@@ -6,6 +6,10 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
+interface ICompoundStrategy {
+    function compound() external;
+}
+
 /// @title CompoundVault
 /// @notice Auto-compounding vault that periodically harvests yield and reinvests.
 /// @dev Deposits into an underlying strategy, harvests rewards, sells for the base
@@ -23,6 +27,7 @@ contract CompoundVault is Ownable, ReentrancyGuard {
     uint256 public performanceFeeBps; // basis points (e.g., 1000 = 10%)
     uint256 public lastHarvestTime;
     uint256 public lastPricePerShare;
+    uint256 public totalLoss;
 
     mapping(address => uint256) public userShares;
 
@@ -30,6 +35,7 @@ contract CompoundVault is Ownable, ReentrancyGuard {
     event Withdrawn(address indexed user, uint256 amount, uint256 shares);
     event Harvested(uint256 profit, uint256 fee, uint256 timestamp);
     event Compounded(uint256 amount, uint256 newPricePerShare);
+    event StrategyLoss(uint256 amount);
 
     constructor(
         address _baseToken,
@@ -112,21 +118,32 @@ contract CompoundVault is Ownable, ReentrancyGuard {
         emit Harvested(profit, fee, block.timestamp);
     }
 
-    /// @notice Compound harvested rewards by converting and re-depositing.
-    /// @dev In production this would swap rewardToken -> baseToken via a DEX.
-    ///      Simplified here to direct deposit of reward token balance.
-    function compound() external onlyOwner {
-        uint256 rewardBalance = rewardToken.balanceOf(address(this));
-        if (rewardBalance == 0) return;
+    /// @notice Compound strategy returns and account for both gains and losses.
+    /// @dev The strategy call may increase or decrease the vault's base token
+    ///      balance. Accounting follows the observed balance delta instead of
+    ///      assuming every strategy result is a positive yield.
+    function compound() external onlyOwner nonReentrant {
+        require(strategy != address(0), "Vault: no strategy");
+        require(strategy.code.length > 0, "Vault: invalid strategy");
 
-        // In a real implementation, this would swap via a DEX router.
-        // For this contract, we assume baseToken == rewardToken or an oracle price.
-        uint256 compoundAmount = (rewardBalance * lastPricePerShare) / 1e18;
+        uint256 balanceBefore = baseToken.balanceOf(address(this));
+        ICompoundStrategy(strategy).compound();
+        uint256 balanceAfter = baseToken.balanceOf(address(this));
 
-        totalDeposited += compoundAmount;
-        lastPricePerShare = totalShares > 0 ? (totalDeposited * 1e18) / totalShares : 1e18;
+        if (balanceAfter >= balanceBefore) {
+            uint256 compoundAmount = balanceAfter - balanceBefore;
+            totalDeposited += compoundAmount;
+            _updatePricePerShare();
 
-        emit Compounded(compoundAmount, lastPricePerShare);
+            emit Compounded(compoundAmount, lastPricePerShare);
+        } else {
+            uint256 loss = balanceBefore - balanceAfter;
+            totalLoss += loss;
+            totalDeposited = loss >= totalDeposited ? 0 : totalDeposited - loss;
+            _updatePricePerShare();
+
+            emit StrategyLoss(loss);
+        }
     }
 
     /// @notice Update the performance fee.
@@ -146,5 +163,9 @@ contract CompoundVault is Ownable, ReentrancyGuard {
     function pricePerShare() external view returns (uint256) {
         if (totalShares == 0) return 1e18;
         return (totalDeposited * 1e18) / totalShares;
+    }
+
+    function _updatePricePerShare() private {
+        lastPricePerShare = totalShares > 0 ? (totalDeposited * 1e18) / totalShares : 1e18;
     }
 }
