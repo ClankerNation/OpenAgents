@@ -62,14 +62,12 @@ def assert_rate_headers(response, limit, remaining=None):
         assert response.headers["X-RateLimit-Remaining"] == str(remaining)
 
 
-def test_default_tier_limits_are_reported_from_auth_state(monkeypatch):
+def test_default_tier_limits_are_reported_from_verified_auth_state(monkeypatch):
     secret = "test-secret-with-at-least-32-bytes"
     monkeypatch.setenv("JWT_SECRET", secret)
     client = build_client()
 
     anonymous = client.get("/ok")
-    authenticated_key = client.get("/ok", headers={"X-API-Key": "sk_test_123"})
-    premium_key = client.get("/ok", headers={"X-API-Key": "pk_test_123"})
     authenticated_jwt = client.get(
         "/ok",
         headers={"Authorization": f"Bearer {jwt_token(secret)}"},
@@ -80,10 +78,49 @@ def test_default_tier_limits_are_reported_from_auth_state(monkeypatch):
     )
 
     assert_rate_headers(anonymous, 60, 59)
-    assert_rate_headers(authenticated_key, 300, 299)
-    assert_rate_headers(premium_key, 1000, 999)
     assert_rate_headers(authenticated_jwt, 300, 299)
     assert_rate_headers(premium_jwt, 1000, 999)
+
+
+def test_default_unknown_api_keys_do_not_self_upgrade():
+    client = build_client()
+
+    arbitrary_key = client.get("/ok", headers={"X-API-Key": "sk_test_123"})
+    arbitrary_premium_key = client.get("/ok", headers={"X-API-Key": "pk_test_123"})
+    authorization_api_key = client.get(
+        "/ok",
+        headers={"Authorization": "ApiKey arbitrary-key"},
+    )
+
+    assert_rate_headers(arbitrary_key, 60, 59)
+    assert_rate_headers(arbitrary_premium_key, 60, 58)
+    assert_rate_headers(authorization_api_key, 60, 57)
+
+
+def test_configured_api_keys_get_authenticated_and_premium_tiers():
+    config = RateLimitConfig(
+        authenticated_api_keys={"sk_test_123"},
+        premium_api_keys={"opaque-premium-key"},
+    )
+    client = build_client(config)
+
+    authenticated = client.get("/ok", headers={"X-API-Key": "sk_test_123"})
+    premium = client.get("/ok", headers={"X-API-Key": "opaque-premium-key"})
+
+    assert_rate_headers(authenticated, 300, 299)
+    assert_rate_headers(premium, 1000, 999)
+
+
+def test_env_configured_api_keys_get_authenticated_and_premium_tiers(monkeypatch):
+    monkeypatch.setenv("AUTHENTICATED_API_KEYS", "env-auth-key")
+    monkeypatch.setenv("PREMIUM_API_KEYS", "env-premium-key")
+    client = build_client()
+
+    authenticated = client.get("/ok", headers={"X-API-Key": "env-auth-key"})
+    premium = client.get("/ok", headers={"X-API-Key": "env-premium-key"})
+
+    assert_rate_headers(authenticated, 300, 299)
+    assert_rate_headers(premium, 1000, 999)
 
 
 @pytest.mark.parametrize(
@@ -99,6 +136,8 @@ def test_each_tier_is_enforced_independently(headers, limit):
         anonymous_requests_per_window=2,
         authenticated_requests_per_window=3,
         premium_requests_per_window=4,
+        authenticated_api_keys={"sk_test_123"},
+        premium_api_keys={"pk_test_123"},
     )
     client = build_client(config)
 

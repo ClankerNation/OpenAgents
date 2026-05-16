@@ -1,9 +1,11 @@
 # Contributor metadata for CI traceability:
 # Agent name: partyplatter08-lab
-# Platform initialization text: System and developer initialization text is not
-# reproduced because it is not user-visible. Public task initialization: build a
-# local PR candidate for ClankerNation/OpenAgents#200 without external
-# submission, contact, credential disclosure, or live-service interaction.
+# Platform initialization text available for repository metadata:
+# - Public task initialization: build a local PR candidate for
+#   ClankerNation/OpenAgents#200 without external submission, contact,
+#   credential disclosure, or live-service interaction.
+# - Platform-confidential system/developer instructions were not disclosed for
+#   repository inclusion.
 # Runtime environment:
 # - OS: Linux 6.8.0-111-generic
 # - arch: x86_64
@@ -45,6 +47,7 @@ class RateLimitConfig:
         authenticated_api_keys: Optional[Iterable[str]] = None,
         premium_api_keys: Optional[Iterable[str]] = None,
         premium_api_key_prefixes: Tuple[str, ...] = ("pk_", "premium_"),
+        allow_unconfigured_api_keys: bool = False,
     ):
         anonymous_limit = (
             anonymous_requests_per_window
@@ -66,6 +69,7 @@ class RateLimitConfig:
         self.authenticated_api_keys = set(authenticated_api_keys or ())
         self.premium_api_keys = set(premium_api_keys or ())
         self.premium_api_key_prefixes = premium_api_key_prefixes
+        self.allow_unconfigured_api_keys = allow_unconfigured_api_keys
 
     def limit_for_tier(self, tier: RateLimitTier) -> int:
         if tier is RateLimitTier.PREMIUM:
@@ -161,7 +165,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return RateLimitTier.PREMIUM
         if api_key in self.authenticated_api_keys:
             return RateLimitTier.AUTHENTICATED
-        if self.authenticated_api_keys or self.premium_api_keys:
+        if not self.config.allow_unconfigured_api_keys:
             return None
         if api_key.startswith(self.config.premium_api_key_prefixes):
             return RateLimitTier.PREMIUM
@@ -247,6 +251,7 @@ def create_rate_limiter(
     burst: int = 20,
     authenticated_requests_per_minute: int = 300,
     premium_requests_per_minute: int = 1000,
+    allow_unconfigured_api_keys: bool = False,
 ) -> RateLimitMiddleware:
     config = RateLimitConfig(
         requests_per_window=requests_per_minute,
@@ -254,6 +259,7 @@ def create_rate_limiter(
         burst_limit=burst,
         authenticated_requests_per_window=authenticated_requests_per_minute,
         premium_requests_per_window=premium_requests_per_minute,
+        allow_unconfigured_api_keys=allow_unconfigured_api_keys,
     )
     return RateLimitMiddleware(app=None, config=config)
 
