@@ -7,6 +7,7 @@ from datetime import datetime
 
 from ..models.database import get_db, Payment, Task
 from ..middleware.auth import get_current_user
+from ..errors import NotFoundError, ForbiddenError, BadRequestError
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 
@@ -30,9 +31,12 @@ async def deposit_escrow(
 ):
     task = db.query(Task).filter(Task.id == deposit.task_id).first()
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise NotFoundError("Task not found", details={"task_id": deposit.task_id})
     if task.creator_id != user["id"]:
-        raise HTTPException(status_code=403, detail="Only task creator can fund escrow")
+        raise ForbiddenError(
+            "Only task creator can fund escrow",
+            details={"task_id": deposit.task_id, "creator_id": task.creator_id},
+        )
 
     # BUG: No idempotency key — retried requests create duplicate escrow entries,
     # locking more funds than intended
@@ -65,9 +69,12 @@ async def claim_payment(
 ):
     task = db.query(Task).filter(Task.id == claim.task_id).first()
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise NotFoundError("Task not found", details={"task_id": claim.task_id})
     if task.status != "completed":
-        raise HTTPException(status_code=400, detail="Task not yet completed")
+        raise BadRequestError(
+            "Task not yet completed",
+            details={"task_id": claim.task_id, "current_status": task.status},
+        )
 
     # BUG: Race condition — two concurrent claims can both read status="escrowed"
     # before either updates it, causing a double-payout
@@ -76,7 +83,9 @@ async def claim_payment(
     ).all()
 
     if not payments:
-        raise HTTPException(status_code=400, detail="No escrowed funds available")
+        raise BadRequestError(
+            "No escrowed funds available", details={"task_id": claim.task_id}
+        )
 
     total_claimed = 0.0
     for payment in payments:

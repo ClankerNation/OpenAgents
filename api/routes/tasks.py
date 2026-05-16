@@ -7,6 +7,7 @@ from datetime import datetime
 
 from ..models.database import get_db, Task
 from ..middleware.auth import get_current_user
+from ..errors import NotFoundError, ForbiddenError, BadRequestError
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -65,7 +66,7 @@ async def list_tasks(
 async def get_task(task_id: int, db=Depends(get_db)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise NotFoundError("Task not found", details={"task_id": task_id})
     return task
 
 
@@ -78,12 +79,15 @@ async def update_task_status(
 ):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise NotFoundError("Task not found", details={"task_id": task_id})
 
     # BUG: Creator can mark their own task as completed — should require
     # a third party or the assignee to confirm completion
     if task.creator_id != user["id"]:
-        raise HTTPException(status_code=403, detail="Only the creator can update status")
+        raise ForbiddenError(
+            "Only the creator can update status",
+            details={"task_id": task_id, "creator_id": task.creator_id},
+        )
 
     task.status = update.status
     task.updated_at = datetime.utcnow()
@@ -95,11 +99,17 @@ async def update_task_status(
 async def cancel_task(task_id: int, user=Depends(get_current_user), db=Depends(get_db)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise NotFoundError("Task not found", details={"task_id": task_id})
     if task.creator_id != user["id"]:
-        raise HTTPException(status_code=403, detail="Only the creator can cancel")
+        raise ForbiddenError(
+            "Only the creator can cancel",
+            details={"task_id": task_id, "creator_id": task.creator_id},
+        )
     if task.status not in ("open", "assigned"):
-        raise HTTPException(status_code=400, detail="Cannot cancel an active task")
+        raise BadRequestError(
+            "Cannot cancel an active task",
+            details={"task_id": task_id, "current_status": task.status},
+        )
     task.status = "cancelled"
     db.commit()
     return {"id": task.id, "status": "cancelled"}

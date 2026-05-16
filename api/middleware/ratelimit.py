@@ -7,6 +7,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from typing import Dict, Tuple
 
+from ..errors import RateLimitedError
+
 
 class RateLimitConfig:
     def __init__(
@@ -68,8 +70,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return JSONResponse(
                 status_code=429,
                 content={
-                    "error": "Rate limit exceeded",
-                    "retry_after": value,
+                    "code": "RATE_LIMITED",
+                    "message": "Rate limit exceeded",
+                    "details": {
+                        "retry_after_seconds": value,
+                        "limit": self.config.requests_per_window,
+                        "window_seconds": self.config.window_seconds,
+                    },
                 },
                 headers={"Retry-After": str(value)},
             )
