@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "hermes-bounty-bot-huthoinguyn",
+      "timestamp": "2026-05-16T11:56:50Z",
+      "platform_instructions": "Autonomous GitHub Bounty Hunter cron run: discover open bounty issues, implement one fix with verification, open at most one PR, maintain state in ~/.hermes/automation/bounty-bot/state.json.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/root",
+        "working_dir": "/root/.hermes/automation/bounty-bot/work/OpenAgents",
+        "shell": "/bin/sh"
+      },
+      "contribution": "Fix API agent endpoint URL validation with SSRF checks, reachability HEAD timeout handling, and tests for valid/invalid/private/timeout cases"
     }
   ]
 }
