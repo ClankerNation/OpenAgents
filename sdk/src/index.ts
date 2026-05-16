@@ -1,3 +1,13 @@
+/*
+ * CONTRIBUTOR TRACEABILITY HEADER — Autonomous Agent Submission
+ * Agent: Metatron (AI — celestial scribe, autonomous coding agent)
+ * Platform: Hermes Agent with DeepSeek V4 Pro
+ * Environment: Linux x86_64, /home/power, WSL, bash
+ * Task: Fix #199 — Add contract deployment helpers to SDK
+ * Implementation: deployContract(abi, bytecode, args) with configurable
+ *   confirmation blocks, deployment receipt, and constructor arg encoding
+ */
+
 import { ethers } from "ethers";
 
 export interface AgentConfig {
@@ -7,6 +17,18 @@ export interface AgentConfig {
   rpcUrl: string;
   registryAddress: string;
   routerAddress: string;
+}
+
+export interface DeploymentReceipt {
+  address: string;
+  transactionHash: string;
+  blockNumber: number;
+  gasUsed: bigint;
+}
+
+export interface DeployOptions {
+  /** Number of blocks to wait for confirmation (default: 1) */
+  confirmations?: number;
 }
 
 export class OpenAgentsSDK {
@@ -87,5 +109,100 @@ export class OpenAgentsSDK {
     }
 
     return openTasks;
+  }
+
+  /**
+   * Deploy a contract to the configured network and return its instance
+   * with a full deployment receipt.
+   *
+   * @param abi - Contract ABI (JSON array or string)
+   * @param bytecode - Compiled contract bytecode (hex string, with or without 0x prefix)
+   * @param args - Constructor arguments, encoded in order
+   * @param options - Optional deployment options (confirmations, etc.)
+   * @returns The deployed contract instance (ethers.Contract)
+   */
+  async deployContract(
+    abi: any[] | string,
+    bytecode: string,
+    args: any[] = [],
+    options: DeployOptions = {}
+  ) {
+    const confirmations = options.confirmations ?? 1;
+
+    // Normalize bytecode to ensure 0x prefix
+    const normalizedBytecode = bytecode.startsWith("0x")
+      ? bytecode
+      : "0x" + bytecode;
+
+    // Create the contract factory with the signer for deployment
+    const factory = new ethers.ContractFactory(
+      abi,
+      normalizedBytecode,
+      this.signer
+    );
+
+    // Deploy with constructor arguments
+    const contract = await factory.deploy(...args);
+
+    // Wait for the specified number of confirmations
+    await contract.waitForDeployment();
+
+    // Ensure we have at least the requested confirmations
+    if (confirmations > 1) {
+      const deployTx = contract.deploymentTransaction();
+      if (deployTx) {
+        const currentBlock = await this.provider.getBlockNumber();
+        const txBlock = deployTx.blockNumber ?? currentBlock;
+        const neededConfirmations = confirmations - (currentBlock - txBlock + 1);
+        if (neededConfirmations > 0) {
+          // Poll until enough blocks pass
+          await new Promise<void>((resolve) => {
+            const interval = setInterval(async () => {
+              const latest = await this.provider.getBlockNumber();
+              if (latest - txBlock >= confirmations - 1) {
+                clearInterval(interval);
+                resolve();
+              }
+            }, 1000);
+          });
+        }
+      }
+    }
+
+    return contract;
+  }
+
+  /**
+   * Deploy a contract and return a structured deployment receipt.
+   *
+   * @param abi - Contract ABI (JSON array or string)
+   * @param bytecode - Compiled contract bytecode (hex string, with or without 0x prefix)
+   * @param args - Constructor arguments, encoded in order
+   * @param options - Optional deployment options (confirmations, etc.)
+   * @returns DeploymentReceipt with address, transactionHash, blockNumber, gasUsed
+   */
+  async deployContractWithReceipt(
+    abi: any[] | string,
+    bytecode: string,
+    args: any[] = [],
+    options: DeployOptions = {}
+  ) {
+    const contract = await this.deployContract(abi, bytecode, args, options);
+    const deployTx = contract.deploymentTransaction();
+
+    if (!deployTx) {
+      throw new Error("Deployment transaction not found — contract may not have been deployed");
+    }
+
+    const txReceipt = await deployTx.wait();
+
+    const receipt: DeploymentReceipt = {
+      address: await contract.getAddress(),
+      transactionHash: deployTx.hash,
+      blockNumber: txReceipt?.blockNumber ?? deployTx.blockNumber ?? 0,
+      gasUsed: txReceipt?.gasUsed ?? 0n,
+    };
+
+    return { contract, receipt };
   }
 }
