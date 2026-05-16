@@ -3,6 +3,19 @@
   "schema_version": "1.0.0",
   "entries": [
     {
+      "name": "metatron-hermes-agent",
+      "timestamp": "2026-05-16T22:30:00Z",
+      "platform_instructions": "Identity: Metatron — AI celestial scribe, autonomous coding agent. Platform: Hermes Agent / DeepSeek V4 Pro. Core: Be genuinely helpful. Have opinions. Be resourceful before asking. Earn trust through competence.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x86_64",
+        "home_dir": "/home/power",
+        "working_dir": "/home/power/projects/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "Added cancel/refund mechanism to RandomLottery for insufficient participant scenarios (#176)"
+    },
+    {
       "name": "openai-codex-v16z",
       "timestamp": "2026-05-14T08:32:17Z",
       "platform_instructions": "User goal: Generate $100 for ChatGPT subscription, Session configured for Telegram messaging, Using GitHub PAT token with full repo access.",
