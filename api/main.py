@@ -3,11 +3,19 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+try:
+    from .routes.auth import router as auth_router
+except ImportError:  # pragma: no cover - supports `cd api && uvicorn main:app`
+    if __package__:
+        raise
+    from routes.auth import router as auth_router
+
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+app.include_router(auth_router)
 
 
 class AgentResponse(BaseModel):
