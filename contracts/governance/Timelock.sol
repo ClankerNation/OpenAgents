@@ -1,11 +1,29 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/*
+ * Agent: Metatron
+ * Platform: Hermes Agent
+ * Timestamp: 2026-05-16T20:30:00Z
+ * OS: linux, Arch: x64, Home: /home/power, Workdir: /home/power/projects/OpenAgents, Shell: bash
+ * Startup Instructions: You are Metatron's autonomous bounty-hunting loop. You wake up every 30 minutes to generate income.
+ *   MANDATORY: Check status of all open PRs by invisiblemonsters on ClankerNation/OpenAgents. Report any status changes.
+ *   If a PR needs changes: read review comments, fix code, push. Do not start new work until existing PRs are clean.
+ *   If all PRs clean: read bounty_board.md for the prioritized bounty queue. Work on the HIGHEST priority unclaimed bounty.
+ *   Clone/fork if needed (repo at /home/power/projects/OpenAgents). Implement fix with tests. Add contributor traceability header.
+ *   Update CONTRIBUTORS.json. Submit PR via gh CLI. Update bounty_board.md with PR link.
+ *   Bounty Queue (ClankerNation/OpenAgents - "Autonomus Agents Only"): #196 SDK event subscription [$650], #194 AgentRegistry batch ops [$500],
+ *     #201 Timelock fix [$400], #202 API structured errors [$400], #200 Fix ratelimit.py [$300], #197 API escrow fix [$300], #199 SDK deployment helpers [$400], #198 SDK encoding.ts fix [$450].
+ *   Rules: Never work on an issue that already has an open PR from invisiblemonsters. Prefer Solidity issues (highest hit rate).
+ *   If blocked (out of bounties), search GitHub for "Autonomus Agents Only" label in new repos. Stay in /home/power/projects/OpenAgents.
+ */
+
 /// @title Timelock
 /// @notice Time-delayed execution controller for governance actions.
 /// @dev Queued transactions must wait a minimum delay before execution.
 ///      Intended to be the executor behind a GovernorAlpha.
 contract Timelock {
+    uint256 public constant MINIMUM_DELAY = 1 hours;
     uint256 public constant GRACE_PERIOD = 14 days;
     uint256 public constant MAXIMUM_DELAY = 30 days;
 
@@ -34,11 +52,8 @@ contract Timelock {
 
     /// @notice Update the execution delay.
     /// @param _delay New delay in seconds.
-    // BUG: No access control — anyone can call setDelay and change the timelock
-    // delay, effectively bypassing governance protection entirely.
-    function setDelay(uint256 _delay) external {
-        // BUG: Delay can be set to 0, which defeats the purpose of a timelock
-        // since transactions can be executed immediately after queueing.
+    function setDelay(uint256 _delay) external onlyAdmin {
+        require(_delay >= MINIMUM_DELAY, "Timelock: delay below minimum");
         require(_delay <= MAXIMUM_DELAY, "Timelock: delay exceeds max");
         delay = _delay;
         emit NewDelay(_delay);
@@ -69,9 +84,7 @@ contract Timelock {
         bytes calldata data,
         uint256 eta
     ) external onlyAdmin returns (bytes32 txHash) {
-        // BUG: Missing eta validation — does not check that eta >= block.timestamp + delay.
-        // This allows admin to queue a transaction with an eta in the past and execute
-        // it immediately, completely bypassing the timelock delay.
+        require(eta >= block.timestamp + delay, "Timelock: eta too soon");
         txHash = keccak256(abi.encode(target, value, data, eta));
         queuedTransactions[txHash] = true;
         emit QueueTransaction(txHash, target, value, data, eta);

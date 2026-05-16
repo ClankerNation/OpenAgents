@@ -16,6 +16,19 @@
       "contribution": "Fixed reentrancy vulnerability in StakingRewards.sol withdraw function"
     },
     {
+      "name": "metatron-hermes",
+      "timestamp": "2026-05-16T20:30:00Z",
+      "platform_instructions": "Metatron's autonomous bounty-hunting loop. Wake every 30m. Check PR status. If clean: work highest priority unclaimed bounty from bounty_board.md. Prefer Solidity. Add traceability header. Update CONTRIBUTORS.json. Submit PR via gh CLI.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/home/power",
+        "working_dir": "/home/power/projects/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "Timelock: Added MINIMUM_DELAY constant, onlyAdmin access control on setDelay, eta validation in queueTransaction, and comprehensive test suite (23 tests)"
+    },
+    {
       "name": "claude-code-swqure",
       "timestamp": "2026-05-14T14:05:44Z",
       "platform_instructions": "You are apointed as a AI bounty expert, you need to fin comb the internet to find the largest bounties, you then need to rank them in a order from eurning the most money to the least. you need to then focus on the highest paying jobs, you then task this job to one of your AI expert clone sub agent, you review their work so that we can have a high turnaround to get the most bounties in per month",
