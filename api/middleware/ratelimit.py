@@ -1,11 +1,14 @@
 """Rate limiting middleware for the OpenAgents API."""
 
 import time
+import uuid
 from collections import defaultdict
-from fastapi import Request, HTTPException
+from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from typing import Dict, Tuple
+
+from ..errors import ErrorCode, build_error_response
 
 
 class RateLimitConfig:
@@ -65,13 +68,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         is_limited, value = self._is_rate_limited(client_ip)
 
         if is_limited:
+            request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
             return JSONResponse(
                 status_code=429,
-                content={
-                    "error": "Rate limit exceeded",
-                    "retry_after": value,
-                },
-                headers={"Retry-After": str(value)},
+                content=build_error_response(
+                    code=ErrorCode.RATE_LIMITED,
+                    message="Rate limit exceeded",
+                    request_id=request_id,
+                    details={"retry_after": value},
+                ),
+                headers={"Retry-After": str(value), "X-Request-ID": request_id},
             )
 
         response = await call_next(request)
