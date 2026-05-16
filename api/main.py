@@ -1,4 +1,6 @@
+import os
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -7,6 +9,35 @@ app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
+)
+
+# CORS Configuration
+# In production: set ALLOWED_ORIGINS to specific domains (comma-separated)
+# In development: set ALLOWED_ORIGINS=* for wildcard (not recommended for prod)
+_allowed_origins_env = os.environ.get("ALLOWED_ORIGINS", "")
+_is_development = os.environ.get("ENVIRONMENT", "production").lower() == "development"
+
+if _allowed_origins_env == "*" and _is_development:
+    # Wildcard only allowed in development mode
+    allowed_origins = ["*"]
+elif _allowed_origins_env:
+    # Parse comma-separated origins
+    allowed_origins = [origin.strip() for origin in _allowed_origins_env.split(",") if origin.strip()]
+else:
+    # Default restrictive origins for production
+    allowed_origins = [
+        "https://openagents.dev",
+        "https://app.openagents.dev",
+        "https://api.openagents.dev",
+    ]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=["*"],
+    expose_headers=["X-Request-ID", "X-RateLimit-Remaining", "X-RateLimit-Limit"],
 )
 
 
