@@ -6,7 +6,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./openagents.db")
@@ -82,8 +82,24 @@ class Payment(Base):
     status = Column(String(32), default="pending")
     created_at = Column(DateTime, default=datetime.utcnow)
     claimed_at = Column(DateTime, nullable=True)
+    release_time = Column(DateTime, nullable=True)
 
     task = relationship("Task", back_populates="payments")
+
+    @property
+    def expired_at(self) -> datetime | None:
+        """Computed: release_time + 30-day grace period."""
+        if self.release_time is None:
+            return None
+        return self.release_time + timedelta(days=30)
+
+    @property
+    def is_expired(self) -> bool:
+        """True if the escrow is past its 30-day grace period."""
+        expired = self.expired_at
+        if expired is None:
+            return False
+        return datetime.utcnow() > expired
 
 
 def init_db():
