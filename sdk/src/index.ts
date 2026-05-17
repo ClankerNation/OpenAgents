@@ -17,7 +17,7 @@ export interface AgentConfig {
   provider?: ethers.Provider;
 }
 
-export interface DeployContractOptions extends ethers.Overrides {
+export interface DeployContractOptions extends ethers.TransactionRequest {
   confirmations?: number;
 }
 
@@ -69,7 +69,7 @@ export class OpenAgentsSDK {
     }
 
     const contractAddress = await contract.getAddress();
-    const receiptConfirmations = await receipt.confirmations();
+    const receiptConfirmations = await deploymentTx.confirmations();
 
     return {
       contract: contract as unknown as ethers.Contract,
