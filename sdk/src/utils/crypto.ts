@@ -41,7 +41,7 @@ export function generateNonce(): string {
 }
 
 export function signMessage(privateKey: string, message: string): string {
-  const msgHash = keccak256(message);
+  const msgHash = hashMessage(message);
   const key = secp256k1.keyFromPrivate(privateKey, "hex");
   const signature = key.sign(msgHash);
   return signature.toDER("hex");
@@ -52,9 +52,7 @@ export function verifySignature(
   message: string,
   signature: string
 ): boolean {
-  // BUG: No validation on signature length — malformed signatures
-  // could cause unexpected behavior or bypass checks
-  const msgHash = keccak256(message);
+  const msgHash = hashMessage(message);
   try {
     const key = secp256k1.keyFromPublic(publicKey, "hex");
     return key.verify(msgHash, signature);
@@ -63,7 +61,7 @@ export function verifySignature(
   }
 }
 
-export function hashPersonalMessage(message: string): string {
+export function hashMessage(message: string): string {
   const prefix = `\x19Ethereum Signed Message:\n${message.length}`;
   return keccak256(prefix + message);
 }
@@ -73,7 +71,7 @@ export function recoverPublicKey(
   signature: string,
   recoveryParam: number
 ): string {
-  const msgHash = Buffer.from(keccak256(message), "hex");
+  const msgHash = Buffer.from(hashMessage(message), "hex");
   const recovered = secp256k1.recoverPubKey(msgHash, signature, recoveryParam);
   return recovered.encode("hex", false);
 }
