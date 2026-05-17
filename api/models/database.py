@@ -82,8 +82,17 @@ class Payment(Base):
     status = Column(String(32), default="pending")
     created_at = Column(DateTime, default=datetime.utcnow)
     claimed_at = Column(DateTime, nullable=True)
+    # release_time: the deadline after which the escrow becomes eligible for auto-refund
+    release_time = Column(DateTime, nullable=True)
 
     task = relationship("Task", back_populates="payments")
+
+    @property
+    def expired_at(self):
+        """Computed field: 30 days after release_time."""
+        if self.release_time is None:
+            return None
+        return self.release_time + __import__("datetime").timedelta(days=30)
 
 
 def init_db():

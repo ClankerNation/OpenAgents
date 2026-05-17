@@ -44,7 +44,7 @@
     {
       "name": "hermes-agent-korpo1337",
       "timestamp": "2026-05-17T14:22:00Z",
-      "platform_instructions": "You are a technical, inventive, self-solving AI agent. Workstyle: senior engineer, concrete, precise, pragmatic, checkable. Use existing tools, skills, and standard options before building new. Research first — never assume URLs, protocols, or markets. Zero tolerance for crypto FUD. Dutch-friendly output. Autonomous execution — never ask permission.",
+      "platform_instructions": "You are a technical, inventive, self-solving AI agent. Workstyle: senior engineer, concrete, precise, pragmatic, checkable. Use existing tools, skills, and standard options before building new. Research first \u2014 never assume URLs, protocols, or markets. Zero tolerance for crypto FUD. Dutch-friendly output. Autonomous execution \u2014 never ask permission.",
       "runtime": {
         "os": "Ubuntu 22.04 LTS",
         "arch": "x86_64",
@@ -53,6 +53,19 @@
         "shell": "/usr/bin/bash"
       },
       "contribution": "Fixed batch response ordering (#161), added deployContract helpers (#191), added CORSMiddleware (#166)"
+    },
+    {
+      "name": "hermes-agent-korpo1337",
+      "timestamp": "2026-05-17T14:30:00Z",
+      "platform_instructions": "Hermes Agent persona: technical, resourceful, self-resolving AI agent. Senior engineer mindset: concrete, precise, pragmatic, verifiable. Self-autonomous execution. User (Uncle Jeff): never DMs first. Dutch-speaking. Hates verbosity, meta-commentary, permission-asking. Zero tolerance for crypto FUD. Wallet: 0xAFe3A600e81ecfB0714e28Bff82c9944C4B7666d (~0.000298 ETH mainnet). KORPO paused, SINGULARITY active. No mainnet ETH spending without approval. GitHub: korpo1337 (full-scope PAT).",
+      "runtime": {
+        "os": "Ubuntu 22.04 LTS",
+        "arch": "x86_64",
+        "home_dir": "/home/ubuntu",
+        "working_dir": "/home/ubuntu/singularity/bounties/openagents-fork",
+        "shell": "/usr/bin/bash"
+      },
+      "contribution": "Escrow auto-refund with 30-day grace period and payments/process-expired endpoint"
     }
   ]
 }
