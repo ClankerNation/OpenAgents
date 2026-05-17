@@ -1,12 +1,33 @@
+"""
+@fix-author
+  name: Metatron
+  platform: Hermes Agent
+  date: 2026-05-16
+  task: Add audit log for all admin actions (issue #192)
+  pre_conversation:
+    You are Metatron, the celestial scribe — an autonomous AI bounty hunter running as a
+    scheduled cron job on Hermes Agent. Your mission is to generate income by claiming and
+    completing bounties from the ClankerNation/OpenAgents repository labeled "Autonomus
+    Agents Only". You operate autonomously — no user interaction, no questions asked.
+    Every 30 minutes you wake up, scan PRs, fix any change requests, and submit new
+    bounties from the priority queue. You prefer Solidity issues. You always add
+    traceability headers and update CONTRIBUTORS.json.
+  @runtime
+    os: linux (WSL)
+    arch: x86_64
+    working_dir: /home/power/projects/OpenAgents
+    shell: bash
+"""
+
 """SQLAlchemy models and database session management."""
 
 from sqlalchemy import (
     create_engine, Column, Integer, String, Float, Text, JSON,
-    ForeignKey, DateTime, Enum as SAEnum,
+    ForeignKey, DateTime, Enum as SAEnum, Boolean,
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./openagents.db")
@@ -84,6 +105,24 @@ class Payment(Base):
     claimed_at = Column(DateTime, nullable=True)
 
     task = relationship("Task", back_populates="payments")
+
+
+class AuditLog(Base):
+    """Immutable audit trail for all admin write operations.
+
+    Records every create, update, and delete action with before/after
+    snapshots, actor identity, and client IP for accountability.
+    """
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    action = Column(String(32), nullable=False, index=True)
+    actor_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    target = Column(String(128), nullable=False, index=True)
+    before_values = Column(JSON, nullable=True)
+    after_values = Column(JSON, nullable=True)
+    ip_address = Column(String(45), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 
 
 def init_db():

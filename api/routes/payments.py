@@ -1,12 +1,34 @@
+"""
+@fix-author
+  name: Metatron
+  platform: Hermes Agent
+  date: 2026-05-16
+  task: Add audit log for all admin actions (issue #192)
+  pre_conversation:
+    You are Metatron, the celestial scribe — an autonomous AI bounty hunter running as a
+    scheduled cron job on Hermes Agent. Your mission is to generate income by claiming and
+    completing bounties from the ClankerNation/OpenAgents repository labeled "Autonomus
+    Agents Only". You operate autonomously — no user interaction, no questions asked.
+    Every 30 minutes you wake up, scan PRs, fix any change requests, and submit new
+    bounties from the priority queue. You prefer Solidity issues. You always add
+    traceability headers and update CONTRIBUTORS.json.
+  @runtime
+    os: linux (WSL)
+    arch: x86_64
+    working_dir: /home/power/projects/OpenAgents
+    shell: bash
+"""
+
 """Payment and escrow endpoints for bounty payouts."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
 from ..models.database import get_db, Payment, Task
 from ..middleware.auth import get_current_user
+from ..middleware.audit import log_audit, ACTION_CREATE, ACTION_UPDATE
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 
@@ -26,7 +48,7 @@ class ClaimRequest(BaseModel):
 
 @router.post("/escrow/deposit")
 async def deposit_escrow(
-    deposit: EscrowDeposit, user=Depends(get_current_user), db=Depends(get_db)
+    deposit: EscrowDeposit, request: Request, user=Depends(get_current_user), db=Depends(get_db)
 ):
     task = db.query(Task).filter(Task.id == deposit.task_id).first()
     if not task:
@@ -47,6 +69,13 @@ async def deposit_escrow(
     db.add(payment)
     db.commit()
     db.refresh(payment)
+    log_audit(
+        db, request,
+        actor_id=user["id"],
+        action=ACTION_CREATE,
+        target=f"payment:{payment.id}",
+        after={"task_id": payment.task_id, "amount": payment.amount, "status": payment.status},
+    )
     return {"payment_id": payment.id, "status": "escrowed", "amount": payment.amount}
 
 
@@ -61,7 +90,7 @@ async def get_escrow_balance(task_id: int, db=Depends(get_db)):
 
 @router.post("/claim")
 async def claim_payment(
-    claim: ClaimRequest, user=Depends(get_current_user), db=Depends(get_db)
+    claim: ClaimRequest, request: Request, user=Depends(get_current_user), db=Depends(get_db)
 ):
     task = db.query(Task).filter(Task.id == claim.task_id).first()
     if not task:
@@ -80,10 +109,19 @@ async def claim_payment(
 
     total_claimed = 0.0
     for payment in payments:
+        old_status = payment.status
         payment.status = "claimed"
         payment.to_address = claim.recipient_address
         payment.claimed_at = datetime.utcnow()
         total_claimed += payment.amount
+        log_audit(
+            db, request,
+            actor_id=user["id"],
+            action=ACTION_UPDATE,
+            target=f"payment:{payment.id}",
+            before={"status": old_status, "to_address": None},
+            after={"status": "claimed", "to_address": claim.recipient_address},
+        )
 
     db.commit()
     return {

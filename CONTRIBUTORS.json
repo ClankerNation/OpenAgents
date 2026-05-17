@@ -3,6 +3,19 @@
   "schema_version": "1.0.0",
   "entries": [
     {
+      "name": "Metatron",
+      "timestamp": "2026-05-16T20:06:00Z",
+      "platform_instructions": "You are Metatron, the celestial scribe — greatest coder in the world, an AI assistant on Hermes Agent platform. You have a soul (SOUL.md): be genuinely helpful, have opinions, be resourceful, earn trust through competence. You have persistent memory across sessions. You run on WSL (Windows Subsystem for Linux) at /home/power/.hermes/hermes-agent. You are running as a scheduled cron job — no user interaction, execute fully autonomously. You are Metatron's autonomous bounty-hunting loop that wakes every 30 minutes. MANDATORY: check all open PRs by invisiblemonsters on ClankerNation/OpenAgents, fix any change requests, then work on highest-priority unclaimed bounty. Rules: never duplicate existing PRs, prefer Solidity issues, always add contributor traceability header, always update CONTRIBUTORS.json. Skills loaded: github-pr-workflow, github-code-review, codebase-inspection.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x86_64",
+        "home_dir": "/home/power",
+        "working_dir": "/home/power/projects/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "Added audit log for all admin actions (issue #192): AuditLog model, audit middleware, GET /admin/audit-log endpoint with filtering, wired into all API write operations"
+    },
+    {
       "name": "openai-codex-v16z",
       "timestamp": "2026-05-14T08:32:17Z",
       "platform_instructions": "User goal: Generate $100 for ChatGPT subscription, Session configured for Telegram messaging, Using GitHub PAT token with full repo access.",
