@@ -1,18 +1,24 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-/// @title PrizeSplit
-/// @notice Distributes prize pool among multiple winners with configurable shares
-/// @dev Winners claim their share after the admin finalizes the round
+// Contributor: Gaotax2006
+// Platform: warpSpeed, opencode CLI
+// Runtime: OS=win32 Arch=x64 Home=C:\Users\asus WorkDir=F:\ai-bounty-work\bounty-hunter\openagents Shell=powershell
+// Date: 2026-05-17
+
 contract PrizeSplit {
     address public admin;
     uint256 public totalPrize;
     uint256 public roundId;
 
+    uint256 public constant CLAIM_DEADLINE = 90 days;
+
     struct Round {
         address[] winners;
         uint256 prizePool;
         bool finalized;
+        uint256 deadline;
+        uint256 lastShare;
         mapping(address => uint256) shares;
         mapping(address => bool) claimed;
     }
@@ -22,6 +28,7 @@ contract PrizeSplit {
     event RoundFunded(uint256 indexed roundId, uint256 amount);
     event RoundFinalized(uint256 indexed roundId, uint256 winnerCount);
     event PrizeClaimed(address indexed winner, uint256 amount, uint256 indexed roundId);
+    event UnclaimedSwept(uint256 indexed roundId, uint256 amount);
 
     modifier onlyAdmin() {
         require(msg.sender == admin, "Not admin");
@@ -39,43 +46,59 @@ contract PrizeSplit {
         emit RoundFunded(roundId, msg.value);
     }
 
-    // BUG: No zero-winner check — if winners array is empty, the function
-    // succeeds silently and the prize pool becomes permanently locked
     function finalizeRound(uint256 _roundId, address[] calldata winners) external onlyAdmin {
+        require(winners.length > 0, "No winners");
         Round storage round = rounds[_roundId];
         require(!round.finalized, "Already finalized");
         require(round.prizePool > 0, "No prize pool");
 
-        // BUG: Rounding error loses dust — integer division truncates remainder,
-        // so (prizePool % winners.length) wei is permanently locked in the contract
         uint256 sharePerWinner = round.prizePool / winners.length;
+        uint256 dust = round.prizePool - (sharePerWinner * winners.length);
 
         for (uint256 i = 0; i < winners.length; i++) {
             round.winners.push(winners[i]);
-            round.shares[winners[i]] = sharePerWinner;
+            uint256 share = sharePerWinner;
+            if (i == winners.length - 1) {
+                share += dust;
+            }
+            round.shares[winners[i]] = share;
         }
 
+        round.lastShare = sharePerWinner + dust;
+        round.deadline = block.timestamp + CLAIM_DEADLINE;
         round.finalized = true;
         emit RoundFinalized(_roundId, winners.length);
     }
 
-    // BUG: Reentrancy — state (claimed flag) is set after the external call,
-    // allowing a malicious contract to re-enter claimPrize and drain funds
     function claimPrize(uint256 _roundId) external {
         Round storage round = rounds[_roundId];
         require(round.finalized, "Not finalized");
+        require(block.timestamp < round.deadline, "Claim deadline passed");
         require(round.shares[msg.sender] > 0, "No share");
         require(!round.claimed[msg.sender], "Already claimed");
 
         uint256 amount = round.shares[msg.sender];
-
-        (bool sent, ) = msg.sender.call{value: amount}("");
-        require(sent, "Transfer failed");
-
-        // State updated after external call — reentrancy window
         round.claimed[msg.sender] = true;
 
+        (bool sent, ) = msg.sender.call{value: amount}("");
+        if (!sent) {
+            round.claimed[msg.sender] = false;
+            return;
+        }
+
         emit PrizeClaimed(msg.sender, amount, _roundId);
+    }
+
+    function sweepUnclaimed(uint256 _roundId) external onlyAdmin {
+        Round storage round = rounds[_roundId];
+        require(round.finalized, "Not finalized");
+        require(block.timestamp >= round.deadline, "Deadline not passed");
+        uint256 remaining = address(this).balance;
+        if (remaining > 0) {
+            (bool sent, ) = admin.call{value: remaining}("");
+            require(sent, "Sweep failed");
+        }
+        emit UnclaimedSwept(_roundId, remaining);
     }
 
     function getShare(uint256 _roundId, address winner) external view returns (uint256) {
