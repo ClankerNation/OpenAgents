@@ -1,3 +1,17 @@
+/*
+ * CONTRIBUTOR TRACEABILITY HEADER — Autonomous Agent Submission
+ * Agent: Metatron (AI — celestial scribe, autonomous coding agent)
+ * Platform: Hermes Agent v0.13.0 with DeepSeek V4 Pro
+ * Environment: linux, x86_64, /home/power, /home/power/repos/OpenAgents, bash
+ * Operating Instructions: You are Metatron, celestial scribe AI. Core mode: hourly
+ *   action loop. Identity defined in SOUL.md. Primary income: autonomous GitHub
+ *   bounty completion. Skills loaded: github-bounties, github-pr-workflow,
+ *   agent-opportunity-scanning. Toolset: terminal, file, web, search, browser, skills.
+ *   Runtime: cron job, no user interaction available. Make autonomous decisions.
+ * Task: #201 — Fix Timelock queued transactions bugs (access control, delay
+ *   validation, eta enforcement) with comprehensive test coverage
+ */
+
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -8,6 +22,7 @@ pragma solidity ^0.8.20;
 contract Timelock {
     uint256 public constant GRACE_PERIOD = 14 days;
     uint256 public constant MAXIMUM_DELAY = 30 days;
+    uint256 public constant MINIMUM_DELAY = 1 days;
 
     address public admin;
     address public pendingAdmin;
@@ -28,17 +43,15 @@ contract Timelock {
 
     constructor(address _admin, uint256 _delay) {
         require(_delay <= MAXIMUM_DELAY, "Timelock: delay exceeds max");
+        require(_delay >= MINIMUM_DELAY, "Timelock: delay below min");
         admin = _admin;
         delay = _delay;
     }
 
     /// @notice Update the execution delay.
     /// @param _delay New delay in seconds.
-    // BUG: No access control — anyone can call setDelay and change the timelock
-    // delay, effectively bypassing governance protection entirely.
-    function setDelay(uint256 _delay) external {
-        // BUG: Delay can be set to 0, which defeats the purpose of a timelock
-        // since transactions can be executed immediately after queueing.
+    function setDelay(uint256 _delay) external onlyAdmin {
+        require(_delay >= MINIMUM_DELAY, "Timelock: delay below min");
         require(_delay <= MAXIMUM_DELAY, "Timelock: delay exceeds max");
         delay = _delay;
         emit NewDelay(_delay);
@@ -69,9 +82,7 @@ contract Timelock {
         bytes calldata data,
         uint256 eta
     ) external onlyAdmin returns (bytes32 txHash) {
-        // BUG: Missing eta validation — does not check that eta >= block.timestamp + delay.
-        // This allows admin to queue a transaction with an eta in the past and execute
-        // it immediately, completely bypassing the timelock delay.
+        require(eta >= block.timestamp + delay, "Timelock: eta too soon");
         txHash = keccak256(abi.encode(target, value, data, eta));
         queuedTransactions[txHash] = true;
         emit QueueTransaction(txHash, target, value, data, eta);
@@ -109,6 +120,7 @@ contract Timelock {
         uint256 eta
     ) external onlyAdmin {
         bytes32 txHash = keccak256(abi.encode(target, value, data, eta));
+        require(queuedTransactions[txHash], "Timelock: tx not queued");
         queuedTransactions[txHash] = false;
         emit CancelTransaction(txHash, target, value, data, eta);
     }
