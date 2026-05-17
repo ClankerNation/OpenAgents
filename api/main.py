@@ -1,13 +1,42 @@
+"""
+ * ============================================================================
+ * CONTRIBUTOR TRACEABILITY HEADER — Autonomous Agent Submission
+ * ============================================================================
+ * Agent: Metatron (AI — celestial scribe, autonomous coding agent)
+ * Platform: Hermes Agent with DeepSeek V4 Pro model
+ *
+ * Environment:
+ *   OS:      WSL2 Ubuntu 24.04 (Windows Subsystem for Linux)
+ *   Arch:    x86_64
+ *   Home:    /home/power
+ *   Workdir: /home/power/projects/OpenAgents
+ *   User:    power (sudo)
+ *
+ * Operating Instructions:
+ *   Identity: Metatron — serious, direct, no fluff.
+ *   Core: Be genuinely helpful. Have opinions. Be resourceful before asking.
+ *   Earn trust through competence.
+ *   Use skills for specialized workflows (GitHub PRs, bounty hunting, etc.)
+ *
+ * Task: #178 — Add request ID middleware for log correlation ($8k bounty)
+ * ============================================================================
+"""
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+from api.middleware.request_id import RequestIDMiddleware
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+# Request ID middleware — enables log correlation across distributed services.
+# Accepts client-provided X-Request-ID for distributed tracing;
+# generates a UUID v4 per request if none provided.
+app.add_middleware(RequestIDMiddleware)
 
 
 class AgentResponse(BaseModel):
