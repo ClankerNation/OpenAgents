@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/// @contributor agent: Claude Code
+/// @contributor platform: Hermes Agent
+/// @contributor runtime: Linux Docker
+/// @contributor date: 2026-05-17
+
 /// @title InterestRateModel
 /// @notice Variable interest rate model based on pool utilization
 /// @dev Rate increases with utilization, with a kink at the optimal point
@@ -20,6 +25,22 @@ contract InterestRateModel {
 
     event RateParamsUpdated(uint256 baseRate, uint256 multiplier, uint256 jumpMultiplier, uint256 kink);
 
+    event RateParametersUpdated(
+        uint256 oldBaseRate,
+        uint256 newBaseRate,
+        uint256 oldMultiplier,
+        uint256 newMultiplier,
+        uint256 oldJumpMultiplier,
+        uint256 newJumpMultiplier
+    );
+
+    struct Parameters {
+        uint256 baseRate;
+        uint256 multiplier;
+        uint256 jumpMultiplier;
+        uint256 kink;
+    }
+
     modifier onlyAdmin() {
         require(msg.sender == admin, "Not admin");
         _;
@@ -38,6 +59,42 @@ contract InterestRateModel {
         kink = _kink;
     }
 
+    function setBaseRatePerYear(uint256 _baseRate) external onlyAdmin {
+        emit RateParametersUpdated(
+            baseRate,
+            _baseRate,
+            multiplier,
+            multiplier,
+            jumpMultiplier,
+            jumpMultiplier
+        );
+        baseRate = _baseRate;
+    }
+
+    function setMultiplierPerYear(uint256 _multiplier) external onlyAdmin {
+        emit RateParametersUpdated(
+            baseRate,
+            baseRate,
+            multiplier,
+            _multiplier,
+            jumpMultiplier,
+            jumpMultiplier
+        );
+        multiplier = _multiplier;
+    }
+
+    function setJumpMultiplierPerYear(uint256 _jumpMultiplier) external onlyAdmin {
+        emit RateParametersUpdated(
+            baseRate,
+            baseRate,
+            multiplier,
+            multiplier,
+            jumpMultiplier,
+            _jumpMultiplier
+        );
+        jumpMultiplier = _jumpMultiplier;
+    }
+
     function updateParams(
         uint256 _baseRate,
         uint256 _multiplier,
@@ -49,6 +106,10 @@ contract InterestRateModel {
         jumpMultiplier = _jumpMultiplier;
         kink = _kink;
         emit RateParamsUpdated(_baseRate, _multiplier, _jumpMultiplier, _kink);
+    }
+
+    function getParameters() external view returns (Parameters memory) {
+        return Parameters(baseRate, multiplier, jumpMultiplier, kink);
     }
 
     function getUtilization(uint256 totalBorrowed, uint256 totalDeposits) public pure returns (uint256) {
