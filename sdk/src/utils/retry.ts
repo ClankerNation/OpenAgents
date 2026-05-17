@@ -25,9 +25,9 @@ export interface RetryOptions {
 }
 
 const DEFAULT_OPTIONS: Required<Omit<RetryOptions, "onRetry" | "retryCondition">> = {
-  maxRetries: 3,
+  maxRetries: 5,
   baseDelayMs: 500,
-  maxDelayMs: 30_000,
+  maxDelayMs: 60_000,
   backoffMultiplier: 2,
 };
 
@@ -66,8 +66,7 @@ export class RetryHandler {
   async execute<T>(fn: () => Promise<T>): Promise<T> {
     let lastError: Error | undefined;
 
-    const maxAttempts = Math.min(this.options.maxRetries, 10);
-    for (let attempt = 0; attempt <= maxAttempts; attempt++) {
+    for (let attempt = 0; attempt <= this.options.maxRetries; attempt++) {
       try {
         const result = await fn();
         this.consecutiveFailures = 0;
@@ -77,7 +76,7 @@ export class RetryHandler {
         this.consecutiveFailures++;
 
         const shouldRetry = this.retryCondition(lastError);
-        if (!shouldRetry || attempt >= maxAttempts) {
+        if (!shouldRetry || attempt >= this.options.maxRetries) {
           throw lastError;
         }
 
@@ -100,7 +99,7 @@ export class RetryHandler {
         break;
       }
     }
-    const jitter = Math.random() * this.options.baseDelayMs;
+    const jitter = delay * Math.random() * 0.25;
     return Math.min(delay + jitter, this.options.maxDelayMs);
   }
 
