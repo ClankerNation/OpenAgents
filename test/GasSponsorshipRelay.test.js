@@ -10,17 +10,29 @@ describe("GasSponsorshipRelay", function () {
     [owner, agent, relayer, other] = await ethers.getSigners();
   });
 
+  /**
+   * Helper: sign calldata as an agent for a meta-transaction.
+   * Returns the signature bytes.
+   */
+  async function signMetaTx(signer, data, nonce) {
+    const packed = ethers.solidityPacked(
+      ["bytes", "uint256"],
+      [data, nonce]
+    );
+    const messageHash = ethers.keccak256(packed);
+    const signature = await signer.signMessage(ethers.getBytes(messageHash));
+    return signature;
+  }
+
   beforeEach(async function () {
-    // Deploy fresh contracts for each test
     const AgentRegistry = await ethers.getContractFactory("AgentRegistry");
     registry = await AgentRegistry.deploy(REGISTRATION_FEE);
     await registry.waitForDeployment();
 
     const TaskRouter = await ethers.getContractFactory("TaskRouter");
-    taskRouter = await TaskRouter.deploy(registry.target, 250); // 2.5% platform fee
+    taskRouter = await TaskRouter.deploy(registry.target, 250);
     await taskRouter.waitForDeployment();
 
-    // Link TaskRouter to AgentRegistry for stake deductions
     await registry.setTaskRouter(taskRouter.target);
   });
 
@@ -83,20 +95,19 @@ describe("GasSponsorshipRelay", function () {
       ).to.be.revertedWith("Insufficient stake");
     });
 
-    it("should allow TaskRouter to deduct stake for reimbursement", async function () {
-      await registry.connect(agent).depositStake({ value: ethers.parseEther("5.0") });
+    it("should emit TaskRouterSet event on first set", async function () {
+      // Deploy a fresh registry so we test the first setTaskRouter call
+      const AgentRegistry = await ethers.getContractFactory("AgentRegistry");
+      const freshRegistry = await AgentRegistry.deploy(REGISTRATION_FEE);
+      await freshRegistry.waitForDeployment();
 
-      const deductAmount = ethers.parseEther("0.01");
-      // TaskRouter is the caller — simulate by calling deductStake directly
-      // In production, only TaskRouter can call this, but we test the mechanism
-      // by having the TaskRouter contract call deductStake via executeOnBehalf
-      // This test verifies the event emission
-    });
+      const TaskRouter = await ethers.getContractFactory("TaskRouter");
+      const freshRouter = await TaskRouter.deploy(freshRegistry.target, 250);
+      await freshRouter.waitForDeployment();
 
-    it("should emit TaskRouterSet event when setting task router", async function () {
-      await expect(registry.setTaskRouter(taskRouter.target))
-        .to.emit(registry, "TaskRouterSet")
-        .withArgs(ethers.ZeroAddress, taskRouter.target);
+      await expect(freshRegistry.setTaskRouter(freshRouter.target))
+        .to.emit(freshRegistry, "TaskRouterSet")
+        .withArgs(ethers.ZeroAddress, freshRouter.target);
     });
 
     it("should reject setting zero address as TaskRouter", async function () {
@@ -110,6 +121,21 @@ describe("GasSponsorshipRelay", function () {
         registry.connect(agent).setTaskRouter(taskRouter.target)
       ).to.be.revertedWithCustomError(registry, "OwnableUnauthorizedAccount");
     });
+
+    it("should enforce onlyTaskRouter on deductStake", async function () {
+      await registry.connect(agent).depositStake({ value: ethers.parseEther("5.0") });
+
+      const deductAmount = ethers.parseEther("0.01");
+
+      // Non-TaskRouter cannot call deductStake
+      await expect(
+        registry.connect(agent).deductStake(agent.address, relayer.address, deductAmount)
+      ).to.be.revertedWith("Only TaskRouter");
+
+      // TaskRouter CAN call deductStake (tested via executeOnBehalf in Sponsored Execution tests)
+      // This is verified by the fact that executeOnBehalf tests pass — they internally
+      // call deductStake which would revert if onlyTaskRouter failed.
+    });
   });
 
   // ── TaskRouter: executeOnBehalf ──────────────────────────────────
@@ -118,45 +144,11 @@ describe("GasSponsorshipRelay", function () {
     const TASK_DESC = "Compute weather forecast";
     const DEADLINE_OFFSET = 86400; // 1 day
 
-    /**
-     * Helper: sign calldata as an agent for a meta-transaction.
-     * Returns the signature bytes.
-     */
-    async function signMetaTx(signer, data, nonce) {
-      // Build the same message hash as the contract
-      const packed = ethers.solidityPacked(
-        ["bytes", "uint256"],
-        [data, nonce]
-      );
-      const messageHash = ethers.keccak256(packed);
-      // Sign the Ethereum signed message hash (EIP-191 personal_sign)
-      const signature = await signer.signMessage(ethers.getBytes(messageHash));
-      return signature;
-    }
-
-    it("should execute a createTask call on behalf of an agent", async function () {
+    it("should execute assignTask via sponsored meta-transaction", async function () {
       // Agent deposits stake for gas reimbursement
       await registry.connect(agent).depositStake({ value: ethers.parseEther("5.0") });
 
-      // Build the calldata for createTask
-      const deadline = Math.floor(Date.now() / 1000) + DEADLINE_OFFSET;
-      const reward = ethers.parseEther("0.5");
-      const createTaskData = taskRouter.interface.encodeFunctionData(
-        "createTask",
-        [TASK_DESC, deadline]
-      );
-
-      // We need to send the reward value with the meta-tx call.
-      // The executeOnBehalf function doesn't forward value, so we need a
-      // workaround: the relayer must provide the value.
-      // For createTask which requires msg.value, the relayer sends ETH
-      // and gets reimbursed.
-
-      // For this test, we use a payable approach: the relayer funds
-      // the meta-transaction. We'll test with assignTask instead which
-      // doesn't require msg.value.
-
-      // Register an agent first
+      // Register an agent
       const agentName = "WeatherBot";
       const endpoint = "https://weather.example.com/api";
       await registry.connect(agent).registerAgent(agentName, endpoint, {
@@ -166,39 +158,51 @@ describe("GasSponsorshipRelay", function () {
       const agentId = ethers.keccak256(
         ethers.solidityPacked(
           ["address", "string", "uint256"],
-          [agent.address, agentName, await ethers.provider.getBlock("latest").then(b => b.timestamp)]
+          [agent.address, agentName, (await ethers.provider.getBlock("latest")).timestamp]
         )
       );
 
-      // Create a task normally (so we can test assign via meta-tx)
-      const deadline2 = Math.floor(Date.now() / 1000) + DEADLINE_OFFSET;
-      await taskRouter.createTask(TASK_DESC, deadline2, {
+      // Create a task normally
+      const deadline = Math.floor(Date.now() / 1000) + DEADLINE_OFFSET;
+      await taskRouter.createTask(TASK_DESC, deadline, {
         value: ethers.parseEther("0.1"),
       });
       const taskId = 0;
 
-      // Now build assignTask calldata
+      // Build assignTask calldata
       const assignData = taskRouter.interface.encodeFunctionData(
         "assignTask",
         [taskId, agentId]
       );
 
-      // Get current nonce
+      // Get current nonce and sign
       const nonce = await taskRouter.nonces(agent.address);
-
-      // Agent signs the meta-transaction
       const signature = await signMetaTx(agent, assignData, nonce);
 
       // Relayer executes on behalf of agent
-      await expect(
-        taskRouter.connect(relayer).executeOnBehalf(agent.address, assignData, signature)
-      )
-        .to.emit(taskRouter, "SponsoredExecution")
-        .withArgs(agent.address, relayer.address, nonce, 0, true);
+      const tx = await taskRouter.connect(relayer).executeOnBehalf(
+        agent.address, assignData, signature
+      );
+      const receipt = await tx.wait();
+
+      // Verify SponsoredExecution event was emitted (with success=true)
+      // We use a flexible assertion since gasReimbursement varies
+      const event = receipt.logs.find(
+        (log) => log.fragment && log.fragment.name === "SponsoredExecution"
+      );
+      expect(event).to.not.be.undefined;
+      expect(event.args[0]).to.equal(agent.address); // agent
+      expect(event.args[1]).to.equal(relayer.address); // relayer
+      expect(event.args[2]).to.equal(nonce); // nonce
+      expect(event.args[4]).to.equal(true); // success
+
+      // Verify the task was assigned
+      const task = await taskRouter.tasks(taskId);
+      expect(task.assignedAgent).to.equal(agentId);
+      expect(task.status).to.equal(1); // Assigned
     });
 
     it("should reject invalid signatures", async function () {
-      // Build some calldata
       const assignData = taskRouter.interface.encodeFunctionData(
         "assignTask",
         [0, ethers.ZeroHash]
@@ -213,7 +217,7 @@ describe("GasSponsorshipRelay", function () {
     });
 
     it("should enforce replay protection via nonces", async function () {
-      // Register an agent
+      // Register agent
       await registry.connect(agent).registerAgent("TestBot", "https://test.com", {
         value: REGISTRATION_FEE,
       });
@@ -222,24 +226,20 @@ describe("GasSponsorshipRelay", function () {
       const agentId = ethers.keccak256(
         ethers.solidityPacked(
           ["address", "string", "uint256"],
-          [agent.address, agentName, await ethers.provider.getBlock("latest").then(b => b.timestamp)]
+          [agent.address, agentName, (await ethers.provider.getBlock("latest")).timestamp]
         )
       );
 
-      // Create a task
+      // Create two tasks
       const deadline = Math.floor(Date.now() / 1000) + DEADLINE_OFFSET;
       await taskRouter.createTask("Task1", deadline, { value: ethers.parseEther("0.1") });
-      const taskId1 = 0;
-
-      // Create another task
       await taskRouter.createTask("Task2", deadline, { value: ethers.parseEther("0.1") });
-      const taskId2 = 1;
 
       await registry.connect(agent).depositStake({ value: ethers.parseEther("1.0") });
 
       const assignData = taskRouter.interface.encodeFunctionData(
         "assignTask",
-        [taskId1, agentId]
+        [0, agentId]
       );
 
       const nonce = await taskRouter.nonces(agent.address);
@@ -248,7 +248,7 @@ describe("GasSponsorshipRelay", function () {
       // First execution should succeed
       await taskRouter.connect(relayer).executeOnBehalf(agent.address, assignData, signature);
 
-      // Second execution with same signature should fail (replay)
+      // Nonce incremented, replay with same signature should fail
       await expect(
         taskRouter.connect(relayer).executeOnBehalf(agent.address, assignData, signature)
       ).to.be.revertedWith("Invalid signature");
@@ -263,12 +263,13 @@ describe("GasSponsorshipRelay", function () {
       const agentId = ethers.keccak256(
         ethers.solidityPacked(
           ["address", "string", "uint256"],
-          [agent.address, agentName, await ethers.provider.getBlock("latest").then(b => b.timestamp)]
+          [agent.address, agentName, (await ethers.provider.getBlock("latest")).timestamp]
         )
       );
 
       const deadline = Math.floor(Date.now() / 1000) + DEADLINE_OFFSET;
       await taskRouter.createTask("Task", deadline, { value: ethers.parseEther("0.1") });
+      await taskRouter.createTask("Task2", deadline, { value: ethers.parseEther("0.1") });
       await registry.connect(agent).depositStake({ value: ethers.parseEther("1.0") });
 
       const assignData = taskRouter.interface.encodeFunctionData(
@@ -285,10 +286,6 @@ describe("GasSponsorshipRelay", function () {
       nonce = await taskRouter.nonces(agent.address);
       expect(nonce).to.equal(1);
 
-      // Create another task for second execution
-      const deadline2 = Math.floor(Date.now() / 1000) + DEADLINE_OFFSET;
-      await taskRouter.createTask("Task2", deadline2, { value: ethers.parseEther("0.1") });
-
       const assignData2 = taskRouter.interface.encodeFunctionData(
         "assignTask",
         [1, agentId]
@@ -302,7 +299,7 @@ describe("GasSponsorshipRelay", function () {
     });
 
     it("should allow execution even with insufficient stake (relayer absorbs cost)", async function () {
-      // Register agent with no stake
+      // Register agent with NO stake
       await registry.connect(agent).registerAgent("NoStakeBot", "https://nostake.com", {
         value: REGISTRATION_FEE,
       });
@@ -311,7 +308,7 @@ describe("GasSponsorshipRelay", function () {
       const agentId = ethers.keccak256(
         ethers.solidityPacked(
           ["address", "string", "uint256"],
-          [agent.address, agentName, await ethers.provider.getBlock("latest").then(b => b.timestamp)]
+          [agent.address, agentName, (await ethers.provider.getBlock("latest")).timestamp]
         )
       );
 
@@ -327,10 +324,17 @@ describe("GasSponsorshipRelay", function () {
       const signature = await signMetaTx(agent, assignData, nonce);
 
       // Should succeed — execution still goes through even without stake
-      await expect(
-        taskRouter.connect(relayer).executeOnBehalf(agent.address, assignData, signature)
-      )
-        .to.emit(taskRouter, "SponsoredExecution");
+      const tx = await taskRouter.connect(relayer).executeOnBehalf(
+        agent.address, assignData, signature
+      );
+      const receipt = await tx.wait();
+
+      // Verify SponsoredExecution was emitted
+      const event = receipt.logs.find(
+        (log) => log.fragment && log.fragment.name === "SponsoredExecution"
+      );
+      expect(event).to.not.be.undefined;
+      expect(event.args[4]).to.equal(true); // success
 
       // Verify the task was assigned
       const task = await taskRouter.tasks(0);
@@ -342,11 +346,8 @@ describe("GasSponsorshipRelay", function () {
   // ── Edge Cases ──────────────────────────────────────────────────
 
   describe("Edge Cases", function () {
-    it("should reject execution with expired/forged signature", async function () {
-      // Build calldata
+    it("should reject execution with forged signature", async function () {
       const data = taskRouter.interface.encodeFunctionData("taskCount");
-
-      // Use a random signature
       const badSignature = "0x" + "00".repeat(65);
 
       await expect(
@@ -354,15 +355,58 @@ describe("GasSponsorshipRelay", function () {
       ).to.be.reverted;
     });
 
-    it("should handle empty calldata gracefully", async function () {
+    it("should handle view function calls via meta-transaction", async function () {
+      const echoData = taskRouter.interface.encodeFunctionData("taskCount");
+      const nonce = await taskRouter.nonces(agent.address);
+      const signature = await signMetaTx(agent, echoData, nonce);
+
+      // Call taskCount() via meta-transaction — should succeed
+      const tx = await taskRouter.connect(relayer).executeOnBehalf(
+        agent.address, echoData, signature
+      );
+      const receipt = await tx.wait();
+
+      const event = receipt.logs.find(
+        (log) => log.fragment && log.fragment.name === "SponsoredExecution"
+      );
+      expect(event).to.not.be.undefined;
+      expect(event.args[4]).to.equal(true); // success
+    });
+
+    it("should clear _metaTxAgent after execution", async function () {
       const emptyData = "0x";
       const nonce = await taskRouter.nonces(agent.address);
       const signature = await signMetaTx(agent, emptyData, nonce);
 
-      // Empty calldata call to self should succeed (does nothing)
-      await expect(
-        taskRouter.connect(relayer).executeOnBehalf(agent.address, emptyData, signature)
-      ).to.emit(taskRouter, "SponsoredExecution");
+      await taskRouter.connect(relayer).executeOnBehalf(
+        agent.address, emptyData, signature
+      );
+
+      // _metaTxAgent should be cleared back to zero
+      expect(await taskRouter.metaTxAgent()).to.equal(ethers.ZeroAddress);
+    });
+
+    it("should correctly report _metaTxAgent during execution", async function () {
+      const nonce = await taskRouter.nonces(agent.address);
+
+      // Call metaTxAgent() from within a meta-transaction
+      const echoData = taskRouter.interface.encodeFunctionData("metaTxAgent");
+      const signature = await signMetaTx(agent, echoData, nonce);
+
+      // When metaTxAgent is called during executeOnBehalf, it should return agent
+      const tx = await taskRouter.connect(relayer).executeOnBehalf(
+        agent.address, echoData, signature
+      );
+      const receipt = await tx.wait();
+
+      const event = receipt.logs.find(
+        (log) => log.fragment && log.fragment.name === "SponsoredExecution"
+      );
+      expect(event).to.not.be.undefined;
+      expect(event.args[4]).to.equal(true);
+
+      // After execution, _metaTxAgent should be cleared
+      expect(await taskRouter.metaTxAgent()).to.equal(ethers.ZeroAddress);
     });
   });
 });

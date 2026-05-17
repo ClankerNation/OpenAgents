@@ -52,6 +52,16 @@ contract TaskRouter {
     // Gas sponsorship: nonce tracking per agent owner address for replay protection
     mapping(address => uint256) public nonces;
 
+    // Address of the agent currently executing via meta-transaction.
+    // Zero when no meta-transaction is in progress. Functions that check
+    // msg.sender should also accept _metaTxAgent as the acting agent.
+    address private _metaTxAgent;
+
+    /// @notice Returns the address of the agent currently executing via meta-transaction.
+    function metaTxAgent() public view returns (address) {
+        return _metaTxAgent;
+    }
+
     event TaskCreated(uint256 indexed taskId, address indexed creator, uint256 reward);
     event TaskAssigned(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskCompleted(uint256 indexed taskId, bytes32 indexed agentId);
@@ -129,10 +139,16 @@ contract TaskRouter {
         // 3. Record gas before execution for reimbursement calculation
         uint256 gasBefore = gasleft();
 
-        // 4. Execute the signed calldata against this contract
+        // 4. Set meta-transaction context so called functions can verify agent
+        _metaTxAgent = agent;
+
+        // 5. Execute the signed calldata against this contract
         (bool success, ) = address(this).call(data);
 
-        // 5. Calculate gas used and reimbursement amount
+        // 6. Clear meta-transaction context
+        _metaTxAgent = address(0);
+
+        // 7. Calculate gas used and reimbursement amount
         uint256 gasUsed = gasBefore - gasleft();
         uint256 gasReimbursement = gasUsed * tx.gasprice;
 
@@ -178,9 +194,9 @@ contract TaskRouter {
         require(task.status == TaskStatus.Open, "Not open");
         require(block.timestamp < task.deadline, "Deadline passed");
 
-        AgentRegistry.Agent memory agent = registry.getAgent(agentId);
-        require(agent.active, "Agent not active");
-        require(agent.owner == msg.sender, "Not agent owner");
+        AgentRegistry.Agent memory agentData = registry.getAgent(agentId);
+        require(agentData.active, "Agent not active");
+        require(agentData.owner == msg.sender || agentData.owner == _metaTxAgent, "Not agent owner");
 
         task.assignedAgent = agentId;
         task.status = TaskStatus.Assigned;
@@ -192,8 +208,8 @@ contract TaskRouter {
         Task storage task = tasks[taskId];
         require(task.status == TaskStatus.Assigned, "Not assigned");
 
-        AgentRegistry.Agent memory agent = registry.getAgent(task.assignedAgent);
-        require(agent.owner == msg.sender, "Not assigned agent owner");
+        AgentRegistry.Agent memory agentData = registry.getAgent(task.assignedAgent);
+        require(agentData.owner == msg.sender || agentData.owner == _metaTxAgent, "Not assigned agent owner");
 
         task.result = result;
         task.status = TaskStatus.Completed;
