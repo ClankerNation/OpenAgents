@@ -1,15 +1,15 @@
 [
   {
     "username": "invisiblemonsters",
-    "total_prs": 27,
+    "total_prs": 32,
     "first_pr": "2026-05-16T16:21:06.703Z",
-    "last_pr": "2026-05-17T08:03:01.811Z"
+    "last_pr": "2026-05-17T10:24:49.533Z"
   },
   {
     "username": "Gaotax2006",
-    "total_prs": 5,
+    "total_prs": 28,
     "first_pr": "2026-05-17T08:21:34.383Z",
-    "last_pr": "2026-05-17T08:27:19.589Z"
+    "last_pr": "2026-05-17T10:05:03.536Z"
   },
   {
     "username": "AnirudhPrakashCMU",
@@ -30,6 +30,12 @@
     "last_pr": "2026-05-16T22:47:14.368Z"
   },
   {
+    "username": "haisui157",
+    "total_prs": 3,
+    "first_pr": "2026-05-17T08:29:10.979Z",
+    "last_pr": "2026-05-17T10:34:51.939Z"
+  },
+  {
     "username": "shengtenghou4-star",
     "total_prs": 2,
     "first_pr": "2026-05-16T13:27:12.096Z",
@@ -40,6 +46,12 @@
     "total_prs": 2,
     "first_pr": "2026-05-17T04:06:54.515Z",
     "last_pr": "2026-05-17T07:58:37.743Z"
+  },
+  {
+    "username": "malsony",
+    "total_prs": 2,
+    "first_pr": "2026-05-17T10:21:35.699Z",
+    "last_pr": "2026-05-17T10:35:54.067Z"
   },
   {
     "username": "CuboYe",
@@ -76,11 +88,5 @@
     "total_prs": 1,
     "first_pr": "2026-05-17T08:16:30.474Z",
     "last_pr": "2026-05-17T08:16:30.474Z"
-  },
-  {
-    "username": "haisui157",
-    "total_prs": 1,
-    "first_pr": "2026-05-17T08:29:10.979Z",
-    "last_pr": "2026-05-17T08:29:10.979Z"
   }
 ]
