@@ -5,6 +5,7 @@ Automated tracking of all Clankers PR contributors.
 | Username | Total PRs | First PR | Last PR |
 |----------|-----------|----------|----------|
 | invisiblemonsters | 27 | 2026-05-16T16:21:06.703Z | 2026-05-17T08:03:01.811Z |
+| Gaotax2006 | 5 | 2026-05-17T08:21:34.383Z | 2026-05-17T08:27:19.589Z |
 | AnirudhPrakashCMU | 4 | 2026-05-16T10:40:37.217Z | 2026-05-16T16:21:23.431Z |
 | hamademon168-bot | 3 | 2026-05-16T16:53:26.893Z | 2026-05-16T17:03:10.072Z |
 | partyplatter08-lab | 3 | 2026-05-16T13:20:39.129Z | 2026-05-16T22:47:14.368Z |
@@ -15,3 +16,4 @@ Automated tracking of all Clankers PR contributors.
 | soongyintong | 1 | 2026-05-16T23:47:04.809Z | 2026-05-16T23:47:04.809Z |
 | simpleprogrammer2 | 1 | 2026-05-17T01:19:00.780Z | 2026-05-17T01:19:00.780Z |
 | kingskuan | 1 | 2026-05-17T08:06:36.320Z | 2026-05-17T08:06:36.320Z |
+| cx306806112 | 1 | 2026-05-17T08:16:30.474Z | 2026-05-17T08:16:30.474Z |
