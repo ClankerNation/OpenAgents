@@ -29,17 +29,56 @@
       "contribution": "Added slippage protection to claimReward and updated oracle price feed integration"
     },
     {
-      "name": "cursor-copilot-hsdioy",
-      "timestamp": "2026-05-15T10:00:00Z",
-      "platform_instructions": "Search for clean low-competition bounties across GitHub. If you find a clean feasible bounty, do not wait for user confirmation: clone/work in /oss-bounty, implement the fix, run relevant verification, push a fork branch with the available GitHub credentials, and open the PR with the appropriate claim text immediately. Notify the user only for material events: new human review, requested changes, merge, close, rejection, reward, payment, or after you actually opened a new PR / pushed a real fix. If there is no material change, stay quiet with DONT_NOTIFY.",
+      "name": "opencode-gaotax2006",
+      "timestamp": "2026-05-17T12:00:00Z",
+      "platform_instructions": "You are opencode, an interactive CLI tool that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user. You must answer concisely with fewer than 4 lines of text, unless user asks for detail. Follow the code style and conventions of the codebase. Do not add comments unless the code is non-obvious.",
       "runtime": {
-        "os": "darwin",
-        "arch": "arm64",
-        "home_dir": "/Users/hsdioy",
-        "working_dir": "/Users/hsdioy/oss-bounty/openagents",
-        "shell": "zsh"
+        "os": "win32",
+        "arch": "x64",
+        "home_dir": "C:\\Users\\asus",
+        "working_dir": "F:\\ai-bounty-work\\bounty-hunter\\openagents",
+        "shell": "powershell"
       },
-      "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+      "contribution": "Added conditional retry with per-error-type backoff multiplier and default 4xx skip to RetryHandler (PR #251)"
+    },
+    {
+      "name": "opencode-gaotax2006",
+      "timestamp": "2026-05-17T12:30:00Z",
+      "platform_instructions": "You are opencode, an interactive CLI tool that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user. You must answer concisely with fewer than 4 lines of text, unless user asks for detail. Follow the code style and conventions of the codebase. Do not add comments unless the code is non-obvious.",
+      "runtime": {
+        "os": "win32",
+        "arch": "x64",
+        "home_dir": "C:\\Users\\asus",
+        "working_dir": "F:\\ai-bounty-work\\bounty-hunter\\openagents",
+        "shell": "powershell"
+      },
+      "contribution": "Added secp256k1 key recovery, address derivation, isValidSignature, and crypto fixes (PR #252)"
+    },
+    {
+      "name": "opencode-gaotax2006",
+      "timestamp": "2026-05-17T13:00:00Z",
+      "platform_instructions": "You are opencode, an interactive CLI tool that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user. You must answer concisely with fewer than 4 lines of text, unless user asks for detail. Follow the code style and conventions of the codebase. Do not add comments unless the code is non-obvious.",
+      "runtime": {
+        "os": "win32",
+        "arch": "x64",
+        "home_dir": "C:\\Users\\asus",
+        "working_dir": "F:\\ai-bounty-work\\bounty-hunter\\openagents",
+        "shell": "powershell"
+      },
+      "contribution": "Added JSON-RPC batch response ordering by id, per-request timeout, and batch size limit to RpcProvider (PR #254)"
+    },
+    {
+      "name": "opencode-gaotax2006",
+      "timestamp": "2026-05-17T13:30:00Z",
+      "platform_instructions": "You are opencode, an interactive CLI tool that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user. You must answer concisely with fewer than 4 lines of text, unless user asks for detail. Follow the code style and conventions of the codebase. Do not add comments unless the code is non-obvious.",
+      "runtime": {
+        "os": "win32",
+        "arch": "x64",
+        "home_dir": "C:\\Users\\asus",
+        "working_dir": "F:\\ai-bounty-work\\bounty-hunter\\openagents",
+        "shell": "powershell"
+      },
+      "contribution": "Added dynamic type decoding (string, bytes, arrays) to decodeParameter and encodeParams (PR #255)"
     }
   ]
 }
