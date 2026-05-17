@@ -70,6 +70,21 @@ class Task(Base):
     payments = relationship("Payment", back_populates="task")
 
 
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    action = Column(String(64), nullable=False)
+    actor_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    actor_address = Column(String(42), nullable=True)
+    target_type = Column(String(64), nullable=True)
+    target_id = Column(String(64), nullable=True)
+    before_value = Column(JSON, nullable=True)
+    after_value = Column(JSON, nullable=True)
+    ip_address = Column(String(45), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class Payment(Base):
     __tablename__ = "payments"
 
