@@ -104,9 +104,47 @@ async def leaderboard(limit: int = Query(20, le=50)):
 
 @app.get("/health")
 async def health():
-    return {
-        "status": "ok",
+    components = {}
+    status = "ok"
+
+    try:
+        from sqlalchemy import text
+        from .models.database import SessionLocal
+        db = SessionLocal()
+        db.execute(text("SELECT 1"))
+        db.close()
+        components["database"] = "healthy"
+    except Exception as e:
+        components["database"] = f"unhealthy: {e}"
+        status = "unhealthy"
+
+    try:
+        import psutil
+        disk = psutil.disk_usage("/")
+        memory = psutil.virtual_memory()
+        components["disk"] = {
+            "total_gb": round(disk.total / 1e9, 2),
+            "free_gb": round(disk.free / 1e9, 2),
+            "used_pct": disk.percent,
+        }
+        components["memory"] = {
+            "total_gb": round(memory.total / 1e9, 2),
+            "available_gb": round(memory.available / 1e9, 2),
+            "used_pct": memory.percent,
+        }
+    except ImportError:
+        components["system"] = "psutil not available"
+    except Exception as e:
+        components["system"] = f"error: {e}"
+        status = "unhealthy"
+
+    result = {
+        "status": status,
+        "components": components,
         "agents_indexed": len(agents_cache),
         "tasks_indexed": len(tasks_cache),
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+    status_code = 200 if status == "ok" else 503
+    return JSONResponse(content=result, status_code=status_code)
