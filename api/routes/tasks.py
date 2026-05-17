@@ -1,16 +1,33 @@
+"""
+@fix-author
+  name: HermesAgent
+  platform: Hermes Agent (haisui157)
+  date: 2026-05-17
+  task: Add agent reputation scoring system (issue #43) — wire reputation updates into task status changes
+  pre_conversation:
+    You are HermesAgent, an autonomous bounty hunting AI agent running as a
+    scheduled cron job on Hermes Agent for user haisui157.
+  @runtime
+    os: linux (WSL)
+    arch: x86_64
+    working_dir: /mnt/c/WINDOWS/System32
+    shell: bash
+"""
 """Task management endpoints for bounty assignments."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
 from ..models.database import get_db, Task
 from ..middleware.auth import get_current_user
+from ..middleware.audit import log_audit, ACTION_CREATE, ACTION_UPDATE, ACTION_DELETE
+from ..services.reputation import record_completion, record_dispute
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
-VALID_STATUSES = {"open", "assigned", "in_progress", "review", "completed", "cancelled"}
+VALID_STATUSES = {"open", "assigned", "in_progress", "review", "completed", "cancelled", "disputed"}
 
 
 class TaskCreate(BaseModel):
@@ -26,7 +43,7 @@ class TaskStatusUpdate(BaseModel):
 
 
 @router.post("/")
-async def create_task(task: TaskCreate, user=Depends(get_current_user), db=Depends(get_db)):
+async def create_task(task: TaskCreate, request: Request, user=Depends(get_current_user), db=Depends(get_db)):
     new_task = Task(
         title=task.title,
         description=task.description,
@@ -40,6 +57,13 @@ async def create_task(task: TaskCreate, user=Depends(get_current_user), db=Depen
     db.add(new_task)
     db.commit()
     db.refresh(new_task)
+    log_audit(
+        db, request,
+        actor_id=user["id"],
+        action=ACTION_CREATE,
+        target=f"task:{new_task.id}",
+        after={"title": new_task.title, "reward_amount": new_task.reward_amount},
+    )
     return {"id": new_task.id, "status": new_task.status}
 
 
@@ -73,6 +97,7 @@ async def get_task(task_id: int, db=Depends(get_db)):
 async def update_task_status(
     task_id: int,
     update: TaskStatusUpdate,
+    request: Request,
     user=Depends(get_current_user),
     db=Depends(get_db),
 ):
@@ -85,14 +110,37 @@ async def update_task_status(
     if task.creator_id != user["id"]:
         raise HTTPException(status_code=403, detail="Only the creator can update status")
 
+    old_status = task.status
     task.status = update.status
     task.updated_at = datetime.utcnow()
+
+    # Update agent reputation on completion or dispute
+    if update.status == "completed" and task.agent_id is not None:
+        from ..models.database import Agent
+        agent = db.query(Agent).filter(Agent.id == task.agent_id).first()
+        if agent:
+            record_completion(db, agent)
+
+    elif update.status == "disputed" and task.agent_id is not None:
+        from ..models.database import Agent
+        agent = db.query(Agent).filter(Agent.id == task.agent_id).first()
+        if agent:
+            record_dispute(db, agent)
+
     db.commit()
+    log_audit(
+        db, request,
+        actor_id=user["id"],
+        action=ACTION_UPDATE,
+        target=f"task:{task.id}",
+        before={"status": old_status},
+        after={"status": task.status},
+    )
     return {"id": task.id, "status": task.status}
 
 
 @router.delete("/{task_id}")
-async def cancel_task(task_id: int, user=Depends(get_current_user), db=Depends(get_db)):
+async def cancel_task(task_id: int, request: Request, user=Depends(get_current_user), db=Depends(get_db)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -100,6 +148,15 @@ async def cancel_task(task_id: int, user=Depends(get_current_user), db=Depends(g
         raise HTTPException(status_code=403, detail="Only the creator can cancel")
     if task.status not in ("open", "assigned"):
         raise HTTPException(status_code=400, detail="Cannot cancel an active task")
+    before_snapshot = {"status": task.status, "title": task.title}
     task.status = "cancelled"
     db.commit()
+    log_audit(
+        db, request,
+        actor_id=user["id"],
+        action=ACTION_DELETE,
+        target=f"task:{task.id}",
+        before=before_snapshot,
+        after=None,
+    )
     return {"id": task.id, "status": "cancelled"}
