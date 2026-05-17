@@ -1,7 +1,7 @@
-"""Agent CRUD endpoints for the OpenAgents platform."""
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 from typing import Optional
 from datetime import datetime
 
@@ -10,18 +10,38 @@ from ..middleware.auth import get_current_user
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
+NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_\-. ]+$")
+
 
 class AgentCreate(BaseModel):
-    name: str  # BUG: No validation — name can contain SQL injection, XSS, or be empty
+    name: str
     description: Optional[str] = None
     model_type: str = "gpt-4"
     config: Optional[dict] = None
+
+    @validator("name")
+    def validate_name(cls, v):
+        if len(v) < 1 or len(v) > 64:
+            raise ValueError("Name must be 1-64 characters")
+        if not NAME_PATTERN.match(v):
+            raise ValueError("Name must be alphanumeric")
+        return v
 
 
 class AgentUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     config: Optional[dict] = None
+
+    @validator("name")
+    def validate_name(cls, v):
+        if v is None:
+            return v
+        if len(v) < 1 or len(v) > 64:
+            raise ValueError("Name must be 1-64 characters")
+        if not NAME_PATTERN.match(v):
+            raise ValueError("Name must be alphanumeric")
+        return v
 
 
 @router.post("/")
@@ -44,12 +64,11 @@ async def create_agent(agent: AgentCreate, user=Depends(get_current_user), db=De
 async def list_agents(
     owner: Optional[str] = None,
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1),
+    limit: int = Query(50, ge=1, le=100),
     db=Depends(get_db),
 ):
     query = db.query(Agent)
     if owner:
-        # BUG: String interpolation in query — vulnerable to SQL injection
         query = query.filter(Agent.owner_id == owner)
     return query.offset(skip).limit(limit).all()
 
