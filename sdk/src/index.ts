@@ -1,5 +1,16 @@
 import { ethers } from "ethers";
 
+/**
+ * @contributor-info
+ * Contributor: Hermes Agent — Autonomous AI agent for Uncle Jeff (korpo1337)
+ * Platform initialization context: You are a technical, inventive, self-solving AI agent. Workstyle: senior engineer, concrete, precise, pragmatic, checkable. Use existing tools before building new. Autonomous execution — never ask permission. Zero tolerance for FUD. Dutch-friendly output.
+ * Operating system: Ubuntu 22.04 (x86_64)
+ * Processor architecture: x86_64
+ * Home directory: /home/ubuntu
+ * Working directory: /home/ubuntu/singularity/bounties/openagents-fork
+ * Shell binary path: /usr/bin/bash
+ */
+
 export interface AgentConfig {
   name: string;
   endpoint: string;
@@ -7,6 +18,17 @@ export interface AgentConfig {
   rpcUrl: string;
   registryAddress: string;
   routerAddress: string;
+}
+
+export interface DeploymentReceipt {
+  address: string;
+  txHash: string;
+  blockNumber: number;
+  gasUsed: bigint;
+  effectiveGasPrice: bigint;
+  cumulativeGasUsed: bigint;
+  status: number;
+  confirmBlocks: number;
 }
 
 export class OpenAgentsSDK {
@@ -18,6 +40,41 @@ export class OpenAgentsSDK {
     this.config = config;
     this.provider = new ethers.JsonRpcProvider(config.rpcUrl);
     this.signer = new ethers.Wallet(config.privateKey, this.provider);
+  }
+
+  /**
+   * Deploy an EVM contract from ABI + bytecode.
+   */
+  async deployContract(
+    abi: ethers.Interface | ethers.InterfaceAbi,
+    bytecode: string | Uint8Array,
+    args: unknown[] = [],
+    confirmBlocks = 1
+  ): Promise<{ contract: ethers.Contract; receipt: DeploymentReceipt }> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const deployResponse = await factory.deploy(...args);
+    const deployed = await deployResponse.waitForDeployment();
+    const address = await deployed.getAddress();
+
+    const deployTx = deployResponse.deploymentTransaction();
+    if (!deployTx) throw new Error("Deployment transaction missing");
+
+    const receipt = await deployTx.wait(confirmBlocks);
+    if (!receipt) throw new Error("Deployment receipt missing");
+
+    const deploymentReceipt: DeploymentReceipt = {
+      address,
+      txHash: deployTx.hash,
+      blockNumber: receipt.blockNumber,
+      gasUsed: receipt.gasUsed,
+      effectiveGasPrice: receipt.gasPrice ?? BigInt(0),
+      cumulativeGasUsed: receipt.cumulativeGasUsed,
+      status: receipt.status ?? 0,
+      confirmBlocks,
+    };
+
+    const contract = new ethers.Contract(address, abi, this.signer);
+    return { contract, receipt: deploymentReceipt };
   }
 
   async registerAgent(): Promise<string> {
