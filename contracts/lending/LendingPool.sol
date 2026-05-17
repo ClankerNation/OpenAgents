@@ -33,6 +33,8 @@ contract LendingPool {
     mapping(address => Position) public positions;
     uint256 public totalDeposits;
     uint256 public totalBorrowed;
+    uint256 public maxBorrowPerAsset;
+    uint256 public constant MAX_BORROW_SHARE_BPS = 2500; // 25% of pool per user
 
     event Deposited(address indexed user, uint256 amount);
     event Borrowed(address indexed user, uint256 amount);
@@ -53,8 +55,18 @@ contract LendingPool {
         emit Deposited(msg.sender, amount);
     }
 
+    function setMaxBorrowPerAsset(uint256 cap) external {
+        maxBorrowPerAsset = cap;
+    }
+
     function borrow(uint256 amount) external {
         require(amount > 0, "Zero amount");
+        if (maxBorrowPerAsset > 0) {
+            require(amount <= maxBorrowPerAsset, "Exceeds asset cap");
+        }
+        require(totalBorrowed + amount <= totalDeposits * 95 / 100, "Utilization too high");
+        require(amount <= totalDeposits * MAX_BORROW_SHARE_BPS / 10000, "Exceeds user share cap");
+
         positions[msg.sender].borrowedAmount += amount;
         totalBorrowed += amount;
 
