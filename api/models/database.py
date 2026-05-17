@@ -86,5 +86,19 @@ class Payment(Base):
     task = relationship("Task", back_populates="payments")
 
 
+class WebhookSubscription(Base):
+    __tablename__ = "webhook_subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    url = Column(String(512), nullable=False)
+    secret = Column(String(128), nullable=False)
+    events = Column(JSON, default=list)
+    active = Column(SAEnum("active", "inactive", name="webhook_status"), default="active")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User")
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
