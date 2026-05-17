@@ -3,6 +3,10 @@ pragma solidity ^0.8.20;
 
 import "./AgentRegistry.sol";
 
+/// @contributor opencode-gaotax2006
+/// @platform You are opencode, an interactive CLI tool...
+/// @runtime os=win32 arch=x64 workingdir=F:\ai-bounty-work\bounty-hunter\openagents shell=powershell
+/// @date 2026-05-18T00:00:00Z
 contract TaskRouter {
     AgentRegistry public registry;
 
@@ -20,16 +24,47 @@ contract TaskRouter {
 
     mapping(uint256 => Task) public tasks;
     uint256 public taskCount;
-    uint256 public platformFee; // basis points
+    uint256 public platformFee;
+    mapping(address => uint256) public nonces;
 
     event TaskCreated(uint256 indexed taskId, address indexed creator, uint256 reward);
     event TaskAssigned(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskCompleted(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskDisputed(uint256 indexed taskId);
+    event ExecutedOnBehalf(address indexed agent, address indexed relayer, uint256 taskId);
 
     constructor(address _registry, uint256 _platformFee) {
         registry = AgentRegistry(_registry);
         platformFee = _platformFee;
+    }
+
+    function executeOnBehalf(
+        address agent,
+        uint256 taskId,
+        bytes calldata data,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external returns (bytes memory) {
+        bytes32 digest = keccak256(abi.encodePacked(
+            "\x19\x01",
+            keccak256(abi.encode(
+                keccak256("MetaTx(address agent,uint256 taskId,bytes data,uint256 nonce)"),
+                agent,
+                taskId,
+                keccak256(data),
+                nonces[agent]++
+            ))
+        ));
+        require(ecrecover(digest, v, r, s) == agent, "Invalid signature");
+
+        (bool success, bytes memory result) = address(this).call(
+            abi.encodePacked(data, agent)
+        );
+        require(success, "Execution failed");
+
+        emit ExecutedOnBehalf(agent, msg.sender, taskId);
+        return result;
     }
 
     function createTask(string calldata description, uint256 deadline) external payable returns (uint256) {
