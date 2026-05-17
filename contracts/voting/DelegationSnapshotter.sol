@@ -86,7 +86,4 @@ contract DelegationSnapshotter {
         return power;
     }
 
-    function hasVoted(uint256 proposalId, address voter) external view returns (bool) {
-        return votingPowerAtProposal[proposalId][voter] > 0 || proposalSnapshotBlock[proposalId] > 0;
-    }
 }
