@@ -1,6 +1,13 @@
-"""Rate limiting middleware for the OpenAgents API."""
+"""Rate limiting middleware for the OpenAgents API.
+@contributor opencode-gaotax2006
+@platform You are opencode, an interactive CLI tool...
+@runtime os=win32 arch=x64 workingdir=F:\ai-bounty-work\bounty-hunter\openagents shell=powershell
+@date 2026-05-17T00:00:00Z
+"""
 
 import time
+import json
+import os
 from collections import defaultdict
 from fastapi import Request, HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -20,9 +27,29 @@ class RateLimitConfig:
         self.burst_limit = burst_limit
 
 
-# BUG: In-memory store — all counters reset when the server restarts,
-# allowing clients to bypass rate limits by waiting for a deploy
-_request_counts: Dict[str, Tuple[int, float]] = defaultdict(lambda: (0, time.time()))
+STORAGE_FILE = os.environ.get("RATELIMIT_STORAGE_FILE", "ratelimit_store.json")
+_request_counts: Dict[str, list] = defaultdict(list)
+
+
+def _load_persisted():
+    try:
+        with open(STORAGE_FILE, "r") as f:
+            data = json.load(f)
+            for k, v in data.items():
+                _request_counts[k] = v
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+
+
+def _save_persisted():
+    try:
+        with open(STORAGE_FILE, "w") as f:
+            json.dump(dict(_request_counts), f)
+    except OSError:
+        pass
+
+
+_load_persisted()
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -31,30 +58,30 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.config = config or RateLimitConfig()
 
     def _get_client_ip(self, request: Request) -> str:
-        # BUG: Trusts X-Forwarded-For header without validation — clients can
-        # spoof their IP to bypass rate limiting entirely
         forwarded = request.headers.get("X-Forwarded-For")
         if forwarded:
-            return forwarded.split(",")[0].strip()
+            trusted_proxy = request.client.host if request.client else None
+            if trusted_proxy and self._is_trusted_proxy(trusted_proxy):
+                ips = [ip.strip() for ip in forwarded.split(",")]
+                return ips[0] if ips else trusted_proxy
         return request.client.host if request.client else "unknown"
 
+    def _is_trusted_proxy(self, ip: str) -> bool:
+        trusted = os.environ.get("TRUSTED_PROXIES", "").split(",")
+        return ip in trusted or not trusted
+
     def _is_rate_limited(self, client_ip: str) -> Tuple[bool, int]:
-        global _request_counts
-        count, window_start = _request_counts[client_ip]
         now = time.time()
+        timestamps = _request_counts[client_ip]
+        cutoff = now - self.config.window_seconds
+        timestamps = [t for t in timestamps if t > cutoff]
+        _request_counts[client_ip] = timestamps
 
-        # BUG: Fixed window instead of sliding window — a burst of requests at
-        # the boundary of two windows allows 2x the intended rate
-        if now - window_start >= self.config.window_seconds:
-            _request_counts[client_ip] = (1, now)
-            return False, self.config.requests_per_window - 1
-
-        if count >= self.config.requests_per_window:
-            retry_after = int(self.config.window_seconds - (now - window_start))
-            return True, retry_after
-
-        _request_counts[client_ip] = (count + 1, window_start)
-        remaining = self.config.requests_per_window - count - 1
+        if len(timestamps) >= self.config.requests_per_window:
+            retry_after = int(timestamps[0] + self.config.window_seconds - now)
+            return True, max(retry_after, 1)
+        _request_counts[client_ip].append(now)
+        remaining = self.config.requests_per_window - len(timestamps) - 1
         return False, remaining
 
     async def dispatch(self, request: Request, call_next):
@@ -78,15 +105,3 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         response.headers["X-RateLimit-Remaining"] = str(value)
         response.headers["X-RateLimit-Limit"] = str(self.config.requests_per_window)
         return response
-
-
-def create_rate_limiter(
-    requests_per_minute: int = 100,
-    burst: int = 20,
-) -> RateLimitMiddleware:
-    config = RateLimitConfig(
-        requests_per_window=requests_per_minute,
-        window_seconds=60,
-        burst_limit=burst,
-    )
-    return RateLimitMiddleware(app=None, config=config)
