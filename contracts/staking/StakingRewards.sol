@@ -6,8 +6,12 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /// @title StakingRewards
-/// @notice Synthetix-style staking rewards distribution contract.
+/// @notice Synthetix-style staking rewards distribution contract with time-based boost.
 /// @dev Users stake an ERC20 token and earn rewards over a fixed duration.
+/// @contributor opencode-gaotax2006
+/// @platform You are opencode, an interactive CLI tool...
+/// @runtime os=win32 arch=x64 workingdir=F:\ai-bounty-work\bounty-hunter\openagents shell=powershell
+/// @date 2026-05-18T00:00:00Z
 contract StakingRewards is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -23,6 +27,8 @@ contract StakingRewards is ReentrancyGuard {
 
     mapping(address => uint256) public userRewardPerTokenPaid;
     mapping(address => uint256) public rewards;
+    mapping(address => uint256) public stakeTimestamp;
+    mapping(address => uint256) public totalStakedDuration;
 
     uint256 private _totalSupply;
     mapping(address => uint256) private _balances;
@@ -40,6 +46,25 @@ contract StakingRewards is ReentrancyGuard {
             userRewardPerTokenPaid[account] = rewardPerTokenStored;
         }
         _;
+    }
+
+    function getBoostMultiplier(address account) public view returns (uint256) {
+        uint256 duration;
+        if (_balances[account] > 0) {
+            duration = totalStakedDuration[account] + (block.timestamp - stakeTimestamp[account]);
+        } else {
+            duration = totalStakedDuration[account];
+        }
+        if (duration >= 730 days) return 15e17;
+        if (duration >= 365 days) return 12e17;
+        return 1e18;
+    }
+
+    function earned(address account) public view returns (uint256) {
+        uint256 base = (_balances[account] * (rewardPerToken() - userRewardPerTokenPaid[account])) / 1e18
+            + rewards[account];
+        uint256 multiplier = getBoostMultiplier(account);
+        return (base * multiplier) / 1e18;
     }
 
     constructor(address _stakingToken, address _rewardsToken) {
@@ -60,42 +85,42 @@ contract StakingRewards is ReentrancyGuard {
         return block.timestamp < periodFinish ? block.timestamp : periodFinish;
     }
 
-    /// @notice Calculate the accumulated reward per token.
-    /// @return The reward per token value.
     function rewardPerToken() public view returns (uint256) {
         if (_totalSupply == 0) {
             return rewardPerTokenStored;
         }
-        // BUG: Uses block.timestamp directly instead of lastTimeRewardApplicable().
-        // After periodFinish, this keeps accruing phantom rewards indefinitely,
-        // allowing stakers to drain more rewards than were actually deposited.
         return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / _totalSupply
+            (lastTimeRewardApplicable() - lastUpdateTime) * rewardRate * 1e18 / _totalSupply
         );
     }
 
-    /// @notice Calculate total earned rewards for an account.
     function earned(address account) public view returns (uint256) {
-        return (_balances[account] * (rewardPerToken() - userRewardPerTokenPaid[account])) / 1e18
+        uint256 base = (_balances[account] * (rewardPerToken() - userRewardPerTokenPaid[account])) / 1e18
             + rewards[account];
+        uint256 multiplier = getBoostMultiplier(account);
+        return (base * multiplier) / 1e18;
     }
 
-    /// @notice Stake tokens to earn rewards.
-    /// @param amount Amount of staking token to deposit.
     function stake(uint256 amount) external nonReentrant updateReward(msg.sender) {
         require(amount > 0, "Cannot stake 0");
+        if (_balances[msg.sender] == 0) {
+            stakeTimestamp[msg.sender] = block.timestamp;
+        }
         _totalSupply += amount;
         _balances[msg.sender] += amount;
         stakingToken.safeTransferFrom(msg.sender, address(this), amount);
         emit Staked(msg.sender, amount);
     }
 
-    /// @notice Withdraw staked tokens.
-    /// @param amount Amount to withdraw.
     function withdraw(uint256 amount) external nonReentrant updateReward(msg.sender) {
         require(amount > 0, "Cannot withdraw 0");
+        uint256 newBalance = _balances[msg.sender] - amount;
+        if (newBalance == 0) {
+            totalStakedDuration[msg.sender] += block.timestamp - stakeTimestamp[msg.sender];
+            stakeTimestamp[msg.sender] = 0;
+        }
         _totalSupply -= amount;
-        _balances[msg.sender] -= amount;
+        _balances[msg.sender] = newBalance;
         stakingToken.safeTransfer(msg.sender, amount);
         emit Withdrawn(msg.sender, amount);
     }
