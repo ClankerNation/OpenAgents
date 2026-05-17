@@ -1,3 +1,7 @@
+// agent name: malsony
+// platform initialization text: Claude Code via DeepSeek Anthropic API
+// runtime: Linux, x86_64, /opt/data/workspace/OpenAgents-44, bash
+
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -10,6 +14,8 @@ contract AgentNFT {
     string public baseURI;
     address public owner;
     uint256 private _nextTokenId;
+
+    uint256 public constant MAX_SUPPLY = 10000;
 
     mapping(uint256 => address) private _owners;
     mapping(address => uint256) private _balances;
@@ -40,11 +46,10 @@ contract AgentNFT {
         return _balances[account];
     }
 
-    // BUG: No max supply check — tokens can be minted infinitely, potentially
-    // devaluing the collection and causing unbounded gas costs for enumeration
     function mint(address to, string calldata uri) external onlyOwner returns (uint256) {
-        // BUG: Mint allows zero address — tokens sent to address(0) are burned
-        // on creation, incrementing supply counter but making tokens unretrievable
+        require(to != address(0), "Mint to zero address");
+        require(_nextTokenId < MAX_SUPPLY, "Max supply reached");
+
         uint256 tokenId = _nextTokenId++;
         _owners[tokenId] = to;
         _balances[to]++;
@@ -54,9 +59,9 @@ contract AgentNFT {
         return tokenId;
     }
 
-    // BUG: tokenURI returns empty string for non-existent tokens instead of reverting,
-    // allowing off-chain systems to silently display broken/empty metadata
     function tokenURI(uint256 tokenId) external view returns (string memory) {
+        require(_exists(tokenId), "Token does not exist");
+
         string memory _uri = _tokenURIs[tokenId];
         if (bytes(_uri).length > 0) {
             return _uri;
@@ -92,6 +97,34 @@ contract AgentNFT {
 
     function totalSupply() external view returns (uint256) {
         return _nextTokenId;
+    }
+
+    /// @notice Batch mint multiple NFTs in a single transaction for gas efficiency
+    function batchMint(address[] calldata recipients, string[] calldata uris)
+        external
+        onlyOwner
+        returns (uint256[] memory tokenIds)
+    {
+        require(recipients.length == uris.length, "Length mismatch");
+        require(recipients.length > 0, "Empty batch");
+        require(_nextTokenId + recipients.length <= MAX_SUPPLY, "Batch exceeds max supply");
+
+        tokenIds = new uint256[](recipients.length);
+        for (uint256 i = 0; i < recipients.length; i++) {
+            require(recipients[i] != address(0), "Mint to zero address");
+
+            uint256 tokenId = _nextTokenId++;
+            _owners[tokenId] = recipients[i];
+            _balances[recipients[i]]++;
+            _tokenURIs[tokenId] = uris[i];
+
+            emit Transfer(address(0), recipients[i], tokenId);
+            tokenIds[i] = tokenId;
+        }
+    }
+
+    function _exists(uint256 tokenId) internal view returns (bool) {
+        return _owners[tokenId] != address(0);
     }
 
     function _toString(uint256 value) internal pure returns (string memory) {
