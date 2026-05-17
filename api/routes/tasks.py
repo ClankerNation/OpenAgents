@@ -1,14 +1,63 @@
 """Task management endpoints for bounty assignments."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+import json
 
 from ..models.database import get_db, Task
 from ..middleware.auth import get_current_user
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
+
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: dict[int, list[WebSocket]] = {}
+
+    async def connect(self, task_id: int, websocket: WebSocket):
+        await websocket.accept()
+        if task_id not in self.active_connections:
+            self.active_connections[task_id] = []
+        self.active_connections[task_id].append(websocket)
+
+    def disconnect(self, task_id: int, websocket: WebSocket):
+        if task_id in self.active_connections:
+            self.active_connections[task_id] = [ws for ws in self.active_connections[task_id] if ws != websocket]
+            if not self.active_connections[task_id]:
+                del self.active_connections[task_id]
+
+    async def broadcast_task_update(self, task_id: int, data: dict):
+        if task_id in self.active_connections:
+            stale = []
+            for ws in self.active_connections[task_id]:
+                try:
+                    await ws.send_json(data)
+                except Exception:
+                    stale.append(ws)
+            for ws in stale:
+                self.disconnect(task_id, ws)
+
+
+manager = ConnectionManager()
+
+
+@router.websocket("/ws")
+async def task_websocket(websocket: WebSocket):
+    await websocket.accept()
+    subscriptions = set()
+    try:
+        while True:
+            data = await websocket.receive_text()
+            msg = json.loads(data)
+            if msg.get("type") == "subscribe" and msg.get("task_id"):
+                subscriptions.add(msg["task_id"])
+            elif msg.get("type") == "unsubscribe" and msg.get("task_id"):
+                subscriptions.discard(msg["task_id"])
+    except WebSocketDisconnect:
+        for tid in subscriptions:
+            manager.disconnect(tid, websocket)
 
 VALID_STATUSES = {"open", "assigned", "in_progress", "review", "completed", "cancelled"}
 
@@ -85,9 +134,11 @@ async def update_task_status(
     if task.creator_id != user["id"]:
         raise HTTPException(status_code=403, detail="Only the creator can update status")
 
+    old_status = task.status
     task.status = update.status
     task.updated_at = datetime.utcnow()
     db.commit()
+    await manager.broadcast_task_update(task.id, {"type": "status_change", "task_id": task.id, "old_status": old_status, "new_status": task.status})
     return {"id": task.id, "status": task.status}
 
 
@@ -102,4 +153,5 @@ async def cancel_task(task_id: int, user=Depends(get_current_user), db=Depends(g
         raise HTTPException(status_code=400, detail="Cannot cancel an active task")
     task.status = "cancelled"
     db.commit()
+    await manager.broadcast_task_update(task.id, {"type": "status_change", "task_id": task.id, "old_status": "cancelling", "new_status": "cancelled"})
     return {"id": task.id, "status": "cancelled"}
