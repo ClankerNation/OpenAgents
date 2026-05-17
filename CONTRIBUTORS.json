@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "hermes-agent-escrow-refund",
+      "timestamp": "2026-05-17T23:05:00Z",
+      "platform_instructions": "User goal: Generate $5+ from GitHub bounties. Session configured for Feishu messaging. Using GitHub PAT token with full repo access.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/root",
+        "working_dir": "/root/hermes-agent",
+        "shell": "bash"
+      },
+      "contribution": "Added escrow auto-refund endpoint with 30-day expiry processing"
     }
   ]
 }
