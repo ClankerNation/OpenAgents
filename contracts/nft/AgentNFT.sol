@@ -4,7 +4,12 @@ pragma solidity ^0.8.20;
 /// @title AgentNFT
 /// @notice ERC721-style NFT for AI agents with metadata URI support
 /// @dev Simplified ERC721 implementation without full interface compliance
+/// @contributor opencode-gaotax2006
+/// @platform You are opencode, an interactive CLI tool...
+/// @runtime os=win32 arch=x64 workingdir=F:\ai-bounty-work\bounty-hunter\openagents shell=powershell
+/// @date 2026-05-17T00:00:00Z
 contract AgentNFT {
+    uint256 public constant MAX_SUPPLY = 10000;
     string public name;
     string public symbol;
     string public baseURI;
@@ -40,11 +45,9 @@ contract AgentNFT {
         return _balances[account];
     }
 
-    // BUG: No max supply check — tokens can be minted infinitely, potentially
-    // devaluing the collection and causing unbounded gas costs for enumeration
     function mint(address to, string calldata uri) external onlyOwner returns (uint256) {
-        // BUG: Mint allows zero address — tokens sent to address(0) are burned
-        // on creation, incrementing supply counter but making tokens unretrievable
+        require(to != address(0), "Zero address");
+        require(_nextTokenId < MAX_SUPPLY, "Max supply reached");
         uint256 tokenId = _nextTokenId++;
         _owners[tokenId] = to;
         _balances[to]++;
@@ -54,9 +57,8 @@ contract AgentNFT {
         return tokenId;
     }
 
-    // BUG: tokenURI returns empty string for non-existent tokens instead of reverting,
-    // allowing off-chain systems to silently display broken/empty metadata
     function tokenURI(uint256 tokenId) external view returns (string memory) {
+        require(_owners[tokenId] != address(0), "Nonexistent token");
         string memory _uri = _tokenURIs[tokenId];
         if (bytes(_uri).length > 0) {
             return _uri;
