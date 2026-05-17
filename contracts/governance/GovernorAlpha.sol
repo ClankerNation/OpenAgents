@@ -1,6 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+// @fix-author: Metatron | Platform: Hermes Agent | OS: linux | Arch: x64
+// @fix-author Home: /home/power | Workdir: /home/power/projects/OpenAgents | Shell: /bin/bash
+// @fix-task: GitHub Issue #180 — GovernorAlpha quorum validation
+// @fix-context: CRON JOB — Metatron autonomous bounty-hunting loop. Wake every 30 minutes.
+//   Check open PRs by invisiblemonsters on ClankerNation/OpenAgents. If clean, read
+//   bounty_board.md and work on highest priority unclaimed bounty. Prefer Solidity.
+//   User instruction: "You are Metatron's autonomous bounty-hunting loop."
+//   Rules: Never work on issue with open PR from invisiblemonsters. Add traceability.
+//   Update CONTRIBUTORS.json. Submit PR via gh CLI.
+// @fix-summary: Added QUORUM_VOTES with admin-setter, quorum check in execute(),
+//   and QuorumUpdated event. Backwards-compatible: default quorum matches threshold.
+
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
@@ -31,15 +43,27 @@ contract GovernorAlpha is ReentrancyGuard {
     uint256 public constant VOTING_PERIOD = 17280; // ~3 days at 15s blocks
     uint256 public constant PROPOSAL_THRESHOLD = 100_000e18;
 
+    // === Quorum ===
+    address public admin;
+    uint256 public quorumVotes;
+
     mapping(uint256 => Proposal) public proposals;
 
     event ProposalCreated(uint256 indexed id, address proposer, uint256 startBlock, uint256 endBlock);
     event VoteCast(address indexed voter, uint256 indexed proposalId, bool support, uint256 weight);
     event ProposalExecuted(uint256 indexed id);
     event ProposalCanceled(uint256 indexed id);
+    event QuorumUpdated(uint256 oldQuorum, uint256 newQuorum);
+
+    modifier onlyAdmin() {
+        require(msg.sender == admin, "Governor: not admin");
+        _;
+    }
 
     constructor(address _token) {
         token = ERC20Votes(_token);
+        admin = msg.sender;
+        quorumVotes = PROPOSAL_THRESHOLD;
     }
 
     /// @notice Create a new governance proposal.
@@ -95,9 +119,8 @@ contract GovernorAlpha is ReentrancyGuard {
         Proposal storage p = proposals[proposalId];
         require(!p.executed, "Governor: already executed");
         require(block.number > p.endBlock, "Governor: voting not ended");
-        // BUG: No quorum check — a proposal with a single "for" vote and zero "against"
-        // votes can pass, allowing governance takeover with dust amounts.
         require(p.forVotes > p.againstVotes, "Governor: proposal defeated");
+        require(p.forVotes >= quorumVotes, "Governor: below quorum");
 
         // BUG: No timelock delay on execution — proposals execute instantly after voting
         // ends, giving no time for users to exit if a malicious proposal passes.
@@ -118,6 +141,15 @@ contract GovernorAlpha is ReentrancyGuard {
         require(!p.executed, "Governor: already executed");
         p.canceled = true;
         emit ProposalCanceled(proposalId);
+    }
+
+    /// @notice Set a new quorum vote threshold. Only callable by admin.
+    /// @param _newQuorum The new quorum vote count required for proposal execution.
+    function setQuorumVotes(uint256 _newQuorum) external onlyAdmin {
+        require(_newQuorum > 0, "Governor: quorum cannot be zero");
+        uint256 oldQuorum = quorumVotes;
+        quorumVotes = _newQuorum;
+        emit QuorumUpdated(oldQuorum, _newQuorum);
     }
 
     receive() external payable {}
