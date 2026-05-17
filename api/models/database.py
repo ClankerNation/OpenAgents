@@ -24,32 +24,34 @@ def get_db():
         db.close()
 
 
+def utcnow():
+    return datetime.utcnow()
+
+
 class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    address = Column(String(42), unique=True, nullable=False)
+    address = Column(String(42), unique=True, nullable=False, index=True)
     username = Column(String(64), unique=True, nullable=True)
-    # BUG: No index on address — wallet lookups on every auth request do full table scans
-    created_at = Column(DateTime, default=datetime.utcnow)  # BUG: naive datetime, no timezone
+    created_at = Column(DateTime, default=utcnow)
 
-    agents = relationship("Agent", back_populates="owner")
+    agents = relationship("Agent", back_populates="owner", cascade="all, delete-orphan")
 
 
 class Agent(Base):
     __tablename__ = "agents"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(128), nullable=False)
+    name = Column(String(128), nullable=False, index=True)
     description = Column(Text, nullable=True)
     model_type = Column(String(32), default="gpt-4")
     config = Column(JSON, default=dict)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
 
-    # BUG: No cascade delete — deleting a user leaves orphaned agents
     owner = relationship("User", back_populates="agents")
-    tasks = relationship("Task", back_populates="agent")
+    tasks = relationship("Task", back_populates="agent", cascade="all, delete-orphan")
 
 
 class Task(Base):
@@ -59,28 +61,28 @@ class Task(Base):
     title = Column(String(256), nullable=False)
     description = Column(Text, nullable=True)
     reward_amount = Column(Float, nullable=False)
-    status = Column(String(32), default="open")
+    status = Column(String(32), default="open", index=True)
     creator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     agent_id = Column(Integer, ForeignKey("agents.id"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utcnow)
     updated_at = Column(DateTime, nullable=True)
     deadline = Column(DateTime, nullable=True)
 
     agent = relationship("Agent", back_populates="tasks")
-    payments = relationship("Payment", back_populates="task")
+    payments = relationship("Payment", back_populates="task", cascade="all, delete-orphan")
 
 
 class Payment(Base):
     __tablename__ = "payments"
 
     id = Column(Integer, primary_key=True, index=True)
-    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
-    from_address = Column(String(42), nullable=False)
-    to_address = Column(String(42), nullable=True)
+    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False, index=True)
+    from_address = Column(String(42), nullable=False, index=True)
+    to_address = Column(String(42), nullable=True, index=True)
     amount = Column(Float, nullable=False)
     token_address = Column(String(42), default="0x0000000000000000000000000000000000000000")
-    status = Column(String(32), default="pending")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    status = Column(String(32), default="pending", index=True)
+    created_at = Column(DateTime, default=utcnow)
     claimed_at = Column(DateTime, nullable=True)
 
     task = relationship("Task", back_populates="payments")
