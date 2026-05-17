@@ -3,11 +3,15 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+from .routes.auth_keys import router as auth_keys_router
+
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+app.include_router(auth_keys_router)
 
 
 class AgentResponse(BaseModel):

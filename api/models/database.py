@@ -70,6 +70,18 @@ class Task(Base):
     payments = relationship("Payment", back_populates="task")
 
 
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    key_hash = Column(String(128), nullable=False)
+    label = Column(String(64), nullable=True)
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_used_at = Column(DateTime, nullable=True)
+
+
 class Payment(Base):
     __tablename__ = "payments"
 

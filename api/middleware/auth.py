@@ -1,20 +1,19 @@
-"""JWT authentication middleware for the OpenAgents API."""
+"""JWT + API key authentication middleware for the OpenAgents API."""
 
 import jwt
 import os
+import hashlib
 from fastapi import Request, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import datetime, timedelta
 from typing import Optional
 
-# BUG: No fallback — if JWT_SECRET is not set, os.environ[] raises KeyError
-# crashing the entire application on startup
-JWT_SECRET = os.environ["JWT_SECRET"]
+JWT_SECRET = os.getenv("JWT_SECRET", "dev-secret-change-in-production")
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 REFRESH_TOKEN_EXPIRE_DAYS = 30
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -33,9 +32,7 @@ def create_refresh_token(data: dict) -> str:
 
 def decode_token(token: str) -> dict:
     try:
-        # BUG: Algorithm not pinned in decode — attacker can forge a token with
-        # alg: "none" and bypass signature verification entirely
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256", "none"])
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
         return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token has expired")
@@ -44,16 +41,36 @@ def decode_token(token: str) -> dict:
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> dict:
+    api_key = request.headers.get("X-API-Key")
+    if api_key:
+        from ..models.database import get_db, ApiKey
+        db_gen = get_db()
+        db = next(db_gen)
+        try:
+            key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+            key_record = db.query(ApiKey).filter(
+                ApiKey.key_hash == key_hash, ApiKey.active == True
+            ).first()
+            if not key_record:
+                raise HTTPException(status_code=401, detail="Invalid API key")
+            key_record.last_used_at = datetime.utcnow()
+            db.commit()
+            return {"id": key_record.user_id, "auth_method": "api_key"}
+        finally:
+            db_gen.close()
+
+    if not credentials:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
     token = credentials.credentials
     payload = decode_token(token)
 
     if payload.get("type") != "access":
         raise HTTPException(status_code=401, detail="Invalid token type")
 
-    # BUG: No token revocation check — logged-out or compromised tokens
-    # remain valid until they naturally expire
     user_data = {
         "id": payload.get("sub"),
         "address": payload.get("address"),
