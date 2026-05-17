@@ -11,6 +11,10 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 /// @notice Vault that accepts deposits and allocates capital across yield strategies.
 /// @dev Implements a simplified vault pattern. Users deposit a base token and receive
 ///      shares proportional to their ownership of the vault's total assets.
+/// @contributor opencode-gaotax2006
+/// @platform You are opencode, an interactive CLI tool...
+/// @runtime os=win32 arch=x64 workingdir=F:\ai-bounty-work\bounty-hunter\openagents shell=powershell
+/// @date 2026-05-18T00:00:00Z
 contract YieldAggregator is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -24,6 +28,7 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
     uint256 public totalShares;
     uint256 public totalDeposited;
     mapping(address => uint256) public shares;
+    bool public paused;
 
     Strategy[] public strategies;
 
@@ -31,6 +36,13 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
     event Withdraw(address indexed user, uint256 assets, uint256 sharesBurned);
     event StrategyAdded(uint256 indexed strategyId, address target);
     event StrategyAllocated(uint256 indexed strategyId, uint256 amount);
+    event EmergencyStop(address indexed owner, string reason);
+    event EmergencyRestart(address indexed owner);
+
+    modifier whenNotPaused() {
+        require(!paused, "Paused");
+        _;
+    }
 
     constructor(address _asset) Ownable(msg.sender) {
         asset = IERC20(_asset);
@@ -42,7 +54,29 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
     // BUG: No slippage check on deposit — the share price can be manipulated via
     // donation attacks (sending tokens directly to the vault) between the user's
     // approval and deposit, causing them to receive far fewer shares than expected.
-    function deposit(uint256 amount) external nonReentrant returns (uint256 sharesMinted) {
+    function pause(string calldata reason) external onlyOwner {
+        paused = true;
+        emit EmergencyStop(msg.sender, reason);
+    }
+
+    function unpause() external onlyOwner {
+        paused = false;
+        emit EmergencyRestart(msg.sender);
+    }
+
+    function emergencyWithdraw(uint256 shareAmount) external nonReentrant returns (uint256 assetsReturned) {
+        require(paused, "Not paused");
+        require(shareAmount > 0, "Zero shares");
+        require(shares[msg.sender] >= shareAmount, "Insufficient shares");
+
+        assetsReturned = (shareAmount * asset.balanceOf(address(this))) / totalShares;
+        shares[msg.sender] -= shareAmount;
+        totalShares -= shareAmount;
+        asset.safeTransfer(msg.sender, assetsReturned);
+        emit Withdraw(msg.sender, assetsReturned, shareAmount);
+    }
+
+    function deposit(uint256 amount) external nonReentrant whenNotPaused returns (uint256 sharesMinted) {
         require(amount > 0, "Vault: zero deposit");
 
         if (totalShares == 0) {
@@ -62,7 +96,7 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
     /// @notice Withdraw tokens by burning vault shares.
     /// @param shareAmount Number of shares to redeem.
     /// @return assetsReturned Amount of base token returned.
-    function withdraw(uint256 shareAmount) external nonReentrant returns (uint256 assetsReturned) {
+    function withdraw(uint256 shareAmount) external nonReentrant whenNotPaused returns (uint256 assetsReturned) {
         require(shareAmount > 0, "Vault: zero shares");
         require(shares[msg.sender] >= shareAmount, "Vault: insufficient shares");
 

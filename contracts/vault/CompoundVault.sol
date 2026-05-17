@@ -10,6 +10,10 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 /// @notice Auto-compounding vault that periodically harvests yield and reinvests.
 /// @dev Deposits into an underlying strategy, harvests rewards, sells for the base
 ///      asset, and re-deposits to compound returns. Charges a performance fee.
+/// @contributor opencode-gaotax2006
+/// @platform You are opencode, an interactive CLI tool...
+/// @runtime os=win32 arch=x64 workingdir=F:\ai-bounty-work\bounty-hunter\openagents shell=powershell
+/// @date 2026-05-18T00:00:00Z
 contract CompoundVault is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -20,9 +24,10 @@ contract CompoundVault is Ownable, ReentrancyGuard {
 
     uint256 public totalShares;
     uint256 public totalDeposited;
-    uint256 public performanceFeeBps; // basis points (e.g., 1000 = 10%)
+    uint256 public performanceFeeBps;
     uint256 public lastHarvestTime;
     uint256 public lastPricePerShare;
+    bool public paused;
 
     mapping(address => uint256) public userShares;
 
@@ -30,6 +35,13 @@ contract CompoundVault is Ownable, ReentrancyGuard {
     event Withdrawn(address indexed user, uint256 amount, uint256 shares);
     event Harvested(uint256 profit, uint256 fee, uint256 timestamp);
     event Compounded(uint256 amount, uint256 newPricePerShare);
+    event EmergencyStop(address indexed owner, string reason);
+    event EmergencyRestart(address indexed owner);
+
+    modifier whenNotPaused() {
+        require(!paused, "Paused");
+        _;
+    }
 
     constructor(
         address _baseToken,
@@ -49,7 +61,28 @@ contract CompoundVault is Ownable, ReentrancyGuard {
 
     /// @notice Deposit base tokens and receive vault shares.
     /// @param amount Amount of base token to deposit.
-    function deposit(uint256 amount) external nonReentrant {
+    function pause(string calldata reason) external onlyOwner {
+        paused = true;
+        emit EmergencyStop(msg.sender, reason);
+    }
+
+    function unpause() external onlyOwner {
+        paused = false;
+        emit EmergencyRestart(msg.sender);
+    }
+
+    function emergencyWithdraw(uint256 shareAmount) external nonReentrant returns (uint256 assets) {
+        require(paused, "Not paused");
+        require(shareAmount > 0 && userShares[msg.sender] >= shareAmount, "Invalid");
+        assets = (shareAmount * totalDeposited) / totalShares;
+        userShares[msg.sender] -= shareAmount;
+        totalShares -= shareAmount;
+        totalDeposited -= assets;
+        baseToken.safeTransfer(msg.sender, assets);
+        emit Withdrawn(msg.sender, assets, shareAmount);
+    }
+
+    function deposit(uint256 amount) external nonReentrant whenNotPaused {
         require(amount > 0, "Vault: zero amount");
 
         uint256 sharesToMint;
@@ -69,7 +102,7 @@ contract CompoundVault is Ownable, ReentrancyGuard {
 
     /// @notice Withdraw base tokens by burning vault shares.
     /// @param shareAmount Number of shares to redeem.
-    function withdraw(uint256 shareAmount) external nonReentrant {
+    function withdraw(uint256 shareAmount) external nonReentrant whenNotPaused {
         require(shareAmount > 0 && userShares[msg.sender] >= shareAmount, "Vault: invalid");
 
         uint256 assets = (shareAmount * totalDeposited) / totalShares;
