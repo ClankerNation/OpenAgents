@@ -18,6 +18,10 @@ interface IERC20 {
 /// @title Router
 /// @notice Multi-hop swap router that routes trades through multiple AMM pools
 /// @dev Each hop uses a registered pool; tokens flow through the router
+/// @contributor opencode-gaotax2006
+/// @platform You are opencode, an interactive CLI tool...
+/// @runtime os=win32 arch=x64 workingdir=F:\ai-bounty-work\bounty-hunter\openagents shell=powershell
+/// @date 2026-05-17T00:00:00Z
 contract Router {
     address public admin;
 
@@ -38,18 +42,19 @@ contract Router {
         emit PoolRegistered(_tokenA, _tokenB, _pool);
     }
 
-    // BUG: No slippage protection — minAmountOut is passed as 0 to every intermediate hop,
-    // so a sandwich attacker can extract maximum value from multi-hop trades
-    // BUG: Path validation missing — no check that path[0] != path[path.length-1],
-    // allowing circular swaps (A->B->A) that waste gas and may be used in attacks
-    // BUG: Intermediate amounts not validated — if a pool returns 0 from swap,
-    // subsequent hops proceed with 0 input, silently producing a 0-output trade
     function swapMultiHop(
         address[] calldata path,
         uint256 amountIn,
-        uint256 /* minAmountOut */
+        uint256 minAmountOut
     ) external returns (uint256 amountOut) {
         require(path.length >= 2, "Path too short");
+        require(path[0] != path[path.length - 1], "Circular path");
+
+        for (uint256 i = 0; i < path.length; i++) {
+            for (uint256 j = i + 1; j < path.length; j++) {
+                require(path[i] != path[j], "Duplicate token in path");
+            }
+        }
 
         IERC20(path[0]).transferFrom(msg.sender, address(this), amountIn);
 
@@ -64,13 +69,14 @@ contract Router {
 
             IERC20(tokenIn).approve(pool, currentAmount);
 
-            // Passes 0 as minAmountOut — no slippage protection on intermediate hops
-            currentAmount = IAMMPool(pool).swap(tokenIn, currentAmount, 0);
+            uint256 hopMinOut = (minAmountOut * currentAmount) / amountIn;
+            currentAmount = IAMMPool(pool).swap(tokenIn, currentAmount, hopMinOut);
+            require(currentAmount > 0, "Zero output");
         }
 
         amountOut = currentAmount;
+        require(amountOut >= minAmountOut, "Slippage exceeded");
 
-        // Transfer final tokens to user
         IERC20(path[path.length - 1]).transfer(msg.sender, amountOut);
 
         emit MultiHopSwap(msg.sender, path, amountIn, amountOut);
