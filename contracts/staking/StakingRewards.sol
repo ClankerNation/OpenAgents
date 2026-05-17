@@ -5,6 +5,23 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
+interface IPermit2 {
+    function permitTransferFrom(
+        bytes calldata permit,
+        bytes calldata transfer,
+        address sender,
+        address receiver
+    ) external;
+    function transferFrom(
+        address from,
+        address to,
+        uint160 amount,
+        address token
+    ) external;
+}
+
+address constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
+
 /// @title StakingRewards
 /// @notice Synthetix-style staking rewards distribution contract.
 /// @dev Users stake an ERC20 token and earn rewards over a fixed duration.
@@ -82,6 +99,14 @@ contract StakingRewards is ReentrancyGuard {
 
     /// @notice Stake tokens to earn rewards.
     /// @param amount Amount of staking token to deposit.
+    function stakeWithPermit(uint256 amount, bytes calldata permitData) external nonReentrant updateReward(msg.sender) {
+        require(amount > 0, "Cannot stake 0");
+        IPermit2(PERMIT2).permitTransferFrom(permitData, "", msg.sender, address(this));
+        _totalSupply += amount;
+        _balances[msg.sender] += amount;
+        emit Staked(msg.sender, amount);
+    }
+
     function stake(uint256 amount) external nonReentrant updateReward(msg.sender) {
         require(amount > 0, "Cannot stake 0");
         _totalSupply += amount;

@@ -7,6 +7,12 @@ interface IERC20 {
     function balanceOf(address account) external view returns (uint256);
 }
 
+interface IPermit2 {
+    function permitTransferFrom(bytes calldata permit, bytes calldata transfer, address sender, address receiver) external;
+}
+
+address constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
+
 /// @title AMMPool
 /// @notice Constant product (x*y=k) automated market maker pool
 /// @dev Supports adding/removing liquidity and token swaps with a fee
@@ -33,6 +39,27 @@ contract AMMPool {
     // BUG: No minimum liquidity lock — first LP can add tiny liquidity then remove it all,
     // enabling a well-known inflation attack where attacker donates tokens to manipulate
     // share price and steal from the next depositor
+    function addLiquidityWithPermit(uint256 amountA, uint256 amountB, bytes calldata permitData) external returns (uint256 lpTokens) {
+        require(amountA > 0 && amountB > 0, "Zero amounts");
+
+        if (totalLiquidity == 0) {
+            lpTokens = _sqrt(amountA * amountB);
+        } else {
+            uint256 lpA = (amountA * totalLiquidity) / reserveA;
+            uint256 lpB = (amountB * totalLiquidity) / reserveB;
+            lpTokens = lpA < lpB ? lpA : lpB;
+        }
+
+        IPermit2(PERMIT2).permitTransferFrom(permitData, "", msg.sender, address(this));
+
+        reserveA += amountA;
+        reserveB += amountB;
+        liquidity[msg.sender] += lpTokens;
+        totalLiquidity += lpTokens;
+
+        emit LiquidityAdded(msg.sender, amountA, amountB, lpTokens);
+    }
+
     function addLiquidity(uint256 amountA, uint256 amountB) external returns (uint256 lpTokens) {
         require(amountA > 0 && amountB > 0, "Zero amounts");
 
