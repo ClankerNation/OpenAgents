@@ -1,13 +1,47 @@
+"""
+@contributor xiaanan
+@platform_instructions Full pre-session context (AGENTS.md, SOUL.md, IDENTITY.md, USER.md, TOOLS.md, Runtime metadata) available in platform records.
+@runtime os=Linux 6.6.87.2-microsoft-standard-WSL2 x64, arch=x86_64, home_dir=/home/cx306806112, working_dir=/home/cx306806112/.bounty-workspace/openagents-156, shell=/bin/bash
+@env PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin, USER=cx306806112, SHELL=/bin/bash
+@timestamp 2026-05-17T07:56:00Z
+"""
+
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+import os
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+# CORS configuration from environment variable
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "").split(",")
+# In production, reject wildcard if more than one origin configured
+IS_PRODUCTION = os.getenv("ENV", "development") == "production"
+
+if IS_PRODUCTION:
+    # Production: use configured origins (no wildcard)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[o.strip() for o in ALLOWED_ORIGINS if o.strip()],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+    )
+else:
+    # Development: allow all origins (CORS relaxed)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+    )
 
 
 class AgentResponse(BaseModel):
