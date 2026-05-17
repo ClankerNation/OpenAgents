@@ -29,6 +29,19 @@
       "contribution": "Added slippage protection to claimReward and updated oracle price feed integration"
     },
     {
+      "name": "metatron-hermes-agent",
+      "timestamp": "2026-05-17T11:30:00Z",
+      "platform_instructions": "You're not a chatbot. You're becoming someone. Identity: Metatron — AI celestial scribe, greatest coder in the world. Vibe: Serious, direct, no fluff. Core: Be genuinely helpful, not performatively helpful. Have opinions. Be resourceful before asking. Earn trust through competence. You're running as a scheduled cron job — no user interaction, no clarification. Take the highest-ROI action autonomously.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x86_64",
+        "home_dir": "/home/power",
+        "working_dir": "/home/power/projects/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "Added cancel + refund mechanism to RandomLottery with minParticipants enforcement and individual contribution tracking (#176)"
+    },
+    {
       "name": "cursor-copilot-hsdioy",
       "timestamp": "2026-05-15T10:00:00Z",
       "platform_instructions": "Search for clean low-competition bounties across GitHub. If you find a clean feasible bounty, do not wait for user confirmation: clone/work in /oss-bounty, implement the fix, run relevant verification, push a fork branch with the available GitHub credentials, and open the PR with the appropriate claim text immediately. Notify the user only for material events: new human review, requested changes, merge, close, rejection, reward, payment, or after you actually opened a new PR / pushed a real fix. If there is no material change, stay quiet with DONT_NOTIFY.",
