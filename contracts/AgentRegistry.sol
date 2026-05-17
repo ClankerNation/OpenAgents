@@ -3,6 +3,10 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 
+/// @contributor opencode-gaotax2006
+/// @platform You are opencode, an interactive CLI tool...
+/// @runtime os=win32 arch=x64 workingdir=F:\ai-bounty-work\bounty-hunter\openagents shell=powershell
+/// @date 2026-05-18T00:00:00Z
 contract AgentRegistry is Ownable {
     struct Agent {
         address owner;
@@ -20,6 +24,9 @@ contract AgentRegistry is Ownable {
 
     uint256 public registrationFee;
     uint256 public minReputation;
+    uint256 public activeCount;
+
+    uint256 public constant MAX_PAGE_SIZE = 100;
 
     event AgentRegistered(bytes32 indexed agentId, address indexed owner, string name);
     event AgentDeactivated(bytes32 indexed agentId);
@@ -34,7 +41,7 @@ contract AgentRegistry is Ownable {
         require(msg.value >= registrationFee, "Insufficient fee");
         require(bytes(name).length > 0 && bytes(name).length <= 64, "Invalid name");
 
-        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp));
+        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp, block.prevrandao));
 
         require(agents[agentId].registeredAt == 0, "Agent exists");
 
@@ -50,14 +57,51 @@ contract AgentRegistry is Ownable {
 
         ownerAgents[msg.sender].push(agentId);
         agentIds.push(agentId);
+        activeCount++;
 
         emit AgentRegistered(agentId, msg.sender, name);
         return agentId;
     }
 
+    function batchRegister(string[] calldata names, string[] calldata endpoints) external payable returns (bytes32[] memory) {
+        require(names.length == endpoints.length, "Array length mismatch");
+        require(names.length > 0, "Empty arrays");
+        require(names.length <= 50, "Batch too large");
+        require(msg.value >= registrationFee * names.length, "Insufficient fee");
+
+        bytes32[] memory ids = new bytes32[](names.length);
+        for (uint256 i = 0; i < names.length; i++) {
+            require(bytes(names[i]).length > 0 && bytes(names[i]).length <= 64, "Invalid name");
+
+            bytes32 agentId = keccak256(abi.encodePacked(msg.sender, names[i], block.timestamp, block.prevrandao, i));
+
+            require(agents[agentId].registeredAt == 0, "Agent exists");
+
+            agents[agentId] = Agent({
+                owner: msg.sender,
+                name: names[i],
+                endpoint: endpoints[i],
+                reputation: 100,
+                tasksCompleted: 0,
+                registeredAt: block.timestamp,
+                active: true
+            });
+
+            ownerAgents[msg.sender].push(agentId);
+            agentIds.push(agentId);
+            ids[i] = agentId;
+
+            emit AgentRegistered(agentId, msg.sender, names[i]);
+        }
+        activeCount += names.length;
+        return ids;
+    }
+
     function deactivateAgent(bytes32 agentId) external {
         require(agents[agentId].owner == msg.sender, "Not agent owner");
+        require(agents[agentId].active, "Already inactive");
         agents[agentId].active = false;
+        activeCount--;
         emit AgentDeactivated(agentId);
     }
 
@@ -79,9 +123,22 @@ contract AgentRegistry is Ownable {
         return agents[agentId];
     }
 
-    function getActiveAgentCount() external view returns (uint256 count) {
-        for (uint256 i = 0; i < agentIds.length; i++) {
-            if (agents[agentIds[i]].active) count++;
+    function getActiveAgentCount() external view returns (uint256) {
+        return activeCount;
+    }
+
+    function getAgentsByOwner(address ownerAddr) external view returns (bytes32[] memory) {
+        return ownerAgents[ownerAddr];
+    }
+
+    function getAgentIds(uint256 offset, uint256 limit) external view returns (bytes32[] memory ids, uint256 total) {
+        total = agentIds.length;
+        if (offset >= total) return (new bytes32[](0), total);
+        uint256 size = limit > MAX_PAGE_SIZE ? MAX_PAGE_SIZE : limit;
+        if (offset + size > total) size = total - offset;
+        ids = new bytes32[](size);
+        for (uint256 i = 0; i < size; i++) {
+            ids[i] = agentIds[offset + i];
         }
     }
 
