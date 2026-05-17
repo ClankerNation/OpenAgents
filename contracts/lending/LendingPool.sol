@@ -38,6 +38,13 @@ contract LendingPool {
     event Borrowed(address indexed user, uint256 amount);
     event Repaid(address indexed user, uint256 amount);
     event Liquidated(address indexed user, address indexed liquidator, uint256 debtRepaid);
+    event FlashLoan(address indexed receiver, address indexed token, uint256 amount, uint256 fee);
+
+    uint256 public constant FLASH_LOAN_FEE = 9e14; // 0.09%
+
+    interface IFlashLoanReceiver {
+        function executeOperation(address token, uint256 amount, uint256 fee, bytes calldata params) external;
+    }
 
     constructor(address _oracle, address _collateralToken, address _borrowToken) {
         oracle = IPriceFeed(_oracle);
@@ -91,6 +98,24 @@ contract LendingPool {
 
         require(collateralToken.transfer(msg.sender, collateral), "Transfer failed");
         emit Liquidated(user, msg.sender, debt);
+    }
+
+    function flashLoan(address receiver, uint256 amount, bytes calldata params) external {
+        require(amount > 0, "Zero amount");
+        require(receiver != address(0), "Invalid receiver");
+        require(totalDeposits >= amount, "Insufficient liquidity");
+
+        uint256 fee = (amount * FLASH_LOAN_FEE) / PRECISION;
+        uint256 totalOwed = amount + fee;
+
+        borrowToken.transfer(receiver, amount);
+
+        IFlashLoanReceiver(receiver).executeOperation(address(borrowToken), amount, fee, params);
+
+        require(borrowToken.transferFrom(receiver, address(this), totalOwed), "Flash loan not repaid");
+
+        totalBorrowed -= amount;
+        emit FlashLoan(receiver, address(borrowToken), amount, fee);
     }
 
     function _isHealthy(address user) internal view returns (bool) {
