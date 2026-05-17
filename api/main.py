@@ -3,11 +3,19 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+from .routes import agents, tasks, payments, admin
+
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+# Include modular route handlers
+app.include_router(agents.router)
+app.include_router(tasks.router)
+app.include_router(payments.router)
+app.include_router(admin.router)
 
 
 class AgentResponse(BaseModel):
