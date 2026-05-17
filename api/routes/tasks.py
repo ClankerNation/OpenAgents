@@ -12,6 +12,15 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 VALID_STATUSES = {"open", "assigned", "in_progress", "review", "completed", "cancelled"}
 
+ALLOWED_TRANSITIONS = {
+    "open": {"assigned", "cancelled"},
+    "assigned": {"in_progress", "cancelled"},
+    "in_progress": {"review", "cancelled"},
+    "review": {"completed", "in_progress"},
+    "completed": set(),
+    "cancelled": set(),
+}
+
 
 class TaskCreate(BaseModel):
     title: str
@@ -22,7 +31,7 @@ class TaskCreate(BaseModel):
 
 
 class TaskStatusUpdate(BaseModel):
-    status: str  # BUG: Not validated against VALID_STATUSES enum — any string accepted
+    status: str
 
 
 @router.post("/")
@@ -48,9 +57,7 @@ async def list_tasks(
     status: Optional[str] = None,
     creator: Optional[str] = None,
     skip: int = Query(0, ge=0),
-    # BUG: No upper bound on limit — clients can request millions of rows,
-    # causing DB strain and potential OOM
-    limit: int = Query(50, ge=1),
+    limit: int = Query(50, ge=1, le=100),
     db=Depends(get_db),
 ):
     query = db.query(Task)
@@ -80,8 +87,22 @@ async def update_task_status(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # BUG: Creator can mark their own task as completed — should require
-    # a third party or the assignee to confirm completion
+    if update.status not in VALID_STATUSES:
+        raise HTTPException(status_code=422, detail=f"Invalid status: {update.status}")
+
+    allowed = ALLOWED_TRANSITIONS.get(task.status, set())
+    if update.status not in allowed:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Cannot transition from {task.status} to {update.status}",
+        )
+
+    if update.status == "completed" and task.creator_id == user["id"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Creator cannot complete their own task",
+        )
+
     if task.creator_id != user["id"]:
         raise HTTPException(status_code=403, detail="Only the creator can update status")
 
