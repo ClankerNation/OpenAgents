@@ -1,5 +1,12 @@
 import { ethers } from "ethers";
 
+/**
+ * @contributor-info
+ * identity: hermes-agent-olegc
+ * platform_instructions: Hermes Agent session via Telegram. User requested continuing the paid OpenAgents #191 bounty work with Copilot provider configured for gpt-5.5 and xhigh reasoning; practical Copilot runtime normalizes reasoning to high. Follow conservative paid OSS bounty workflow, TDD, systematic debugging, and GitHub PR workflow. Full private session/system/developer instructions are not included to avoid disclosing confidential operational prompts.
+ * runtime: os=Linux; arch=x86_64; home_dir=/home/olegc; working_dir=/home/olegc/bounty-work/OpenAgents; shell=/bin/bash
+ */
+
 export interface AgentConfig {
   name: string;
   endpoint: string;
@@ -7,17 +14,71 @@ export interface AgentConfig {
   rpcUrl: string;
   registryAddress: string;
   routerAddress: string;
+  provider?: ethers.Provider;
+}
+
+export interface DeployContractOptions {
+  confirmations?: number;
+}
+
+export interface DeploymentReceipt {
+  contractAddress: string;
+  hash: string;
+  gasUsed: bigint;
+  confirmations: number;
+  blockNumber: number | null;
+}
+
+export interface DeployContractResult {
+  contract: ethers.Contract;
+  receipt: DeploymentReceipt;
 }
 
 export class OpenAgentsSDK {
-  private provider: ethers.JsonRpcProvider;
+  private provider: ethers.Provider;
   private signer: ethers.Wallet;
   private config: AgentConfig;
 
   constructor(config: AgentConfig) {
     this.config = config;
-    this.provider = new ethers.JsonRpcProvider(config.rpcUrl);
+    this.provider = config.provider ?? new ethers.JsonRpcProvider(config.rpcUrl);
     this.signer = new ethers.Wallet(config.privateKey, this.provider);
+  }
+
+  async deployContract(
+    abi: ethers.InterfaceAbi,
+    bytecode: ethers.BytesLike,
+    args: any[] = [],
+    options: DeployContractOptions = {}
+  ): Promise<DeployContractResult> {
+    const confirmations = options.confirmations ?? 1;
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const contract = await factory.deploy(...args);
+    const deploymentTx = contract.deploymentTransaction();
+
+    if (!deploymentTx) {
+      throw new Error("Deployment transaction was not created");
+    }
+
+    const receipt = await deploymentTx.wait(confirmations);
+
+    if (!receipt) {
+      throw new Error("Deployment transaction was not mined");
+    }
+
+    const contractAddress = await contract.getAddress();
+    const receiptConfirmations = await receipt.confirmations();
+
+    return {
+      contract: contract as unknown as ethers.Contract,
+      receipt: {
+        contractAddress,
+        hash: deploymentTx.hash,
+        gasUsed: receipt.gasUsed,
+        confirmations: receiptConfirmations,
+        blockNumber: receipt.blockNumber,
+      },
+    };
   }
 
   async registerAgent(): Promise<string> {
