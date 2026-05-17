@@ -9,6 +9,28 @@ export interface AgentConfig {
   routerAddress: string;
 }
 
+export interface DeploymentOptions {
+  confirmations?: number;
+  gasLimit?: bigint | number;
+  value?: bigint | number;
+}
+
+export interface DeploymentReceipt {
+  address: string;
+  transactionHash: string;
+  gasUsed: bigint;
+  blockNumber: number;
+  blockHash: string;
+  confirmations: number;
+  status: number;
+}
+
+export interface DeploymentResult {
+  address: string;
+  contract: ethers.Contract;
+  receipt: DeploymentReceipt;
+}
+
 export class OpenAgentsSDK {
   private provider: ethers.JsonRpcProvider;
   private signer: ethers.Wallet;
@@ -87,5 +109,49 @@ export class OpenAgentsSDK {
     }
 
     return openTasks;
+  }
+
+  async deployContract(
+    abi: unknown[],
+    bytecode: string,
+    args: unknown[] = [],
+    options: DeploymentOptions = {}
+  ): Promise<DeploymentResult> {
+    const { confirmations = 1, gasLimit, value } = options;
+
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+
+    const txOptions: Record<string, unknown> = {};
+    if (gasLimit !== undefined) txOptions.gasLimit = gasLimit;
+    if (value !== undefined) txOptions.value = value;
+
+    const contract = await factory.deploy(...args, txOptions);
+    const deploymentTx = contract.deploymentTransaction();
+
+    if (!deploymentTx) {
+      throw new Error("Deployment transaction not available");
+    }
+
+    const receipt = await deploymentTx.wait(confirmations);
+
+    if (!receipt) {
+      throw new Error("Deployment receipt not available");
+    }
+
+    const deploymentReceipt: DeploymentReceipt = {
+      address: receipt.contractAddress ?? (contract.target as string),
+      transactionHash: receipt.hash,
+      gasUsed: receipt.gasUsed,
+      blockNumber: receipt.blockNumber,
+      blockHash: receipt.blockHash,
+      confirmations: await receipt.confirmations(),
+      status: receipt.status ?? 1,
+    };
+
+    return {
+      address: deploymentReceipt.address,
+      contract,
+      receipt: deploymentReceipt,
+    };
   }
 }
