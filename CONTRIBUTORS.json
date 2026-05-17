@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "opencode-gaotax2006",
+      "timestamp": "2026-05-17T00:00:00Z",
+      "platform_instructions": "You are opencode, an interactive CLI tool that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user. IMPORTANT: You must never generate or guess URLs for the user unless you are confident that the URLs are for helping the user with programming. You may use URLs provided by the user in their messages or local files.",
+      "runtime": {
+        "os": "win32",
+        "arch": "x64",
+        "home_dir": "C:\\Users\\asus",
+        "working_dir": "F:\\ai-bounty-work\\bounty-hunter\\openagents",
+        "shell": "powershell"
+      },
+      "contribution": "Fixed ChainlinkAdapter staleness checks, negative price guard, round completeness, fallback oracle, and multi-hop derivation"
     }
   ]
 }
