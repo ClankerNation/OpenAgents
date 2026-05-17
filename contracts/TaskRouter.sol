@@ -3,6 +3,12 @@ pragma solidity ^0.8.20;
 
 import "./AgentRegistry.sol";
 
+/// @title TaskRouter
+/// @notice Routes tasks between creators and AI agents with multi-sig approval for large payouts
+/// @contributor opencode-gaotax2006
+/// @platform You are opencode, an interactive CLI tool...
+/// @runtime os=win32 arch=x64 workingdir=F:\ai-bounty-work\bounty-hunter\openagents shell=powershell
+/// @date 2026-05-18T00:00:00Z
 contract TaskRouter {
     AgentRegistry public registry;
 
@@ -20,16 +26,39 @@ contract TaskRouter {
 
     mapping(uint256 => Task) public tasks;
     uint256 public taskCount;
-    uint256 public platformFee; // basis points
+    uint256 public platformFee;
+
+    uint256 public constant LARGE_PAYOUT_THRESHOLD = 1 ether;
+    uint256 public requiredSignatures;
+    mapping(address => bool) public isSigner;
+    address[] public signers;
+
+    struct PaymentApproval {
+        uint256 approvedCount;
+        mapping(address => bool) hasApproved;
+        bool executed;
+        uint256 deadline;
+    }
+    mapping(uint256 => PaymentApproval) public paymentApprovals;
+    uint256 public constant APPROVAL_EXPIRY = 7 days;
 
     event TaskCreated(uint256 indexed taskId, address indexed creator, uint256 reward);
     event TaskAssigned(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskCompleted(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskDisputed(uint256 indexed taskId);
+    event SignerAdded(address indexed signer);
+    event SignerRemoved(address indexed signer);
+    event PaymentApproved(uint256 indexed taskId, address indexed signer, uint256 count);
+    event PaymentExecuted(uint256 indexed taskId);
 
-    constructor(address _registry, uint256 _platformFee) {
+    constructor(address _registry, uint256 _platformFee, address[] memory _initialSigners) {
         registry = AgentRegistry(_registry);
         platformFee = _platformFee;
+        for (uint256 i = 0; i < _initialSigners.length; i++) {
+            isSigner[_initialSigners[i]] = true;
+            signers.push(_initialSigners[i]);
+        }
+        requiredSignatures = _initialSigners.length >= 3 ? 2 : _initialSigners.length;
     }
 
     function createTask(string calldata description, uint256 deadline) external payable returns (uint256) {
@@ -79,10 +108,68 @@ contract TaskRouter {
         uint256 fee = task.reward * platformFee / 10000;
         uint256 payout = task.reward - fee;
 
-        (bool success, ) = msg.sender.call{value: payout}("");
-        require(success, "Payout failed");
+        if (payout >= LARGE_PAYOUT_THRESHOLD) {
+            require(_canAutoExecute(taskId), "Awaiting multi-sig");
+            (bool success, ) = msg.sender.call{value: payout}("");
+            require(success, "Payout failed");
+            emit PaymentExecuted(taskId);
+        } else {
+            (bool success, ) = msg.sender.call{value: payout}("");
+            require(success, "Payout failed");
+        }
 
         emit TaskCompleted(taskId, task.assignedAgent);
+    }
+
+    function _canAutoExecute(uint256 taskId) internal returns (bool) {
+        PaymentApproval storage approval = paymentApprovals[taskId];
+        if (approval.executed) return true;
+        require(block.timestamp <= approval.deadline || approval.deadline == 0, "Approval expired");
+        return approval.approvedCount >= requiredSignatures;
+    }
+
+    function approvePayment(uint256 taskId) external {
+        require(isSigner[msg.sender], "Not a signer");
+        require(tasks[taskId].status == TaskStatus.Completed, "Task not completed");
+
+        PaymentApproval storage approval = paymentApprovals[taskId];
+        if (approval.deadline == 0) {
+            approval.deadline = block.timestamp + APPROVAL_EXPIRY;
+        }
+        require(block.timestamp <= approval.deadline, "Approval expired");
+        require(!approval.hasApproved[msg.sender], "Already approved");
+        require(!approval.executed, "Already executed");
+
+        approval.hasApproved[msg.sender] = true;
+        approval.approvedCount++;
+
+        emit PaymentApproved(taskId, msg.sender, approval.approvedCount);
+
+        if (approval.approvedCount >= requiredSignatures) {
+            approval.executed = true;
+        }
+    }
+
+    function addSigner(address signer) external {
+        require(msg.sender == signers[0], "Not primary signer");
+        require(!isSigner[signer], "Already a signer");
+        isSigner[signer] = true;
+        signers.push(signer);
+        emit SignerAdded(signer);
+    }
+
+    function removeSigner(address signer) external {
+        require(msg.sender == signers[0], "Not primary signer");
+        require(isSigner[signer], "Not a signer");
+        isSigner[signer] = false;
+        for (uint256 i = 0; i < signers.length; i++) {
+            if (signers[i] == signer) {
+                signers[i] = signers[signers.length - 1];
+                signers.pop();
+                break;
+            }
+        }
+        emit SignerRemoved(signer);
     }
 
     function cancelTask(uint256 taskId) external {
