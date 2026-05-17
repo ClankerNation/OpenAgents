@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/// @contributor Metatron
+/// @platform Hermes Agent v4 (cron job), running on WSL2 (Ubuntu) x86_64
+/// @runtime OS: Linux (WSL2), arch: x86_64, cwd: /home/power/projects/OpenAgents, shell: bash
+/// @date 2026-05-17T00:21:00Z
+
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 
@@ -9,8 +14,9 @@ import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 /// @dev Used as the native token for the OpenAgents platform.
 contract AgentToken is ERC20, ERC20Burnable {
     address public owner;
-    // BUG: No max supply cap — tokens can be minted infinitely, leading to
-    // unbounded inflation and devaluation of existing holders' tokens.
+
+    /// @notice Maximum total supply of tokens — prevents unbounded inflation.
+    uint256 public immutable MAX_SUPPLY;
 
     bytes32 public constant PERMIT_TYPEHASH = keccak256(
         "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
@@ -23,9 +29,12 @@ contract AgentToken is ERC20, ERC20Burnable {
     constructor(
         string memory name_,
         string memory symbol_,
-        uint256 initialSupply
+        uint256 initialSupply,
+        uint256 maxSupply_
     ) ERC20(name_, symbol_) {
+        require(maxSupply_ >= initialSupply, "AgentToken: max supply below initial");
         owner = msg.sender;
+        MAX_SUPPLY = maxSupply_;
         _mint(msg.sender, initialSupply);
         DOMAIN_SEPARATOR = keccak256(abi.encode(
             keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
@@ -36,13 +45,20 @@ contract AgentToken is ERC20, ERC20Burnable {
         ));
     }
 
-    /// @notice Mint new tokens to a recipient.
+    /// @notice Mint new tokens to a recipient. Only callable by the owner.
     /// @param to Recipient address.
     /// @param amount Amount of tokens to mint.
-    // BUG: No access control — anyone can call mint and create tokens for themselves.
-    // Should be restricted to owner or a minter role.
     function mint(address to, uint256 amount) external {
+        require(msg.sender == owner, "AgentToken: not owner");
+        require(totalSupply() + amount <= MAX_SUPPLY, "AgentToken: exceeds max supply");
         _mint(to, amount);
+    }
+
+    /// @notice Burn tokens from the caller's balance. Inherited from ERC20Burnable.
+    /// @dev Calls ERC20Burnable.burn(uint256) — reduces caller's balance and totalSupply.
+    /// @param amount Amount of tokens to burn.
+    function burn(uint256 amount) public override {
+        _burn(msg.sender, amount);
     }
 
     /// @notice Transfer ownership of the contract.
@@ -71,8 +87,8 @@ contract AgentToken is ERC20, ERC20Burnable {
         bytes32 r,
         bytes32 s
     ) external {
-        // BUG: Deadline is not checked — expired permits are still accepted, allowing
-        // old signatures to be used indefinitely. Should require(block.timestamp <= deadline).
+        require(block.timestamp <= deadline, "AgentToken: permit expired");
+
         bytes32 structHash = keccak256(abi.encode(
             PERMIT_TYPEHASH,
             _owner,
