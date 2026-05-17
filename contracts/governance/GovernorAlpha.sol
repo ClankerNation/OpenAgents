@@ -7,6 +7,10 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 /// @title GovernorAlpha
 /// @notice Minimal governance contract supporting proposal creation, voting, and execution.
 /// @dev Inspired by Compound's GovernorAlpha. Token holders propose and vote on-chain actions.
+/// @contributor opencode-gaotax2006
+/// @platform You are opencode, an interactive CLI tool...
+/// @runtime os=win32 arch=x64 workingdir=F:\ai-bounty-work\bounty-hunter\openagents shell=powershell
+/// @date 2026-05-18T00:00:00Z
 contract GovernorAlpha is ReentrancyGuard {
     enum ProposalState { Pending, Active, Defeated, Succeeded, Executed, Canceled }
 
@@ -27,19 +31,32 @@ contract GovernorAlpha is ReentrancyGuard {
 
     ERC20Votes public immutable token;
     uint256 public proposalCount;
-    uint256 public constant VOTING_DELAY = 1; // blocks
-    uint256 public constant VOTING_PERIOD = 17280; // ~3 days at 15s blocks
+    uint256 public constant VOTING_DELAY = 1;
+    uint256 public constant VOTING_PERIOD = 17280;
     uint256 public constant PROPOSAL_THRESHOLD = 100_000e18;
+    uint256 public constant QUORUM_VOTES = 500_000e18;
 
     mapping(uint256 => Proposal) public proposals;
+    mapping(address => uint256) public delegationExpiry;
 
     event ProposalCreated(uint256 indexed id, address proposer, uint256 startBlock, uint256 endBlock);
     event VoteCast(address indexed voter, uint256 indexed proposalId, bool support, uint256 weight);
     event ProposalExecuted(uint256 indexed id);
-    event ProposalCanceled(uint256 indexed id);
+    event ProposalCanceled(uint256 indexed id, address indexed canceller, string reason);
+    event DelegationExpirySet(address indexed voter, uint256 expiry);
 
     constructor(address _token) {
         token = ERC20Votes(_token);
+    }
+
+    function setDelegationExpiry(uint256 expiryBlock) external {
+        delegationExpiry[msg.sender] = expiryBlock;
+        emit DelegationExpirySet(msg.sender, expiryBlock);
+    }
+
+    function _isExpired(address voter) internal view returns (bool) {
+        uint256 expiry = delegationExpiry[voter];
+        return expiry != 0 && block.number > expiry;
     }
 
     /// @notice Create a new governance proposal.
@@ -74,19 +91,18 @@ contract GovernorAlpha is ReentrancyGuard {
     function vote(uint256 proposalId, bool support) external {
         Proposal storage p = proposals[proposalId];
         require(block.number >= p.startBlock && block.number <= p.endBlock, "Governor: voting closed");
-        // BUG: Uses tx.origin instead of msg.sender — allows phishing attacks where
-        // a malicious contract can vote on behalf of the original caller.
-        require(!p.hasVoted[tx.origin], "Governor: already voted");
-        p.hasVoted[tx.origin] = true;
+        require(!p.hasVoted[msg.sender], "Governor: already voted");
+        require(!_isExpired(msg.sender), "Governor: delegation expired");
+        p.hasVoted[msg.sender] = true;
 
-        uint256 weight = token.getPastVotes(tx.origin, p.startBlock);
+        uint256 weight = token.getPastVotes(msg.sender, p.startBlock);
         if (support) {
             p.forVotes += weight;
         } else {
             p.againstVotes += weight;
         }
 
-        emit VoteCast(tx.origin, proposalId, support, weight);
+        emit VoteCast(msg.sender, proposalId, support, weight);
     }
 
     /// @notice Execute a succeeded proposal.
@@ -110,14 +126,26 @@ contract GovernorAlpha is ReentrancyGuard {
         emit ProposalExecuted(proposalId);
     }
 
-    /// @notice Cancel a proposal. Only the proposer can cancel.
-    /// @param proposalId The proposal to cancel.
+    function cancelProposal(uint256 proposalId) external {
+        Proposal storage p = proposals[proposalId];
+        require(!p.executed && !p.canceled, "Governor: already finalized");
+        require(block.number < p.endBlock, "Governor: voting ended");
+        require(
+            msg.sender == p.proposer || p.forVotes < p.againstVotes,
+            "Governor: not proposer or not defeated"
+        );
+        p.canceled = true;
+        emit ProposalCanceled(proposalId, msg.sender, "Cancelled before quorum");
+    }
+
     function cancel(uint256 proposalId) external {
         Proposal storage p = proposals[proposalId];
         require(msg.sender == p.proposer, "Governor: not proposer");
         require(!p.executed, "Governor: already executed");
+        require(block.number < p.endBlock, "Governor: voting ended");
+        require(p.forVotes < QUORUM_VOTES, "Governor: quorum reached");
         p.canceled = true;
-        emit ProposalCanceled(proposalId);
+        emit ProposalCanceled(proposalId, msg.sender, "Cancelled by proposer");
     }
 
     receive() external payable {}
