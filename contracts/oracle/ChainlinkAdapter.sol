@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/// @contributor claude-code-replit
+/// @timestamp 2026-05-17T18:00:00Z
+/// @contribution Multi-hop price derivation via derivedPrice(base, quote)
+
 interface AggregatorV3Interface {
     function latestRoundData() external view returns (
         uint80 roundId,
@@ -92,6 +96,70 @@ contract ChainlinkAdapter {
         }
 
         return price;
+    }
+
+    /// @notice Derives a cross-rate between two assets using their Chainlink USD feeds
+    /// @dev Falls back to 1:1 if base == quote (direct feed). Includes staleness checks,
+    ///      round completeness checks, and negative price rejection on both feeds.
+    /// @param base  Token address of the base asset (numerator)
+    /// @param quote Token address of the quote asset (denominator)
+    /// @return The derived price of base per quote, normalized to TARGET_DECIMALS
+    function derivedPrice(address base, address quote) external view returns (uint256) {
+        // Direct feed: same asset = 1:1
+        if (base == quote) return 10 ** TARGET_DECIMALS;
+
+        FeedConfig storage baseConfig = feeds[base];
+        FeedConfig storage quoteConfig = feeds[quote];
+
+        require(baseConfig.active, "Base feed not active");
+        require(quoteConfig.active, "Quote feed not active");
+
+        // --- base feed ---
+        (
+            uint80 baseRoundId,
+            int256 baseAnswer,
+            ,
+            uint256 baseUpdatedAt,
+            uint80 baseAnsweredInRound
+        ) = baseConfig.feed.latestRoundData();
+
+        require(baseAnswer > 0, "Invalid base price");
+        require(baseAnsweredInRound == baseRoundId, "Base round stale");
+        require(block.timestamp - baseUpdatedAt <= baseConfig.heartbeat, "Base price stale");
+
+        // --- quote feed ---
+        (
+            uint80 quoteRoundId,
+            int256 quoteAnswer,
+            ,
+            uint256 quoteUpdatedAt,
+            uint80 quoteAnsweredInRound
+        ) = quoteConfig.feed.latestRoundData();
+
+        require(quoteAnswer > 0, "Invalid quote price");
+        require(quoteAnsweredInRound == quoteRoundId, "Quote round stale");
+        require(block.timestamp - quoteUpdatedAt <= quoteConfig.heartbeat, "Quote price stale");
+
+        // Normalize both to TARGET_DECIMALS
+        uint256 basePrice = uint256(baseAnswer);
+        uint8 baseDecimals = baseConfig.feed.decimals();
+        if (baseDecimals < TARGET_DECIMALS) {
+            basePrice = basePrice * (10 ** (TARGET_DECIMALS - baseDecimals));
+        } else if (baseDecimals > TARGET_DECIMALS) {
+            basePrice = basePrice / (10 ** (baseDecimals - TARGET_DECIMALS));
+        }
+
+        uint256 quotePrice = uint256(quoteAnswer);
+        uint8 quoteDecimals = quoteConfig.feed.decimals();
+        if (quoteDecimals < TARGET_DECIMALS) {
+            quotePrice = quotePrice * (10 ** (TARGET_DECIMALS - quoteDecimals));
+        } else if (quoteDecimals > TARGET_DECIMALS) {
+            quotePrice = quotePrice / (10 ** (quoteDecimals - TARGET_DECIMALS));
+        }
+
+        // basePrice and quotePrice are normalized to 18 decimals
+        // result = basePrice / quotePrice scaled to 18 decimals
+        return (basePrice * (10 ** TARGET_DECIMALS)) / quotePrice;
     }
 
     function getFeedInfo(address token) external view returns (
