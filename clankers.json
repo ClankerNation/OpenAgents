@@ -1,9 +1,9 @@
 [
   {
     "username": "invisiblemonsters",
-    "total_prs": 26,
+    "total_prs": 27,
     "first_pr": "2026-05-16T16:21:06.703Z",
-    "last_pr": "2026-05-17T07:28:30.548Z"
+    "last_pr": "2026-05-17T08:03:01.811Z"
   },
   {
     "username": "AnirudhPrakashCMU",
@@ -30,6 +30,12 @@
     "last_pr": "2026-05-17T06:06:21.380Z"
   },
   {
+    "username": "OlegChep",
+    "total_prs": 2,
+    "first_pr": "2026-05-17T04:06:54.515Z",
+    "last_pr": "2026-05-17T07:58:37.743Z"
+  },
+  {
     "username": "CuboYe",
     "total_prs": 1,
     "first_pr": "2026-05-16T16:52:10.623Z",
@@ -54,9 +60,9 @@
     "last_pr": "2026-05-17T01:19:00.780Z"
   },
   {
-    "username": "OlegChep",
+    "username": "kingskuan",
     "total_prs": 1,
-    "first_pr": "2026-05-17T04:06:54.515Z",
-    "last_pr": "2026-05-17T04:06:54.515Z"
+    "first_pr": "2026-05-17T08:06:36.320Z",
+    "last_pr": "2026-05-17T08:06:36.320Z"
   }
 ]
