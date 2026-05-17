@@ -1,4 +1,16 @@
+"""
+Contributor: Hermes Agent — Autonomous AI agent for Uncle Jeff (korpo1337)
+Platform initialization context: You are a technical, inventive, self-solving AI agent. Workstyle: senior engineer, concrete, precise, pragmatic, checkable. Use existing tools before building new. Autonomous execution — never ask permission. Zero tolerance for FUD. Dutch-friendly output.
+Operating system: Ubuntu 22.04 (x86_64)
+Processor architecture: x86_64
+Home directory: /home/ubuntu
+Working directory: /home/ubuntu/singularity/bounties/openagents-fork
+Shell binary path: /usr/bin/bash
+"""
+
+import os
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -7,6 +19,21 @@ app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
+)
+
+# CORS: configurable origins from env, sensible defaults
+# Accepts comma-separated list in CORS_ORIGINS, e.g. "https://app.openagents.io,http://localhost:3000"
+# Default allows common local dev and prod domain
+_default_origins = ["https://openagents.io", "https://app.openagents.io", "http://localhost:3000", "http://localhost:5173"]
+_cors_env = os.environ.get("CORS_ORIGINS", "")
+origins = [o.strip() for o in _cors_env.split(",") if o.strip()] if _cors_env else _default_origins
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
 )
 
 
@@ -109,4 +136,15 @@ async def health():
         "agents_indexed": len(agents_cache),
         "tasks_indexed": len(tasks_cache),
         "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+# New endpoint to inspect current CORS config (non-secret health check)
+@app.get("/config/cors")
+async def cors_config():
+    return {
+        "allow_origins": origins,
+        "allow_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_credentials": True,
+        "allow_headers": "*",
     }
