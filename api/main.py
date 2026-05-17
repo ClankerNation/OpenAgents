@@ -1,13 +1,55 @@
-from fastapi import FastAPI, HTTPException, Query
+import logging
+import time
+import uuid
+from fastapi import FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+logger = logging.getLogger("openagents.api")
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    request_id = str(uuid.uuid4())
+    request.state.request_id = request_id
+    started_at = time.perf_counter()
+
+    log_context = {
+        "request_id": request_id,
+        "method": request.method,
+        "path": request.url.path,
+    }
+    logger.info("request_started", extra=log_context)
+
+    try:
+        response = await call_next(request)
+    except Exception:
+        logger.exception(
+            "request_failed",
+            extra={
+                **log_context,
+                "duration_ms": round((time.perf_counter() - started_at) * 1000, 2),
+            },
+        )
+        raise
+
+    response.headers["X-Request-ID"] = request_id
+    logger.info(
+        "request_completed",
+        extra={
+            **log_context,
+            "status_code": response.status_code,
+            "duration_ms": round((time.perf_counter() - started_at) * 1000, 2),
+        },
+    )
+    return response
 
 
 class AgentResponse(BaseModel):
