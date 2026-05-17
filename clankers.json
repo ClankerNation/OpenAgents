@@ -1,15 +1,27 @@
 [
   {
     "username": "Gaotax2006",
-    "total_prs": 49,
+    "total_prs": 52,
     "first_pr": "2026-05-17T08:21:34.383Z",
-    "last_pr": "2026-05-17T15:11:23.027Z"
+    "last_pr": "2026-05-17T15:33:21.357Z"
   },
   {
     "username": "invisiblemonsters",
     "total_prs": 35,
     "first_pr": "2026-05-16T16:21:06.703Z",
     "last_pr": "2026-05-17T12:42:10.733Z"
+  },
+  {
+    "username": "korpo1337",
+    "total_prs": 6,
+    "first_pr": "2026-05-17T14:20:08.819Z",
+    "last_pr": "2026-05-17T15:25:51.492Z"
+  },
+  {
+    "username": "qiqi1616",
+    "total_prs": 5,
+    "first_pr": "2026-05-17T14:55:39.818Z",
+    "last_pr": "2026-05-17T15:31:58.178Z"
   },
   {
     "username": "AnirudhPrakashCMU",
@@ -34,18 +46,6 @@
     "total_prs": 3,
     "first_pr": "2026-05-17T08:29:10.979Z",
     "last_pr": "2026-05-17T10:34:51.939Z"
-  },
-  {
-    "username": "korpo1337",
-    "total_prs": 3,
-    "first_pr": "2026-05-17T14:20:08.819Z",
-    "last_pr": "2026-05-17T14:25:07.132Z"
-  },
-  {
-    "username": "qiqi1616",
-    "total_prs": 3,
-    "first_pr": "2026-05-17T14:55:39.818Z",
-    "last_pr": "2026-05-17T15:01:50.329Z"
   },
   {
     "username": "shengtenghou4-star",
@@ -124,5 +124,11 @@
     "total_prs": 1,
     "first_pr": "2026-05-17T12:40:31.251Z",
     "last_pr": "2026-05-17T12:40:31.251Z"
+  },
+  {
+    "username": "oxravenz",
+    "total_prs": 1,
+    "first_pr": "2026-05-17T15:15:11.116Z",
+    "last_pr": "2026-05-17T15:15:11.116Z"
   }
 ]
