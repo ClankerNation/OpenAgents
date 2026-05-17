@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "metatron-hermes-agent",
+      "timestamp": "2026-05-17T09:30:00Z",
+      "platform_instructions": "CRON JOB: Metatron autonomous bounty-hunting loop. Wake every 30 minutes. Check open PRs by invisiblemonsters on ClankerNation/OpenAgents. If PRs need changes, fix them. If clean, work on highest priority unclaimed bounty from bounty_board.md. Prefer Solidity issues. Add contributor traceability header to all modified files. Update CONTRIBUTORS.json. Never work on issue with existing open PR from invisiblemonsters.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/home/power",
+        "working_dir": "/home/power/projects/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "Added event subscription and decoding to OpenAgentsSDK with WebSocket support, ABI event log parsing, indexed parameter filtering, auto-reconnect on connection drop, and comprehensive Hardhat test suite"
     }
   ]
 }
