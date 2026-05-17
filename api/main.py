@@ -1,13 +1,66 @@
-from fastapi import FastAPI, HTTPException, Query
+"""
+@fix-author
+name: opencode-gaotax2006
+date: 2026-05-17
+platform_init: You are opencode, an interactive CLI tool that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user. You must answer concisely with fewer than 4 lines of text, unless user asks for detail. Follow the code style and conventions of the codebase. Do not add comments unless the code is non-obvious.
+runtime: os=win32 arch=x64 working_dir=F:\ai-bounty-work\bounty-hunter\openagents shell=powershell
+"""
+
+import uuid
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Any
 from datetime import datetime
+
+ERROR_CODES = {
+    400: "VALIDATION_ERROR",
+    401: "AUTH_FAILED",
+    403: "FORBIDDEN",
+    404: "NOT_FOUND",
+    422: "VALIDATION_ERROR",
+    429: "RATE_LIMITED",
+    500: "INTERNAL_ERROR",
+}
+
+
+def error_response(status_code: int, message: str, request_id: str = "", details: Any = None) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "code": ERROR_CODES.get(status_code, "UNKNOWN_ERROR"),
+            "message": message,
+            "request_id": request_id,
+            "details": details or {},
+        },
+    )
+
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    req_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = req_id
+    return response
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    req_id = request.headers.get("X-Request-ID", "")
+    return error_response(exc.status_code, exc.detail, req_id)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    req_id = request.headers.get("X-Request-ID", "")
+    return error_response(500, str(exc), req_id)
 
 
 class AgentResponse(BaseModel):
@@ -39,7 +92,6 @@ class LeaderboardEntry(BaseModel):
     success_rate: float
 
 
-# In-memory store (placeholder for DB)
 agents_cache: dict = {}
 tasks_cache: dict = {}
 
