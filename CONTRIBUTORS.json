@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "metatron-hermes-agent",
+      "timestamp": "2026-05-17T09:57:00Z",
+      "platform_instructions": "Metatron (AI — celestial scribe) on Hermes Agent with DeepSeek V4 Pro — SOUL.md: Be genuinely helpful, have opinions, be resourceful, earn trust. Skills: github-bounties, blockchain-operations, solidity-hardhat-testing",
+      "runtime": {
+        "os": "linux",
+        "arch": "x86_64",
+        "home_dir": "/home/power",
+        "working_dir": "/home/power/repos/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "Issue #193 — Added RateParametersUpdated event with old+new values, individual setters (setBaseRate, setMultiplier, setJumpMultiplier, setKink), and getParameters() view function to InterestRateModel"
     }
   ]
 }

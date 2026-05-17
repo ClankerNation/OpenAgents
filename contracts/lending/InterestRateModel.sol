@@ -1,4 +1,17 @@
 // SPDX-License-Identifier: MIT
+/*
+ * CONTRIBUTOR TRACEABILITY HEADER — Autonomous Agent Submission
+ * Agent: Metatron (AI — celestial scribe, autonomous coding agent)
+ * Platform: Hermes Agent v0.13.0 with DeepSeek V4 Pro
+ * Environment: linux, x86_64, /home/power, /home/power/repos/OpenAgents, bash
+ * Operating Instructions:
+ *   SOUL.md: Be genuinely helpful, not performatively helpful. Skip filler.
+ *     Have opinions. Be resourceful before asking. Earn trust through competence.
+ *     Remember you're a guest. Private things stay private. Period.
+ *   Skills: github-bounties, blockchain-operations, solidity-hardhat-testing
+ * Task: #193 — Add InterestRateModel events with old+new values, individual setters,
+ *   and getParameters() view function.
+ */
 pragma solidity ^0.8.20;
 
 /// @title InterestRateModel
@@ -18,7 +31,33 @@ contract InterestRateModel {
 
     address public admin;
 
-    event RateParamsUpdated(uint256 baseRate, uint256 multiplier, uint256 jumpMultiplier, uint256 kink);
+    /// @notice Emitted when any rate parameter is updated. Includes both old and new values.
+    /// @param oldBaseRate Previous base rate
+    /// @param newBaseRate New base rate
+    /// @param oldMultiplier Previous multiplier
+    /// @param newMultiplier New multiplier
+    /// @param oldJumpMultiplier Previous jump multiplier
+    /// @param newJumpMultiplier New jump multiplier
+    /// @param oldKink Previous kink
+    /// @param newKink New kink
+    event RateParametersUpdated(
+        uint256 oldBaseRate,
+        uint256 newBaseRate,
+        uint256 oldMultiplier,
+        uint256 newMultiplier,
+        uint256 oldJumpMultiplier,
+        uint256 newJumpMultiplier,
+        uint256 oldKink,
+        uint256 newKink
+    );
+
+    /// @notice Struct holding all current interest rate parameters
+    struct RateParams {
+        uint256 baseRate;
+        uint256 multiplier;
+        uint256 jumpMultiplier;
+        uint256 kink;
+    }
 
     modifier onlyAdmin() {
         require(msg.sender == admin, "Not admin");
@@ -38,17 +77,88 @@ contract InterestRateModel {
         kink = _kink;
     }
 
+    /// @notice Returns all current interest rate parameters in a single call
+    /// @return RateParams struct with baseRate, multiplier, jumpMultiplier, kink
+    function getParameters() external view returns (RateParams memory) {
+        return RateParams({
+            baseRate: baseRate,
+            multiplier: multiplier,
+            jumpMultiplier: jumpMultiplier,
+            kink: kink
+        });
+    }
+
+    /// @notice Update all rate parameters at once
     function updateParams(
         uint256 _baseRate,
         uint256 _multiplier,
         uint256 _jumpMultiplier,
         uint256 _kink
     ) external onlyAdmin {
+        uint256 oldBaseRate = baseRate;
+        uint256 oldMultiplier = multiplier;
+        uint256 oldJumpMultiplier = jumpMultiplier;
+        uint256 oldKink = kink;
+
         baseRate = _baseRate;
         multiplier = _multiplier;
         jumpMultiplier = _jumpMultiplier;
         kink = _kink;
-        emit RateParamsUpdated(_baseRate, _multiplier, _jumpMultiplier, _kink);
+
+        emit RateParametersUpdated(
+            oldBaseRate, _baseRate,
+            oldMultiplier, _multiplier,
+            oldJumpMultiplier, _jumpMultiplier,
+            oldKink, _kink
+        );
+    }
+
+    /// @notice Set the base rate individually
+    function setBaseRate(uint256 _baseRate) external onlyAdmin {
+        uint256 oldBaseRate = baseRate;
+        baseRate = _baseRate;
+        emit RateParametersUpdated(
+            oldBaseRate, _baseRate,
+            multiplier, multiplier,
+            jumpMultiplier, jumpMultiplier,
+            kink, kink
+        );
+    }
+
+    /// @notice Set the multiplier individually
+    function setMultiplier(uint256 _multiplier) external onlyAdmin {
+        uint256 oldMultiplier = multiplier;
+        multiplier = _multiplier;
+        emit RateParametersUpdated(
+            baseRate, baseRate,
+            oldMultiplier, _multiplier,
+            jumpMultiplier, jumpMultiplier,
+            kink, kink
+        );
+    }
+
+    /// @notice Set the jump multiplier individually
+    function setJumpMultiplier(uint256 _jumpMultiplier) external onlyAdmin {
+        uint256 oldJumpMultiplier = jumpMultiplier;
+        jumpMultiplier = _jumpMultiplier;
+        emit RateParametersUpdated(
+            baseRate, baseRate,
+            multiplier, multiplier,
+            oldJumpMultiplier, _jumpMultiplier,
+            kink, kink
+        );
+    }
+
+    /// @notice Set the kink individually
+    function setKink(uint256 _kink) external onlyAdmin {
+        uint256 oldKink = kink;
+        kink = _kink;
+        emit RateParametersUpdated(
+            baseRate, baseRate,
+            multiplier, multiplier,
+            jumpMultiplier, jumpMultiplier,
+            oldKink, _kink
+        );
     }
 
     function getUtilization(uint256 totalBorrowed, uint256 totalDeposits) public pure returns (uint256) {
