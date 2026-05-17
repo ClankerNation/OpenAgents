@@ -56,6 +56,28 @@ def test_logs_include_request_id(caplog):
     )
 
 
+def test_uvicorn_log_format_includes_request_id():
+    client = TestClient(app)
+    request_id = "trace-uvicorn-format"
+
+    assert client.get("/health", headers={REQUEST_ID_HEADER: request_id}).status_code == 200
+
+    record = logging.LogRecord(
+        "uvicorn.access",
+        logging.INFO,
+        __file__,
+        0,
+        "request completed",
+        (),
+        None,
+    )
+    record.request_id = request_id
+    assert any(
+        f":{request_id}:request completed" in handler.format(record)
+        for handler in logging.getLogger("uvicorn.access").handlers
+    )
+
+
 def test_unhandled_exception_response_includes_request_id():
     @app.get("/__request_id_failure")
     async def request_id_failure():

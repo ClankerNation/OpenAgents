@@ -13,6 +13,7 @@ from typing import Optional
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 
 REQUEST_ID_HEADER = "X-Request-ID"
@@ -34,18 +35,25 @@ class RequestIdFormatter(logging.Formatter):
 
 request_id_filter = RequestIdFilter()
 request_id_formatter = RequestIdFormatter("%(levelname)s:%(name)s:%(request_id)s:%(message)s")
-for logger_name in ("openagents.api", "uvicorn.access", "uvicorn.error"):
-    configured_logger = logging.getLogger(logger_name)
-    configured_logger.addFilter(request_id_filter)
-    for handler in configured_logger.handlers:
-        handler.setFormatter(request_id_formatter)
+
+
+def configure_request_id_logging() -> None:
+    for logger_name in ("openagents.api", "uvicorn.access", "uvicorn.error"):
+        configured_logger = logging.getLogger(logger_name)
+        if request_id_filter not in configured_logger.filters:
+            configured_logger.addFilter(request_id_filter)
+
+        if not configured_logger.handlers:
+            handler = logging.StreamHandler()
+            configured_logger.addHandler(handler)
+
+        for handler in configured_logger.handlers:
+            handler.addFilter(request_id_filter)
+            handler.setFormatter(request_id_formatter)
 
 logger = logging.getLogger("openagents.api")
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    handler.setFormatter(request_id_formatter)
-    logger.addHandler(handler)
 logger.setLevel(logging.INFO)
+configure_request_id_logging()
 
 app = FastAPI(
     title="OpenAgents API",
@@ -54,8 +62,30 @@ app = FastAPI(
 )
 
 
+def _response_with_request_id(response: Response, request_id: str) -> Response:
+    response.headers[REQUEST_ID_HEADER] = request_id
+    return response
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    request_id = getattr(request.state, "request_id", None) or request.headers.get(REQUEST_ID_HEADER) or str(uuid4())
+    return _response_with_request_id(
+        JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers),
+        request_id,
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> PlainTextResponse:
+    request_id = getattr(request.state, "request_id", None) or request.headers.get(REQUEST_ID_HEADER) or str(uuid4())
+    logger.exception("request failed", extra={"path": request.url.path, "method": request.method})
+    return _response_with_request_id(PlainTextResponse("Internal Server Error", status_code=500), request_id)
+
+
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
+    configure_request_id_logging()
     request_id = request.headers.get(REQUEST_ID_HEADER) or str(uuid4())
     token = _request_id_context.set(request_id)
     request.state.request_id = request_id
@@ -72,12 +102,6 @@ async def request_id_middleware(request: Request, call_next):
                 "status_code": response.status_code,
             },
         )
-        return response
-    except Exception:
-        logger.exception("request failed", extra={"path": request.url.path, "method": request.method})
-        response = Response("Internal Server Error", status_code=500)
-        response.headers[REQUEST_ID_HEADER] = request_id
-        response.headers["content-type"] = "text/plain; charset=utf-8"
         return response
     finally:
         _request_id_context.reset(token)
