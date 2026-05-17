@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime
 from uuid import UUID
 
 from fastapi.testclient import TestClient
@@ -51,3 +50,21 @@ def test_logs_include_request_id(caplog):
     ]
     assert completed_logs
     assert all(record.request_id == request_id for record in completed_logs)
+    assert any(
+        f":{request_id}:request completed" in handler.format(completed_logs[-1])
+        for handler in logger.handlers
+    )
+
+
+def test_unhandled_exception_response_includes_request_id():
+    @app.get("/__request_id_failure")
+    async def request_id_failure():
+        raise RuntimeError("boom")
+
+    client = TestClient(app, raise_server_exceptions=False)
+    request_id = "trace-error-correlation"
+
+    response = client.get("/__request_id_failure", headers={REQUEST_ID_HEADER: request_id})
+
+    assert response.status_code == 500
+    assert response.headers[REQUEST_ID_HEADER] == request_id

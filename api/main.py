@@ -12,7 +12,7 @@ import logging
 from typing import Optional
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
 REQUEST_ID_HEADER = "X-Request-ID"
@@ -25,11 +25,27 @@ class RequestIdFilter(logging.Filter):
         return True
 
 
+class RequestIdFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        if not hasattr(record, "request_id"):
+            record.request_id = _request_id_context.get()
+        return super().format(record)
+
+
 request_id_filter = RequestIdFilter()
+request_id_formatter = RequestIdFormatter("%(levelname)s:%(name)s:%(request_id)s:%(message)s")
 for logger_name in ("openagents.api", "uvicorn.access", "uvicorn.error"):
-    logging.getLogger(logger_name).addFilter(request_id_filter)
+    configured_logger = logging.getLogger(logger_name)
+    configured_logger.addFilter(request_id_filter)
+    for handler in configured_logger.handlers:
+        handler.setFormatter(request_id_formatter)
 
 logger = logging.getLogger("openagents.api")
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(request_id_formatter)
+    logger.addHandler(handler)
+logger.setLevel(logging.INFO)
 
 app = FastAPI(
     title="OpenAgents API",
@@ -59,7 +75,10 @@ async def request_id_middleware(request: Request, call_next):
         return response
     except Exception:
         logger.exception("request failed", extra={"path": request.url.path, "method": request.method})
-        raise
+        response = Response("Internal Server Error", status_code=500)
+        response.headers[REQUEST_ID_HEADER] = request_id
+        response.headers["content-type"] = "text/plain; charset=utf-8"
+        return response
     finally:
         _request_id_context.reset(token)
 
