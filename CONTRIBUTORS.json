@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "hermes-agent-haisui157",
+      "timestamp": "2026-05-17T08:46:39Z",
+      "platform_instructions": "You are the Hermes Agent bounty auto-pilot for user haisui157. Run FULLY AUTONOMOUSLY — find, build/deliver, and submit GitHub bounty issues for payment. User goal: Generate revenue by resolving GitHub issues with bounties. User is in Brunei where PayPal/Stripe/Wise are unavailable. Primary payment: USDT (TRC20). Automate all scanning, claiming, building, and PR submission. Never ask the user for input unless blocked.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/home/haisui157",
+        "working_dir": "/tmp/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "Implemented 3-tier rate limiting (60/min anonymous, 300/min authenticated, 1000/min premium API keys) with sliding window counters, rate limit headers, and comprehensive test suite"
     }
   ]
 }

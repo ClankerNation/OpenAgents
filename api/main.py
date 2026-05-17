@@ -3,6 +3,8 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+from .middleware.ratelimit import RateLimitMiddleware
+
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
@@ -110,3 +112,7 @@ async def health():
         "tasks_indexed": len(tasks_cache),
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+
+# Register rate limiter middleware
+app.add_middleware(RateLimitMiddleware)
