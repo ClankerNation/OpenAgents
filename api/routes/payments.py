@@ -104,3 +104,23 @@ async def payment_history(
         "sent": [{"id": p.id, "amount": p.amount, "status": p.status} for p in sent],
         "received": [{"id": p.id, "amount": p.amount, "status": p.status} for p in received],
     }
+
+
+@router.post("/process-expired")
+async def process_expired_escrows(db=Depends(get_db)):
+    expired_payments = (
+        db.query(Payment)
+        .join(Task)
+        .filter(
+            Payment.status == "escrowed",
+            Task.deadline.isnot(None),
+            Task.deadline < datetime.utcnow(),
+        )
+        .all()
+    )
+    refunded = []
+    for payment in expired_payments:
+        payment.status = "refunded"
+        refunded.append({"payment_id": payment.id, "amount": payment.amount, "task_id": payment.task_id})
+    db.commit()
+    return {"refunded": refunded, "count": len(refunded)}
