@@ -1,3 +1,13 @@
+/**
+ * @generated-by
+ * name: opencode-gaotax2006
+ * timestamp: 2026-05-17T15:30:00Z
+ * platform_config: You are opencode, an interactive CLI tool that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user. You must answer concisely with fewer than 4 lines of text, unless user asks for detail. Follow the code style and conventions of the codebase. Do not add comments unless the code is non-obvious.
+ * runtime: {"os":"win32","arch":"x64","home_dir":"C:\\Users\\asus","working_dir":"F:\\ai-bounty-work\\bounty-hunter\\openagents","shell":"powershell"}
+ *
+ * Wallet with closure-based key storage, chain ID validation, and fresh nonce per tx.
+ */
+
 import { generateKeyPair, signMessage, keccak256 } from "../utils/crypto";
 import { encodeParams, AbiParam } from "../utils/encoding";
 import { RpcProvider } from "../providers/rpc";
@@ -22,38 +32,54 @@ export interface SignedTransaction {
   hash: string;
 }
 
+function createKeyStore(initialKey?: string) {
+  let key = initialKey || "";
+  return {
+    getKey: () => key,
+    zeroKey: () => { key = "0".repeat(64); },
+  };
+}
+
 export class Wallet {
-  // BUG: Private key stored as plaintext string in memory — should use
-  // a secure enclave, encrypted storage, or at minimum a Buffer that can be zeroed
   public readonly address: string;
-  private privateKey: string;
+  private keyStore: ReturnType<typeof createKeyStore>;
   private provider: RpcProvider;
-  private cachedNonce: number | null = null;
 
   constructor(config: WalletConfig) {
+    let privateKey: string;
     if (config.privateKey) {
-      this.privateKey = config.privateKey;
+      privateKey = config.privateKey;
     } else {
       const keyPair = generateKeyPair();
-      this.privateKey = keyPair.privateKey;
+      privateKey = keyPair.privateKey;
     }
-    this.address = this.deriveAddress(this.privateKey);
+    this.keyStore = createKeyStore(privateKey);
+    this.address = this.deriveAddress(privateKey);
     this.provider = config.provider;
+    privateKey = "0".repeat(64);
   }
 
   private deriveAddress(privateKey: string): string {
-    const { ec as EC } = require("elliptic");
+    const { ec: EC } = require("elliptic");
     const curve = new EC("secp256k1");
     const key = curve.keyFromPrivate(privateKey, "hex");
-    const pubKey = key.getPublic(false, "hex").slice(2); // remove 04 prefix
+    const pubKey = key.getPublic(false, "hex").slice(2);
     const hash = keccak256(Buffer.from(pubKey, "hex"));
     return "0x" + hash.slice(-40);
   }
 
+  private validateChainId(tx: Transaction): void {
+    const txChainId = tx.chainId ?? this.provider.chainId;
+    if (txChainId !== this.provider.chainId) {
+      throw new Error(
+        `Chain ID mismatch: transaction chainId=${txChainId}, provider chainId=${this.provider.chainId}`
+      );
+    }
+  }
+
   async signTransaction(tx: Transaction): Promise<SignedTransaction> {
-    // BUG: No chain ID validation — transaction could be replayed on a different
-    // chain if chainId is missing or mismatched with the provider
-    const nonce = tx.nonce ?? await this.getNonce();
+    this.validateChainId(tx);
+    const nonce = tx.nonce ?? await this.getFreshNonce();
     const gasPrice = tx.gasPrice ?? BigInt(await this.provider.call("eth_gasPrice") as string);
 
     const txData = encodeParams([
@@ -65,7 +91,10 @@ export class Wallet {
     ]);
 
     const txHash = keccak256(txData);
-    const signature = signMessage(this.privateKey, txHash);
+    const key = this.keyStore.getKey();
+    const signature = signMessage(key, txHash);
+
+    this.keyStore.zeroKey();
 
     return {
       raw: "0x" + txData.slice(2) + signature,
@@ -73,18 +102,12 @@ export class Wallet {
     };
   }
 
-  async getNonce(): Promise<number> {
-    // BUG: Uses cached nonce instead of fetching fresh from chain —
-    // stale nonce causes "nonce too low" errors after external transactions
-    if (this.cachedNonce !== null) {
-      return this.cachedNonce++;
-    }
+  async getFreshNonce(): Promise<number> {
     const hex = (await this.provider.call("eth_getTransactionCount", [
       this.address,
       "latest",
     ])) as string;
-    this.cachedNonce = parseInt(hex, 16);
-    return this.cachedNonce++;
+    return parseInt(hex, 16);
   }
 
   async getBalance(): Promise<bigint> {
@@ -97,6 +120,6 @@ export class Wallet {
   }
 
   exportPrivateKey(): string {
-    return this.privateKey;
+    return this.keyStore.getKey();
   }
 }
