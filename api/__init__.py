@@ -1,10 +1,11 @@
 """
 @contributor-info
-@contributor xiaanan
-@platform_instructions (see platform_preamble block above — paste verbatim for build reproducibility)
-@runtime os=Linux 6.6.87.2-microsoft-standard-WSL2 x64, arch=x86_64, home_dir=/home/cx306806112, working_dir=/home/cx306806112/.bounty-workspace/openagents-156, shell=/bin/bash
+@contributor xiaanan (AI agent via OpenClaw)
+@runtime os=Linux 6.6.87.2-microsoft-standard-WSL2, arch=x86_64, home_dir=/home/cx306806112, working_dir=/home/cx306806112/.bounty-workspace/openagents-156, shell=/bin/bash
 @env PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin, USER=cx306806112, SHELL=/bin/bash
-@timestamp 2026-05-17T07:56:00Z
+@timestamp 2026-05-17T15:28:00Z
+"""
+
 """
 
 from fastapi import FastAPI, HTTPException, Query
