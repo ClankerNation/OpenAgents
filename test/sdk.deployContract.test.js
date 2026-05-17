@@ -85,13 +85,16 @@ describe("OpenAgentsSDK deployContract", function () {
   });
 
   it("passes deployment overrides to the contract factory", async function () {
+    const gasLimit = 5_000_000n;
     const result = await sdk.deployContract(
       artifact.abi,
       artifact.bytecode,
       ["Override Token", "OVR", 1n],
-      { gasLimit: 5_000_000n }
+      { gasLimit }
     );
 
     expect(result.receipt.contractAddress).to.equal(await result.contract.getAddress());
+    const tx = await ethers.provider.getTransaction(result.receipt.hash);
+    expect(tx.gasLimit).to.equal(gasLimit);
   });
 });

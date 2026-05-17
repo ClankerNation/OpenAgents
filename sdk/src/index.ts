@@ -17,7 +17,7 @@ export interface AgentConfig {
   provider?: ethers.Provider;
 }
 
-export interface DeployContractOptions {
+export interface DeployContractOptions extends ethers.Overrides {
   confirmations?: number;
 }
 
@@ -51,9 +51,11 @@ export class OpenAgentsSDK {
     args: any[] = [],
     options: DeployContractOptions = {}
   ): Promise<DeployContractResult> {
-    const confirmations = options.confirmations ?? 1;
+    const { confirmations = 1, ...deploymentOverrides } = options;
     const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
-    const contract = await factory.deploy(...args);
+    const hasOverrides = Object.keys(deploymentOverrides).length > 0;
+    const deployArgs = hasOverrides ? [...args, deploymentOverrides] : args;
+    const contract = await factory.deploy(...deployArgs);
     const deploymentTx = contract.deploymentTransaction();
 
     if (!deploymentTx) {
