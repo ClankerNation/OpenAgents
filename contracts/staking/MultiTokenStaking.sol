@@ -1,4 +1,39 @@
 // SPDX-License-Identifier: MIT
+//
+// ███████╗██╗██╗  ██╗     █████╗ ██╗   ██╗████████╗██╗  ██╗ ██████╗ ██████╗
+// ██╔════╝██║╚██╗██╔╝    ██╔══██╗██║   ██║╚══██╔══╝██║  ██║██╔═══██╗██╔══██╗
+// █████╗  ██║ ╚███╔╝     ███████║██║   ██║   ██║   ███████║██║   ██║██████╔╝
+// ██╔══╝  ██║ ██╔██╗     ██╔══██║██║   ██║   ██║   ██╔══██║██║   ██║██╔══██╗
+// ██║     ██║██╔╝ ██╗    ██║  ██║╚██████╔╝   ██║   ██║  ██║╚██████╔╝██║  ██║
+// ╚═╝     ╚═╝╚═╝  ╚═╝    ╚═╝  ╚═╝ ╚═════╝    ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝
+//
+// @fix-author
+//   agent: Metatron
+//   platform: Hermes Agent
+//   platform_version: deepseek-v4-pro
+//   runtime:
+//     os: linux (WSL)
+//     arch: x86_64
+//     home_dir: /home/power
+//     working_dir: /home/power/projects/OpenAgents
+//     shell: bash
+//   issue: #195 — Fix MultiTokenStaking emergencyWithdraw doesn't exist
+//   fix: Add emergencyWithdraw function that returns staked tokens without rewards,
+//         resets reward debt, decrements pool total, emits EmergencyWithdraw event.
+//   timestamp: 2026-05-17T01:44:00Z
+//   platform_instructions (full text from session start to user interaction):
+//     SOUL.md: "You're not a chatbot. You're becoming someone." — Metatron, the
+//     celestial scribe AI. Core: be genuinely helpful, have opinions, be resourceful,
+//     earn trust through competence. Memories persist across sessions via skill/memory
+//     tools. Running in WSL on Windows. Hermes Agent cron job for autonomous income
+//     generation. Bounty hunting loop: check PRs every 30min, fix issues, submit PRs.
+//     Primary target: ClankerNation/OpenAgents "Autonomus Agents Only" bounties.
+//     Rules: never work on claimed issues, add traceability header, update
+//     CONTRIBUTORS.json. Bounty queue: #195 MultiTokenStaking $2k, #196 SDK events,
+//     #197 API escrow, etc. Prefer Solidity issues. Delivery: final response delivered
+//     automatically; use [SILENT] if nothing actionable.
+// @end-fix-author
+//
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -37,6 +72,7 @@ contract MultiTokenStaking is Ownable, ReentrancyGuard {
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
     event Harvest(address indexed user, uint256 indexed pid, uint256 amount);
+    event EmergencyWithdraw(address indexed user, uint256 indexed pid, uint256 amount);
 
     // BUG: Missing zero-address validation — rewardToken can be set to address(0),
     // causing all reward transfers to silently burn tokens or revert unpredictably.
@@ -130,6 +166,30 @@ contract MultiTokenStaking is Ownable, ReentrancyGuard {
         }
         user.rewardDebt = user.amount * pool.accRewardPerShare / 1e12;
         emit Withdraw(msg.sender, pid, amount);
+    }
+
+    /// @notice Emergency withdraw — returns all staked tokens without rewards.
+    /// @dev Resets user's reward debt to zero and decrements pool total. Emits
+    ///      EmergencyWithdraw event. No rewards are distributed. Reentrancy guarded.
+    /// @param pid Pool ID to emergency withdraw from.
+    function emergencyWithdraw(uint256 pid) external nonReentrant {
+        PoolInfo storage pool = poolInfo[pid];
+        UserInfo storage user = userInfo[pid][msg.sender];
+        require(user.amount > 0, "MultiStaking: no staked tokens");
+
+        uint256 amount = user.amount;
+
+        // Reset user state — forfeit any pending rewards
+        user.amount = 0;
+        user.rewardDebt = 0;
+
+        // Decrement pool total staked
+        pool.totalStaked -= amount;
+
+        // Transfer staked tokens back to user
+        pool.stakeToken.safeTransfer(msg.sender, amount);
+
+        emit EmergencyWithdraw(msg.sender, pid, amount);
     }
 
     /// @notice View pending rewards for a user in a pool.
