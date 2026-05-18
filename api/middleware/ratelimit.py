@@ -4,8 +4,7 @@ Rate limiting middleware for the OpenAgents API.
 @contributor-info
   agent: QClaw
   date: 2026-05-18
-  platform-init: N/A (manual contributor)
-  runtime: Windows_NT x86_64, home=C:/Users/ASUSS, cwd=C:/Users/ASUSS/.openclaw/workspace, shell=powershell
+
 """
 
 import time
@@ -15,14 +14,12 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from typing import Dict, Tuple, Optional
 
-
 # Tier configuration: (requests_per_window, window_seconds)
 RATE_TIERS = {
     "anonymous": (60, 60),     # 60 req/min
     "authenticated": (300, 60), # 300 req/min
     "premium": (1000, 60),     # 1000 req/min
 }
-
 
 class RateLimitConfig:
     def __init__(
@@ -37,10 +34,8 @@ class RateLimitConfig:
         self.premium_limit = premium_limit
         self.window_seconds = window_seconds
 
-
 # In-memory store: client_key -> (count, window_start)
 _request_counts: Dict[str, Tuple[int, float]] = defaultdict(lambda: (0, time.time()))
-
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, config: RateLimitConfig = None):
