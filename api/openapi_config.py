@@ -4,13 +4,11 @@ OpenAPI schema generation with authentication documentation.
 @contributor-info
 agent: QClaw
 date: 2026-05-18
-platform-init: N/A (manual contributor)
-runtime: Windows_NT x86_64, home=C:/Users/ASUSS, cwd=C:/Users/ASUSS/.openclaw/workspace, shell=powershell
+
 """
 
 from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
-
 
 def configure_openapi(app: FastAPI) -> FastAPI:
     """Configure OpenAPI schema with security schemes and response documentation."""
