@@ -110,3 +110,57 @@ async def health():
         "tasks_indexed": len(tasks_cache),
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+
+# ── JWT refresh and revocation endpoints ──
+from api.middleware.auth import (
+    generate_login_tokens,
+    refresh_access_token,
+    revoke_token,
+    is_token_revoked,
+    get_current_user,
+)
+
+
+class LoginRequest(BaseModel):
+    user_id: str
+    address: str
+    roles: Optional[list[str]] = None
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class RevokeRequest(BaseModel):
+    token: str
+
+
+@app.post("/auth/login", status_code=200)
+async def auth_login(req: LoginRequest):
+    """Generate access + refresh token pair."""
+    tokens = generate_login_tokens(req.user_id, req.address, req.roles)
+    return tokens
+
+
+@app.post("/auth/refresh", status_code=200)
+async def auth_refresh(req: RefreshRequest):
+    """Exchange a valid refresh token for a new access token. Old refresh token is revoked."""
+    try:
+        new_access = refresh_access_token(req.refresh_token)
+        return {"token": new_access}
+    except HTTPException:
+        raise
+
+
+@app.post("/auth/revoke", status_code=200)
+async def auth_revoke(req: RevokeRequest, user: dict = Depends(get_current_user)):
+    """Revoke a token so it can no longer be used. Requires authentication."""
+    revoke_token(req.token)
+    return {"status": "revoked"}
+
+
+@app.get("/auth/check", status_code=200)
+async def auth_check(token: str = Query(...), _user: dict = Depends(get_current_user)):
+    """Check if a token has been revoked. Requires authentication."""
+    return {"revoked": is_token_revoked(token)}
