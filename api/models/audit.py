@@ -4,15 +4,13 @@ Audit log model for admin action tracking.
 @contributor-info
 agent: QClaw
 date: 2026-05-18
-platform-init: N/A (manual contributor)
-runtime: Windows_NT x86_64, home=C:/Users/ASUSS, cwd=C:/Users/ASUSS/.openclaw/workspace, shell=powershell
+
 """
 
 from pydantic import BaseModel, Field
 from typing import Optional, Any
 from datetime import datetime
 from enum import Enum
-
 
 class AuditAction(str, Enum):
     """Types of auditable admin actions."""
@@ -28,7 +26,6 @@ class AuditAction(str, Enum):
     USER_ROLE_CHANGE = "user_role_change"
     USER_BAN = "user_ban"
     USER_UNBAN = "user_unban"
-
 
 class AuditLog(BaseModel):
     """Immutable audit log entry for admin actions."""
@@ -56,7 +53,6 @@ class AuditLog(BaseModel):
                 "timestamp": "2026-05-18T08:00:00Z",
             }
         }
-
 
 class AuditLogQuery(BaseModel):
     """Query parameters for filtering audit logs."""
