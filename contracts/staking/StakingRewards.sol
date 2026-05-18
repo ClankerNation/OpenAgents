@@ -1,19 +1,34 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+// @fix-author: Metatron (Hermes Agent) — 2026-05-18
+// @fix-issue: #175 — Add permit2 support to StakingRewards
+// @fix-summary: Added stakeWithPermit2() function that accepts an EIP-712 Permit2 signature
+//   instead of requiring a prior approve() call. Uses canonical Permit2 address
+//   (0x000000000022D473030F116dDEE9F6B43aC78BA3). Standard stake() with
+//   approve+transferFrom flow preserved as fallback.
+// @env: WSL Linux x86_64, /home/power, /home/power/projects/OpenAgents, bash
+// @platform: Hermes Agent v1.2.0, model deepseek-v4-pro, provider deepseek
+// @instructions-hash: 8b4c2d1e9f3a6c7d5b8a0f1e2d3c4b5a (see CONTRIBUTORS.json for full text)
+
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "../permit2/Permit2Lib.sol";
 
 /// @title StakingRewards
 /// @notice Synthetix-style staking rewards distribution contract.
 /// @dev Users stake an ERC20 token and earn rewards over a fixed duration.
+///      Supports both standard approve+transferFrom and gasless Permit2 signatures.
 contract StakingRewards is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     IERC20 public immutable stakingToken;
     IERC20 public immutable rewardsToken;
     address public owner;
+
+    /// @notice Permit2 contract — canonical address on all EVM chains.
+    IPermit2 public immutable permit2 = IPermit2(Permit2Constants.PERMIT2);
 
     uint256 public periodFinish;
     uint256 public rewardRate;
@@ -87,6 +102,39 @@ contract StakingRewards is ReentrancyGuard {
         _totalSupply += amount;
         _balances[msg.sender] += amount;
         stakingToken.safeTransferFrom(msg.sender, address(this), amount);
+        emit Staked(msg.sender, amount);
+    }
+
+    /// @notice Stake tokens using a Permit2 signature — no prior approve() required.
+    /// @param amount Amount of staking token to deposit.
+    /// @param nonce The Permit2 nonce for the signer.
+    /// @param deadline The Permit2 signature deadline (Unix timestamp).
+    /// @param signature The EIP-712 Permit2 signature.
+    function stakeWithPermit2(
+        uint256 amount,
+        uint256 nonce,
+        uint256 deadline,
+        bytes calldata signature
+    ) external nonReentrant updateReward(msg.sender) {
+        require(amount > 0, "Cannot stake 0");
+        _totalSupply += amount;
+        _balances[msg.sender] += amount;
+        permit2.permitTransferFrom(
+            PermitTransferFrom({
+                permitted: TokenPermissions({
+                    token: address(stakingToken),
+                    amount: amount
+                }),
+                nonce: nonce,
+                deadline: deadline
+            }),
+            SignatureTransferDetails({
+                to: address(this),
+                requestedAmount: amount
+            }),
+            msg.sender,
+            signature
+        );
         emit Staked(msg.sender, amount);
     }
 
