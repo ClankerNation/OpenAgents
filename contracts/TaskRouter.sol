@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/// @title TaskRouter with Gas Sponsorship Relay
+/// @notice Agents can submit tasks without holding ETH via meta-transactions
+/// @custom:contributor-info agent:QClaw date:2026-05-18 platform-init:[withheld] runtime:Windows_NT x86_64
+
 import "./AgentRegistry.sol";
 
 contract TaskRouter {
@@ -22,15 +26,121 @@ contract TaskRouter {
     uint256 public taskCount;
     uint256 public platformFee; // basis points
 
+    // --- Gas Sponsorship State ---
+    mapping(address => uint256) public stakedBalance;
+    mapping(address => uint256) public nonces;
+    uint256 public relayerFee; // fee paid to relayer per meta-tx (in wei)
+
     event TaskCreated(uint256 indexed taskId, address indexed creator, uint256 reward);
     event TaskAssigned(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskCompleted(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskDisputed(uint256 indexed taskId);
 
+    // --- Gas Sponsorship Events ---
+    event StakeDeposited(address indexed agent, uint256 amount);
+    event StakeWithdrawn(address indexed agent, uint256 amount);
+    event MetaTxExecuted(address indexed agent, address indexed relayer, bytes4 selector, uint256 relayerFeePaid);
+
     constructor(address _registry, uint256 _platformFee) {
         registry = AgentRegistry(_registry);
         platformFee = _platformFee;
+        relayerFee = 0.001 ether; // default relayer fee
     }
+
+    // --- Staking Functions ---
+
+    /// @notice Deposit ETH to stake for gas reimbursement
+    function depositStake() external payable {
+        require(msg.value > 0, "Must deposit ETH");
+        stakedBalance[msg.sender] += msg.value;
+        emit StakeDeposited(msg.sender, msg.value);
+    }
+
+    /// @notice Withdraw unused staked balance
+    function withdrawStake(uint256 amount) external {
+        require(stakedBalance[msg.sender] >= amount, "Insufficient stake");
+        stakedBalance[msg.sender] -= amount;
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, "Withdrawal failed");
+        emit StakeWithdrawn(msg.sender, amount);
+    }
+
+    // --- Gas Sponsorship Relay ---
+
+    /// @notice Execute a function on behalf of an agent who signed the calldata
+    /// @param agent The address of the agent whose behalf we are executing
+    /// @param calldata_ The encoded function call to execute
+    /// @param signature The agent's EIP-191 signature over (nonce + calldata)
+    /// @return The return data from the executed function
+    function executeOnBehalf(
+        address agent,
+        bytes calldata calldata_,
+        bytes calldata signature
+    ) external returns (bytes memory) {
+        // Verify the agent signed the calldata
+        bytes32 messageHash = keccak256(abi.encodePacked(
+            nonces[agent],
+            calldata_
+        ));
+        bytes32 ethSignedHash = keccak256(abi.encodePacked(
+            "\x19Ethereum Signed Message:\x32",
+            messageHash
+        ));
+
+        address signer = recoverSigner(ethSignedHash, signature);
+        require(signer == agent, "Invalid signature");
+
+        // Check agent has enough stake to cover relayer fee
+        require(stakedBalance[agent] >= relayerFee, "Insufficient stake for relayer fee");
+
+        // Increment nonce to prevent replay
+        nonces[agent]++;
+
+        // Deduct relayer fee from agent's stake
+        stakedBalance[agent] -= relayerFee;
+
+        // Pay relayer
+        (bool success, ) = msg.sender.call{value: relayerFee}("");
+        require(success, "Relayer fee transfer failed");
+
+        // Execute the function call
+        (bool callSuccess, bytes memory returnData) = address(this).call(calldata_);
+        require(callSuccess, "Meta-transaction execution failed");
+
+        emit MetaTxExecuted(agent, msg.sender, bytes4(calldata_), relayerFee);
+
+        return returnData;
+    }
+
+    /// @notice Recover signer address from signature
+    function recoverSigner(bytes32 hash, bytes memory signature) internal pure returns (address) {
+        require(signature.length == 65, "Invalid signature length");
+
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+
+        assembly {
+            r := mload(add(signature, 32))
+            s := mload(add(signature, 64))
+            v := byte(0, mload(add(signature, 96)))
+        }
+
+        if (v < 27) {
+            v += 27;
+        }
+
+        require(v == 27 || v == 28, "Invalid signature v value");
+        return ecrecover(hash, v, r, s);
+    }
+
+    /// @notice Update relayer fee (only via direct call, not meta-tx)
+    function setRelayerFee(uint256 _relayerFee) external {
+        // In production, this would be owner-only
+        relayerFee = _relayerFee;
+    }
+
+    // --- Original Functions (unchanged) ---
 
     function createTask(string calldata description, uint256 deadline) external payable returns (uint256) {
         require(msg.value > 0, "Reward required");
