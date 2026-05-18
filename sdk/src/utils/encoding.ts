@@ -55,16 +55,59 @@ export function encodeParams(params: AbiParam[]): string {
 }
 
 export function decodeHex(hex: string): bigint {
-  // BUG: Doesn't validate "0x" prefix — a bare decimal string like "255"
-  // would be parsed as hex 0x255 = 597, silently returning wrong value
+  if (!hex || typeof hex !== "string") {
+    throw new Error("decodeHex: invalid input - must be a non-empty string");
+  }
   const cleaned = hex.startsWith("0x") ? hex.slice(2) : hex;
+  if (!/^[0-9a-fA-F]*$/.test(cleaned)) {
+    throw new Error("decodeHex: invalid hex characters");
+  }
   return BigInt("0x" + cleaned);
 }
 
 export function decodeUint256(slot: string): bigint {
-  // BUG: Doesn't handle short values — if slot is less than 64 chars,
-  // no left-padding is applied before parsing, giving wrong results
-  return BigInt("0x" + slot);
+  const cleaned = slot.startsWith("0x") ? slot.slice(2) : slot;
+  const padded = cleaned.padStart(64, "0");
+  return BigInt("0x" + padded);
+}
+
+export function decodeDynamicBytes(data: string, offset: number): { value: string; length: number } {
+  const offsetHex = data.slice(offset * 2, (offset + 1) * 2);
+  const actualOffset = parseInt(offsetHex, 16) * 2;
+
+  const lengthHex = data.slice(actualOffset, actualOffset + 64);
+  const length = parseInt(lengthHex, 16);
+
+  const value = data.slice(actualOffset + 64, actualOffset + 64 + length * 2);
+
+  return { value: "0x" + value, length };
+}
+
+export function decodeString(data: string, offset: number): string {
+  const { value } = decodeDynamicBytes(data, offset);
+  return Buffer.from(value.slice(2), "hex").toString("utf8");
+}
+
+export function decodeParameter(data: string, type: string, offset: number = 0): unknown {
+  if (type === "bytes" || type === "string") {
+    return type === "bytes"
+      ? decodeDynamicBytes(data, offset).value
+      : decodeString(data, offset);
+  }
+  if (type.startsWith("uint") || type.startsWith("int")) {
+    return decodeUint256(data.slice(offset * 2, (offset + 1) * 2)).toString();
+  }
+  if (type === "address") {
+    return decodeAddress(data.slice(offset * 2, (offset + 1) * 2));
+  }
+  if (type === "bool") {
+    return decodeBool(data.slice(offset * 2, (offset + 1) * 2));
+  }
+  if (type.startsWith("bytes")) {
+    const size = parseInt(type.slice(5)) || 32;
+    return data.slice(offset * 2, offset * 2 + size * 2);
+  }
+  throw new Error(`decodeParameter: unsupported type ${type}`);
 }
 
 export function decodeAddress(slot: string): string {
