@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/// @contributor: hermes-agent
+/// @platform-config: Autonomous bounty-hunting agent for OpenAgents protocol bounties. Zero-capital, self-directed, no human intervention.
+/// @env: os=Linux arch=x86_64 home_dir=/home/ubuntu working_dir=/home/ubuntu/OpenAgents shell=/bin/bash
+/// @timestamp: 2026-05-18
+
 /// @title InterestRateModel
 /// @notice Variable interest rate model based on pool utilization
 /// @dev Rate increases with utilization, with a kink at the optimal point
@@ -18,7 +23,17 @@ contract InterestRateModel {
 
     address public admin;
 
-    event RateParamsUpdated(uint256 baseRate, uint256 multiplier, uint256 jumpMultiplier, uint256 kink);
+    /// @notice Emitted when any rate parameter is changed, with both old and new values
+    event RateParametersUpdated(
+        uint256 oldBaseRate,
+        uint256 newBaseRate,
+        uint256 oldMultiplier,
+        uint256 newMultiplier,
+        uint256 oldJumpMultiplier,
+        uint256 newJumpMultiplier,
+        uint256 oldKink,
+        uint256 newKink
+    );
 
     modifier onlyAdmin() {
         require(msg.sender == admin, "Not admin");
@@ -44,11 +59,79 @@ contract InterestRateModel {
         uint256 _jumpMultiplier,
         uint256 _kink
     ) external onlyAdmin {
+        uint256 oldBaseRate = baseRate;
+        uint256 oldMultiplier = multiplier;
+        uint256 oldJumpMultiplier = jumpMultiplier;
+        uint256 oldKink = kink;
+
         baseRate = _baseRate;
         multiplier = _multiplier;
         jumpMultiplier = _jumpMultiplier;
         kink = _kink;
-        emit RateParamsUpdated(_baseRate, _multiplier, _jumpMultiplier, _kink);
+        emit RateParametersUpdated(
+            oldBaseRate, _baseRate,
+            oldMultiplier, _multiplier,
+            oldJumpMultiplier, _jumpMultiplier,
+            oldKink, _kink
+        );
+    }
+
+    /// @notice Set the base rate. Only admin can call.
+    function setBaseRate(uint256 _baseRate) external onlyAdmin {
+        uint256 oldBaseRate = baseRate;
+        baseRate = _baseRate;
+        emit RateParametersUpdated(
+            oldBaseRate, _baseRate,
+            multiplier, multiplier,
+            jumpMultiplier, jumpMultiplier,
+            kink, kink
+        );
+    }
+
+    /// @notice Set the multiplier. Only admin can call.
+    function setMultiplier(uint256 _multiplier) external onlyAdmin {
+        uint256 oldMultiplier = multiplier;
+        multiplier = _multiplier;
+        emit RateParametersUpdated(
+            baseRate, baseRate,
+            oldMultiplier, _multiplier,
+            jumpMultiplier, jumpMultiplier,
+            kink, kink
+        );
+    }
+
+    /// @notice Set the jump multiplier. Only admin can call.
+    function setJumpMultiplier(uint256 _jumpMultiplier) external onlyAdmin {
+        uint256 oldJumpMultiplier = jumpMultiplier;
+        jumpMultiplier = _jumpMultiplier;
+        emit RateParametersUpdated(
+            baseRate, baseRate,
+            multiplier, multiplier,
+            oldJumpMultiplier, _jumpMultiplier,
+            kink, kink
+        );
+    }
+
+    /// @notice Set the kink value. Only admin can call.
+    function setKink(uint256 _kink) external onlyAdmin {
+        uint256 oldKink = kink;
+        kink = _kink;
+        emit RateParametersUpdated(
+            baseRate, baseRate,
+            multiplier, multiplier,
+            jumpMultiplier, jumpMultiplier,
+            oldKink, _kink
+        );
+    }
+
+    /// @notice Returns all current rate parameters in one call
+    function getParameters() external view returns (
+        uint256 _baseRate,
+        uint256 _multiplier,
+        uint256 _jumpMultiplier,
+        uint256 _kink
+    ) {
+        return (baseRate, multiplier, jumpMultiplier, kink);
     }
 
     function getUtilization(uint256 totalBorrowed, uint256 totalDeposits) public pure returns (uint256) {
