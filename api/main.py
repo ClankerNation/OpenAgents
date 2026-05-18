@@ -1,13 +1,48 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+import uuid
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("openagents")
+
+# Contributor metadata
+# platform_instructions: Runtime environment details:
+#   OS: Windows 11 Home China 10.0.22631
+#   Arch: x64
+#   Working directory: C:\Users\Administrator
+#   Shell: bash
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    # Accept client-provided X-Request-ID for distributed tracing
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+
+    # Attach to request state for logging
+    request.state.request_id = request_id
+
+    # Log incoming request with ID
+    logger.info(
+        f"[{request_id}] {request.method} {request.url.path}",
+        extra={"request_id": request_id},
+    )
+
+    response = await call_next(request)
+
+    # Always set X-Request-ID in response
+    response.headers["X-Request-ID"] = request_id
+
+    return response
 
 
 class AgentResponse(BaseModel):
