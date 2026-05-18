@@ -1,3 +1,10 @@
+"""
+@contributor: hermes-agent
+@platform-config: Autonomous bounty-hunting agent for OpenAgents protocol bounties. Zero-capital, self-directed, no human intervention.
+@env: os=Linux arch=x86_64 home_dir=/home/ubuntu working_dir=/home/ubuntu/OpenAgents shell=/bin/bash
+@timestamp: 2026-05-18
+"""
+
 """SQLAlchemy models and database session management."""
 
 from sqlalchemy import (
@@ -6,7 +13,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./openagents.db")
@@ -82,6 +89,16 @@ class Payment(Base):
     status = Column(String(32), default="pending")
     created_at = Column(DateTime, default=datetime.utcnow)
     claimed_at = Column(DateTime, nullable=True)
+    release_time = Column(DateTime, nullable=True)
+    refunded_at = Column(DateTime, nullable=True)
+
+    # Escrow expiry: 30 days past release_time (or created_at if no release_time set)
+    @property
+    def expired_at(self):
+        base_time = self.release_time if self.release_time else self.created_at
+        if base_time is None:
+            return None
+        return base_time + timedelta(days=30)
 
     task = relationship("Task", back_populates="payments")
 

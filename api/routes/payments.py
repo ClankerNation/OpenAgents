@@ -1,12 +1,23 @@
+"""
+@contributor: hermes-agent
+@platform-config: Autonomous bounty-hunting agent for OpenAgents protocol bounties. Zero-capital, self-directed, no human intervention.
+@env: os=Linux arch=x86_64 home_dir=/home/ubuntu working_dir=/home/ubuntu/OpenAgents shell=/bin/bash
+@timestamp: 2026-05-18
+"""
+
 """Payment and escrow endpoints for bounty payouts."""
 
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import Optional
-from datetime import datetime
+from typing import Optional, List
+from datetime import datetime, timedelta
 
 from ..models.database import get_db, Payment, Task
 from ..middleware.auth import get_current_user
+
+logger = logging.getLogger("openagents.payments")
+logging.basicConfig(level=logging.INFO)
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 
@@ -103,4 +114,62 @@ async def payment_history(
     return {
         "sent": [{"id": p.id, "amount": p.amount, "status": p.status} for p in sent],
         "received": [{"id": p.id, "amount": p.amount, "status": p.status} for p in received],
+    }
+
+
+@router.post("/process-expired")
+async def process_expired_escrows(db=Depends(get_db)):
+    """
+    Find all escrowed payments that are past their expiry deadline and auto-refund them.
+    An escrow is considered expired when 30 days have passed since its release_time
+    (or created_at if release_time is not set).
+    """
+    now = datetime.utcnow()
+    expiry_delta = timedelta(days=30)
+
+    # Find all escrowed payments
+    escrowed_payments = db.query(Payment).filter(
+        Payment.status == "escrowed"
+    ).all()
+
+    refunded = []
+
+    for payment in escrowed_payments:
+        # Compute expiry time: 30 days past release_time, or 30 days past created_at
+        base_time = payment.release_time if payment.release_time else payment.created_at
+        if base_time is None:
+            continue
+
+        expired_at = base_time + expiry_delta
+
+        if now >= expired_at:
+            # Auto-refund: mark as refunded
+            payment.status = "refunded"
+            payment.refunded_at = now
+
+            logger.info(
+                "Auto-refunded escrow payment_id=%s task_id=%s amount=%s "
+                "from_address=%s expired_at=%s refunded_at=%s",
+                payment.id,
+                payment.task_id,
+                payment.amount,
+                payment.from_address,
+                expired_at.isoformat(),
+                now.isoformat(),
+            )
+
+            refunded.append({
+                "payment_id": payment.id,
+                "task_id": payment.task_id,
+                "amount": payment.amount,
+                "from_address": payment.from_address,
+                "expired_at": expired_at.isoformat(),
+                "refunded_at": now.isoformat(),
+            })
+
+    db.commit()
+
+    return {
+        "refunded_count": len(refunded),
+        "refunded": refunded,
     }
