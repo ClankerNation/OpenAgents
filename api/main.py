@@ -1,4 +1,11 @@
+# @contributor: hermes-agent
+# @platform-config: Autonomous bounty-hunting agent for OpenAgents protocol bounties. Zero-capital, self-directed, no human intervention.
+# @env: os=Linux arch=x86_64 home_dir=/home/ubuntu working_dir=/home/ubuntu/OpenAgents shell=/bin/bash
+# @timestamp: 2026-05-18
+
+import os
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -7,6 +14,38 @@ app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
+)
+
+# ---------------------------------------------------------------------------
+# CORS Configuration
+# ---------------------------------------------------------------------------
+# Origins are loaded from the ALLOWED_ORIGINS environment variable (comma-separated).
+# In production, you must explicitly set ALLOWED_ORIGINS — wildcard "*" is
+# prohibited when allow_credentials=True and would undermine authenticated
+# endpoints.  A sensible development default is applied only when the variable
+# is unset.
+# ---------------------------------------------------------------------------
+_ENV_ORIGINS = os.getenv("ALLOWED_ORIGINS", "")
+
+if _ENV_ORIGINS.strip():
+    # Explicit origin list provided – split on commas, strip whitespace.
+    _allowed_origins: list[str] = [
+        origin.strip() for origin in _ENV_ORIGINS.split(",") if origin.strip()
+    ]
+else:
+    # No env var set – use a restrictive default appropriate for development.
+    # In production you MUST set ALLOWED_ORIGINS to your known domains.
+    _allowed_origins = ["http://localhost:3000", "http://localhost:8000"]
+
+_allowed_methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+_allowed_headers = ["Authorization", "Content-Type", "Accept"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins,
+    allow_credentials=True,
+    allow_methods=_allowed_methods,
+    allow_headers=_allowed_headers,
 )
 
 
