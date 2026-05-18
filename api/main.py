@@ -30,18 +30,12 @@ class TaskResponse(BaseModel):
     status: str
     assigned_agent: Optional[str] = None
 
-
-class LeaderboardEntry(BaseModel):
-    agent_id: str
-    name: str
-    reputation: int
-    tasks_completed: int
-    success_rate: float
-
-
 # In-memory store (placeholder for DB)
 agents_cache: dict = {}
 tasks_cache: dict = {}
+
+from .routes import agents, tasks, payments
+app.include_router(agents.router)
 
 
 @app.get("/agents", response_model=list[AgentResponse])
@@ -82,25 +76,6 @@ async def get_task(task_id: int):
     if task_id not in tasks_cache:
         raise HTTPException(status_code=404, detail="Task not found")
     return tasks_cache[task_id]
-
-
-@app.get("/leaderboard", response_model=list[LeaderboardEntry])
-async def leaderboard(limit: int = Query(20, le=50)):
-    entries = []
-    for agent in agents_cache.values():
-        completed = agent.get("tasks_completed", 0)
-        entries.append(
-            {
-                "agent_id": agent["agent_id"],
-                "name": agent["name"],
-                "reputation": agent.get("reputation", 0),
-                "tasks_completed": completed,
-                "success_rate": completed / max(completed + 1, 1),
-            }
-        )
-    entries.sort(key=lambda x: x["reputation"], reverse=True)
-    return entries[:limit]
-
 
 @app.get("/health")
 async def health():

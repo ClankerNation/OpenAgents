@@ -46,6 +46,10 @@ class Agent(Base):
     config = Column(JSON, default=dict)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    reputation = Column(Integer, default=0)
+    tasks_completed = Column(Integer, default=0)
+    disputes = Column(Integer, default=0)
+    last_active_at = Column(DateTime, default=datetime.utcnow)
 
     # BUG: No cascade delete — deleting a user leaves orphaned agents
     owner = relationship("User", back_populates="agents")
@@ -85,6 +89,14 @@ class Payment(Base):
 
     task = relationship("Task", back_populates="payments")
 
+class ReputationEvent(Base):
+    __tablename__ = "reputation_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    agent_id = Column(Integer, ForeignKey("agents.id"), nullable=False)
+    event_type = Column(String(32), nullable=False) # "completion", "dispute", "decay"
+    score_delta = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 def init_db():
     Base.metadata.create_all(bind=engine)

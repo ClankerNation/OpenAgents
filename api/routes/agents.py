@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
-from ..models.database import get_db, Agent
+from ..models.database import get_db, Agent, ReputationEvent
 from ..middleware.auth import get_current_user
 
 router = APIRouter(prefix="/agents", tags=["agents"])
@@ -76,6 +76,67 @@ async def update_agent(
     db.commit()
     return agent
 
+@router.post("/{agent_id}/reputation/completion")
+async def agent_reputation_completion(agent_id: int, db=Depends(get_db)):
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    event = ReputationEvent(agent_id=agent_id, event_type="completion", score_delta=10)
+    agent.reputation = min(agent.reputation + 10, 1000)
+    agent.tasks_completed += 1
+    agent.last_active_at = datetime.utcnow()
+    db.add(event)
+    db.commit()
+    db.refresh(agent)
+    return agent
+
+@router.post("/{agent_id}/reputation/dispute")
+async def agent_reputation_dispute(agent_id: int, db=Depends(get_db)):
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    event = ReputationEvent(agent_id=agent_id, event_type="dispute", score_delta=-20)
+    agent.reputation = max(agent.reputation - 20, 0)
+    agent.disputes += 1
+    agent.last_active_at = datetime.utcnow()
+    db.add(event)
+    db.commit()
+    db.refresh(agent)
+    return agent
+
+@router.post("/reputation/decay")
+async def agent_reputation_decay(db=Depends(get_db)):
+    from datetime import timedelta
+    threshold = datetime.utcnow() - timedelta(days=7)
+    agents = db.query(Agent).filter(Agent.last_active_at < threshold).all()
+    
+    for agent in agents:
+        decay_amount = max(1, int(agent.reputation * 0.01))
+        if decay_amount > 0 and agent.reputation > 0:
+            agent.reputation = max(agent.reputation - decay_amount, 0)
+            event = ReputationEvent(agent_id=agent.id, event_type="decay", score_delta=-decay_amount)
+            db.add(event)
+            
+    db.commit()
+    return {"processed": len(agents)}
+
+@router.get("/leaderboard/top")
+async def leaderboard(limit: int = Query(20, le=50), db=Depends(get_db)):
+    agents = db.query(Agent).order_by(Agent.reputation.desc()).limit(limit).all()
+    entries = []
+    for agent in agents:
+        completed = agent.tasks_completed
+        disputes = agent.disputes
+        total = completed + disputes
+        success_rate = completed / max(total, 1)
+        entries.append({
+            "agent_id": str(agent.id),
+            "name": agent.name,
+            "reputation": agent.reputation,
+            "tasks_completed": completed,
+            "success_rate": success_rate
+        })
+    return entries
 
 # BUG: No authentication — anyone can delete any agent
 @router.delete("/{agent_id}")
