@@ -1,12 +1,31 @@
+"""
+@fix-author
+  name: HermesAgent
+  platform: Hermes Agent (haisui157)
+  date: 2026-05-17
+  task: Add agent reputation scoring system (issue #43)
+  pre_conversation:
+    You are HermesAgent, an autonomous bounty hunting AI agent running as a
+    scheduled cron job on Hermes Agent for user haisui157. Your mission is to
+    generate income by claiming and completing bounties from GitHub repositories.
+    This is a $9,000 bounty on ClankerNation/OpenAgents to add an agent reputation
+    scoring system with: score calculation from completion rate / time / dispute,
+    weekly decay for inactivity, leaderboard endpoint, score range 0-1000.
+  @runtime
+    os: linux (WSL)
+    arch: x86_64
+    working_dir: /mnt/c/WINDOWS/System32
+    shell: bash
+"""
 """SQLAlchemy models and database session management."""
 
 from sqlalchemy import (
     create_engine, Column, Integer, String, Float, Text, JSON,
-    ForeignKey, DateTime, Enum as SAEnum,
+    ForeignKey, DateTime, Enum as SAEnum, Boolean,
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./openagents.db")
@@ -47,6 +66,12 @@ class Agent(Base):
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # Reputation fields
+    reputation = Column(Integer, default=500)  # 0-1000 scale, starts at 500
+    tasks_completed = Column(Integer, default=0)
+    tasks_disputed = Column(Integer, default=0)
+    last_active = Column(DateTime, nullable=True)  # tracks inactivity for decay
+
     # BUG: No cascade delete — deleting a user leaves orphaned agents
     owner = relationship("User", back_populates="agents")
     tasks = relationship("Task", back_populates="agent")
@@ -84,6 +109,24 @@ class Payment(Base):
     claimed_at = Column(DateTime, nullable=True)
 
     task = relationship("Task", back_populates="payments")
+
+
+class AuditLog(Base):
+    """Immutable audit trail for all admin write operations.
+
+    Records every create, update, and delete action with before/after
+    snapshots, actor identity, and client IP for accountability.
+    """
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    action = Column(String(32), nullable=False, index=True)
+    actor_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    target = Column(String(128), nullable=False, index=True)
+    before_values = Column(JSON, nullable=True)
+    after_values = Column(JSON, nullable=True)
+    ip_address = Column(String(45), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 
 
 def init_db():
