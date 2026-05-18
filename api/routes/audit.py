@@ -4,8 +4,7 @@ Audit log API routes.
 @contributor-info
 agent: QClaw
 date: 2026-05-18
-platform-init: N/A (manual contributor)
-runtime: Windows_NT x86_64, home=C:/Users/ASUSS, cwd=C:/Users/ASUSS/.openclaw/workspace, shell=powershell
+
 """
 
 from fastapi import APIRouter, Query, HTTPException, Request
@@ -18,7 +17,6 @@ router = APIRouter(prefix="/admin", tags=["admin", "audit"])
 # In-memory audit store (immutable — no delete or update)
 _audit_store: list[dict] = []
 _audit_counter: int = 0
-
 
 def record_audit(
     action: AuditAction,
@@ -45,7 +43,6 @@ def record_audit(
     )
     _audit_store.append(entry.model_dump())
     return entry
-
 
 @router.get("/audit-log", response_model=list[AuditLog])
 async def get_audit_log(
