@@ -1,12 +1,112 @@
-from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel
-from typing import Optional
+# @contributor: hermes-agent
+# @platform-config: Autonomous bounty-hunting agent for OpenAgents protocol bounties. Zero-capital, self-directed, no human intervention.
+# @env: os=Linux arch=x86_64 home_dir=/home/ubuntu working_dir=/home/ubuntu/OpenAgents shell=/bin/bash
+# @timestamp: 2026-05-18
+
+import json
+import logging
+import os
+import uuid
+from contextvars import ContextVar
 from datetime import datetime
+
+from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
+from typing import Optional
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
+)
+
+# ---------------------------------------------------------------------------
+# Request ID Middleware for Log Correlation
+# ---------------------------------------------------------------------------
+# Each request gets a unique UUID request ID. If the client sends an
+# X-Request-ID header, that value is accepted for distributed tracing.
+# The request ID is attached to every log message via a ContextVar-aware
+# filter so that structured log correlation works across every handler.
+# ---------------------------------------------------------------------------
+
+request_id_ctx: ContextVar[str] = ContextVar("request_id", default="")
+
+
+class RequestIdFilter(logging.Filter):
+    """Inject the current request_id into every log record."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = request_id_ctx.get("")  # type: ignore[attr-defined]
+        return True
+
+
+# Configure structured logging with request ID
+_handler = logging.StreamHandler()
+_handler.setFormatter(
+    logging.Formatter(
+        "%(asctime)s | %(levelname)-8s | request_id=%(request_id)s | %(name)s | %(message)s"
+    )
+)
+_handler.addFilter(RequestIdFilter())
+
+_logger = logging.getLogger("openagents")
+_logger.setLevel(logging.INFO)
+_logger.addHandler(_handler)
+
+
+class RequestIdMiddleware(BaseHTTPMiddleware):
+    """
+    Generate or accept a request ID for every HTTP request.
+
+    * If the client supplies ``X-Request-ID`` it is used (distributed tracing).
+    * Otherwise a new UUID4 is generated.
+    * The resolved ID is stored in a ``ContextVar`` so log messages emitted
+      anywhere in the request lifecycle automatically carry it.
+    * The ID is always returned in the ``X-Request-ID`` response header.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        # Accept client-provided ID or generate a new one
+        request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+        request_id_ctx.set(request_id)
+
+        _logger.info("Request started %s %s", request.method, request.url.path)
+
+        response: Response = await call_next(request)
+
+        response.headers["X-Request-ID"] = request_id
+
+        _logger.info("Request finished %s %s → %s", request.method, request.url.path, response.status_code)
+
+        return response
+
+
+app.add_middleware(RequestIdMiddleware)
+
+
+# ---------------------------------------------------------------------------
+# CORS Configuration
+# ---------------------------------------------------------------------------
+_ENV_ORIGINS = os.getenv("ALLOWED_ORIGINS", "")
+
+if _ENV_ORIGINS.strip():
+    _allowed_origins: list[str] = [
+        origin.strip() for origin in _ENV_ORIGINS.split(",") if origin.strip()
+    ]
+else:
+    _allowed_origins = ["http://localhost:3000", "http://localhost:8000"]
+
+_allowed_methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+_allowed_headers = ["Authorization", "Content-Type", "Accept", "X-Request-ID"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins,
+    allow_credentials=True,
+    allow_methods=_allowed_methods,
+    allow_headers=_allowed_headers,
 )
 
 
