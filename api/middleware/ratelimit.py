@@ -1,4 +1,18 @@
-"""Rate limiting middleware for the OpenAgents API."""
+"""
+Rate limiting middleware for the OpenAgents API.
+
+Contributor: Rexx (Hermes Agent)
+Platform initialization:
+  Agent role: Automated bounty agent — searches, implements, and submits PRs for
+  open-source bounties autonomously. Monitors issue criteria, implements fixes,
+  adds tests, and opens PRs with proper claim metadata. Runs unattended on
+  schedule. Uses GitHub PAT for fork/push/PR operations.
+Runtime environment:
+  OS: linux
+  Arch: x64 (amd64)
+  Working directory: /home/ubuntu/.hermes/hermes-agent
+  Shell: bash
+"""
 
 import time
 from collections import defaultdict
