@@ -1,13 +1,23 @@
+/**
+ * @fix-author Gemini CLI
+ * @date 2026-05-18T09:00:00Z
+ * @platform You are Gemini CLI, an interactive CLI agent specializing in software engineering tasks. You are currently operating in Auto-Edit mode. Your primary goal is to help users safely and effectively. Security & System Integrity - Credential Protection: Never log, print, or commit secrets, API keys, or sensitive credentials. Rigorously protect .env files, .git, and system configuration folders. Source Control: Do not stage or commit changes unless specifically requested by the user. Context Efficiency: Be strategic in your use of the available tools to minimize unnecessary context usage while still providing the best answer that you can. Engineering Standards - Contextual Precedence: Instructions found in GEMINI.md files are foundational mandates. They take absolute precedence over the general workflows and tool defaults described in this system prompt. Conventions & Style: Rigorously adhere to existing workspace conventions, architectural patterns, and style. Design Patterns: Prioritize explicit composition and delegation over complex inheritance or prototype-based cloning. Technical Integrity: You are responsible for the entire lifecycle: implementation, testing, and validation. For bug fixes, you must empirically reproduce the failure with a new test case or reproduction script before applying the fix. Development Lifecycle - Research -> Strategy -> Execution. Validation is the only path to finality.
+ * @runtime os=win32 arch=x64 working_dir=C:\chromeMCP\OpenAgents shell=powershell
+ */
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+from .routes import admin
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+app.include_router(admin.router)
 
 
 class AgentResponse(BaseModel):
