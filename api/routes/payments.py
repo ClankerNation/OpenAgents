@@ -1,13 +1,25 @@
-"""Payment and escrow endpoints for bounty payouts."""
+"""
+@fix-author Metatron (Hermes Agent)
+platform: hermes-agent | model: deepseek-v4-pro | runtime: linux/x64
+home: /home/power | workdir: /home/power/projects/OpenAgents
+instructions: Autonomous bounty-hunting cron loop for ClankerNation/OpenAgents.
+  Scan open PRs, fix review-blocked PRs first, then claim highest-priority
+  unclaimed bounty with full implementation, tests, traceability header,
+  and CONTRIBUTORS.json update. Submit via gh CLI.
+---
+Payment and escrow endpoints for bounty payouts.
+"""
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
+import logging
 
 from ..models.database import get_db, Payment, Task
 from ..middleware.auth import get_current_user
 
+logger = logging.getLogger("payments.escrow")
 router = APIRouter(prefix="/payments", tags=["payments"])
 
 
@@ -43,6 +55,7 @@ async def deposit_escrow(
         token_address=deposit.token_address,
         status="escrowed",
         created_at=datetime.utcnow(),
+        release_time=datetime.utcnow() + timedelta(days=30),
     )
     db.add(payment)
     db.commit()
@@ -103,4 +116,49 @@ async def payment_history(
     return {
         "sent": [{"id": p.id, "amount": p.amount, "status": p.status} for p in sent],
         "received": [{"id": p.id, "amount": p.amount, "status": p.status} for p in received],
+    }
+
+
+@router.post("/process-expired")
+async def process_expired_escrows(
+    user=Depends(get_current_user), db=Depends(get_db)
+):
+    """Find and refund all escrows past their 30-day expiry window.
+
+    Only processes escrows where status='escrowed' and the current time is
+    past expired_at (release_time + 30 days). Refunds go back to the payer
+    (from_address). Each refund is logged with timestamp and escrow ID.
+    """
+    now = datetime.utcnow()
+    cutoff = now - timedelta(days=30)
+    expired_payments = db.query(Payment).filter(
+        Payment.status == "escrowed",
+        Payment.release_time.isnot(None),
+        Payment.release_time < cutoff,
+    ).all()
+
+    refunded = []
+    for payment in expired_payments:
+        payment.status = "refunded"
+        payment.refunded_at = now
+        refunded.append({
+            "payment_id": payment.id,
+            "task_id": payment.task_id,
+            "amount": payment.amount,
+            "from_address": payment.from_address,
+            "created_at": payment.created_at.isoformat() if payment.created_at else None,
+            "release_time": payment.release_time.isoformat() if payment.release_time else None,
+        })
+        logger.info(
+            "escrow_refunded payment_id=%d task_id=%d amount=%.4f from=%s",
+            payment.id, payment.task_id, payment.amount, payment.from_address,
+        )
+
+    if refunded:
+        db.commit()
+
+    return {
+        "processed": len(refunded),
+        "refunded": refunded,
+        "timestamp": now.isoformat(),
     }

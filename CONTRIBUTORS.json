@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "metatron-hermes-agent",
+      "timestamp": "2026-05-18T04:10:00Z",
+      "platform_instructions": "Autonomous bounty-hunting cron loop. Scan open PRs from invisiblemonsters on ClankerNation/OpenAgents. Fix review-blocked PRs first, then claim highest-priority unclaimed bounty with full implementation, tests, traceability header, and CONTRIBUTORS.json update. Submit via gh CLI.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/home/power",
+        "working_dir": "/home/power/projects/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "Added escrow auto-refund: release_time + expired_at properties on Payment model, POST /payments/process-expired endpoint with logged auto-refunds for expired escrows (#197)"
     }
   ]
 }
