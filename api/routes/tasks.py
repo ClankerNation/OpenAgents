@@ -1,9 +1,11 @@
 """Task management endpoints for bounty assignments."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.websockets import WebSocketState
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+import json
 
 from ..models.database import get_db, Task
 from ..middleware.auth import get_current_user
@@ -11,6 +13,46 @@ from ..middleware.auth import get_current_user
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 VALID_STATUSES = {"open", "assigned", "in_progress", "review", "completed", "cancelled"}
+
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+        self.task_subscriptions: dict[int, list[WebSocket]] = {}
+
+    async def connect(self, websocket: WebSocket, task_id: Optional[int] = None):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        if task_id is not None:
+            if task_id not in self.task_subscriptions:
+                self.task_subscriptions[task_id] = []
+            self.task_subscriptions[task_id].append(websocket)
+
+    def disconnect(self, websocket: WebSocket, task_id: Optional[int] = None):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+        if task_id is not None and task_id in self.task_subscriptions:
+            if websocket in self.task_subscriptions[task_id]:
+                self.task_subscriptions[task_id].remove(websocket)
+
+    async def broadcast(self, message: dict, task_id: Optional[int] = None):
+        if task_id is not None and task_id in self.task_subscriptions:
+            for connection in self.task_subscriptions[task_id][:]:
+                try:
+                    if connection.client_state == WebSocketState.CONNECTED:
+                        await connection.send_json(message)
+                except Exception:
+                    pass
+        else:
+            for connection in self.active_connections[:]:
+                try:
+                    if connection.client_state == WebSocketState.CONNECTED:
+                        await connection.send_json(message)
+                except Exception:
+                    pass
+
+
+manager = ConnectionManager()
 
 
 class TaskCreate(BaseModel):
@@ -88,7 +130,37 @@ async def update_task_status(
     task.status = update.status
     task.updated_at = datetime.utcnow()
     db.commit()
+
+    # Broadcast update to WebSocket subscribers
+    await manager.broadcast({
+        "type": "task_updated",
+        "task_id": task.id,
+        "status": task.status,
+        "updated_at": task.updated_at.isoformat(),
+    }, task_id)
+
     return {"id": task.id, "status": task.status}
+
+
+@router.websocket("/ws")
+async def task_websocket(websocket: WebSocket, task_id: Optional[int] = None):
+    """
+    WebSocket endpoint for real-time task updates.
+    Connect to /tasks/ws for all task updates,
+    or /tasks/ws?task_id=N for updates on a specific task only.
+    """
+    await manager.connect(websocket, task_id)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            try:
+                msg = json.loads(data)
+                if msg.get("type") == "ping":
+                    await websocket.send_json({"type": "pong"})
+            except json.JSONDecodeError:
+                pass
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, task_id)
 
 
 @router.delete("/{task_id}")
