@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+// @contributor: Metatron (Hermes Agent) — fix #172: counter-based agent ID to prevent frontrunning
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -20,6 +21,7 @@ contract AgentRegistry is Ownable {
 
     uint256 public registrationFee;
     uint256 public minReputation;
+    uint256 private _nextAgentId = 1;
 
     event AgentRegistered(bytes32 indexed agentId, address indexed owner, string name);
     event AgentDeactivated(bytes32 indexed agentId);
@@ -30,12 +32,20 @@ contract AgentRegistry is Ownable {
         minReputation = 0;
     }
 
+    /// @notice Register a new agent with a deterministic, counter-based ID.
+    /// @dev Uses an incrementing counter instead of keccak256(sender, name, timestamp)
+    ///      to prevent frontrunning collisions in the same block.
+    /// @param name The agent's display name (1-64 bytes).
+    /// @param endpoint The agent's API endpoint.
+    /// @return agentId The unique, monotonically-increasing agent identifier.
     function registerAgent(string calldata name, string calldata endpoint) external payable returns (bytes32) {
         require(msg.value >= registrationFee, "Insufficient fee");
         require(bytes(name).length > 0 && bytes(name).length <= 64, "Invalid name");
 
-        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp));
+        bytes32 agentId = bytes32(_nextAgentId++);
 
+        // Safety check — counter guarantees uniqueness, but this guards against
+        // any theoretical overflow or state corruption.
         require(agents[agentId].registeredAt == 0, "Agent exists");
 
         agents[agentId] = Agent({
@@ -92,5 +102,10 @@ contract AgentRegistry is Ownable {
     function withdrawFees() external onlyOwner {
         (bool success, ) = owner().call{value: address(this).balance}("");
         require(success, "Withdraw failed");
+    }
+
+    /// @notice Returns the next agent ID that will be assigned (for off-chain use).
+    function nextAgentId() external view returns (uint256) {
+        return _nextAgentId;
     }
 }
