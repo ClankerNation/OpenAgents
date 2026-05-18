@@ -1,3 +1,10 @@
+/**
+ * @generated-by
+ * name: oocheol
+ * timestamp: 2026-05-18T23:30:00Z
+ * platform_instructions: You are Gemini CLI, an interactive CLI agent specializing in software engineering tasks. You are currently operating in Auto-Edit mode. Your primary goal is to help users safely and effectively. Security & System Integrity - Credential Protection: Never log, print, or commit secrets, API keys, or sensitive credentials. Rigorously protect .env files, .git, and system configuration folders. Source Control: Do not stage or commit changes unless specifically requested by the user. Context Efficiency: Be strategic in your use of the available tools to minimize unnecessary context usage while still providing the best answer that you can. Engineering Standards - Contextual Precedence: Instructions found in GEMINI.md files are foundational mandates. They take absolute precedence over the general workflows and tool defaults described in this system prompt. Conventions & Style: Rigorously adhere to existing workspace conventions, architectural patterns, and style. Design Patterns: Prioritize explicit composition and delegation over complex inheritance or prototype-based cloning. Technical Integrity: You are responsible for the entire lifecycle: implementation, testing, and validation. For bug fixes, you must empirically reproduce the failure with a new test case or reproduction script before applying the fix. Development Lifecycle - Research -> Strategy -> Execution. Validation is the only path to finality.
+ * runtime: {"os":"win32","arch":"x64","home_dir":"C:\\Users\\PC","working_dir":"C:\\chromeMCP\\OpenAgents","shell":"powershell"}
+ */
 import { withRetry, RetryOptions } from "../utils/retry";
 
 export interface JsonRpcRequest {
@@ -19,13 +26,20 @@ export interface RpcProviderConfig {
   chainId: number;
   retryOptions?: RetryOptions;
   headers?: Record<string, string>;
+  requestTimeoutMs?: number;
+  batchSizeLimit?: number;
 }
+
+const DEFAULT_TIMEOUT = 10_000; // 10 seconds
+const DEFAULT_BATCH_SIZE = 100;
 
 export class RpcProvider {
   private url: string;
   private chainId: number;
   private retryOptions: RetryOptions;
   private headers: Record<string, string>;
+  private requestTimeoutMs: number;
+  private batchSizeLimit: number;
   private requestId = 0;
 
   constructor(config: RpcProviderConfig) {
@@ -33,6 +47,8 @@ export class RpcProvider {
     this.chainId = config.chainId;
     this.retryOptions = config.retryOptions ?? {};
     this.headers = config.headers ?? {};
+    this.requestTimeoutMs = config.requestTimeoutMs ?? DEFAULT_TIMEOUT;
+    this.batchSizeLimit = config.batchSizeLimit ?? DEFAULT_BATCH_SIZE;
   }
 
   async call(method: string, params: unknown[] = []): Promise<unknown> {
@@ -44,30 +60,42 @@ export class RpcProvider {
     };
 
     return withRetry(async () => {
-      // BUG: No timeout — fetch can hang indefinitely if the RPC node is unresponsive
-      const res = await fetch(this.url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...this.headers },
-        body: JSON.stringify(request),
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), this.requestTimeoutMs);
 
-      const json = await res.json();
+      try {
+        const res = await fetch(this.url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...this.headers },
+          body: JSON.stringify(request),
+          signal: controller.signal,
+        });
 
-      // BUG: Error response is not type-checked — json.error could have unexpected
-      // shape and json.result is returned even when error is present
-      if (json.error) {
-        throw new Error(`RPC error ${json.error.code}: ${json.error.message}`);
+        const json: JsonRpcResponse = await res.json();
+
+        if (json.error) {
+          throw new Error(`RPC error ${json.error.code}: ${json.error.message}`);
+        }
+
+        return json.result;
+      } finally {
+        clearTimeout(timeoutId);
       }
-
-      return json.result;
     }, this.retryOptions);
   }
 
+  /**
+   * Sends a batch of JSON-RPC requests.
+   * Matches responses to requests by 'id' to handle out-of-order responses.
+   * Handles partial failures where some requests in the batch fail.
+   */
   async batchCall(
     calls: Array<{ method: string; params: unknown[] }>
-  ): Promise<unknown[]> {
-    // BUG: No limit on batch size — sending thousands of calls in one batch
-    // can exceed the node's gas/payload limit and fail silently or OOM
+  ): Promise<Array<{ result?: unknown; error?: Error }>> {
+    if (calls.length > this.batchSizeLimit) {
+      throw new Error(`Batch size exceeds limit of ${this.batchSizeLimit}`);
+    }
+
     const requests: JsonRpcRequest[] = calls.map((c) => ({
       jsonrpc: "2.0" as const,
       id: ++this.requestId,
@@ -75,16 +103,51 @@ export class RpcProvider {
       params: c.params,
     }));
 
-    const res = await fetch(this.url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...this.headers },
-      body: JSON.stringify(requests),
-    });
+    // Mapping to track request positions for final output ordering
+    const idToPosition = new Map<number, number>();
+    requests.forEach((req, index) => idToPosition.set(req.id, index));
 
-    const responses: JsonRpcResponse[] = await res.json();
-    return responses
-      .sort((a, b) => a.id - b.id)
-      .map((r) => r.result);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.requestTimeoutMs);
+
+    try {
+      const res = await fetch(this.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...this.headers },
+        body: JSON.stringify(requests),
+        signal: controller.signal,
+      });
+
+      const responses: JsonRpcResponse[] = await res.json();
+      const results: Array<{ result?: unknown; error?: Error }> = new Array(calls.length);
+
+      // Match responses to requests by ID (JSON-RPC spec allows any order)
+      responses.forEach((resp) => {
+        const position = idToPosition.get(resp.id);
+        if (position !== undefined) {
+          if (resp.error) {
+            results[position] = { error: new Error(`RPC error ${resp.error.code}: ${resp.error.message}`) };
+          } else {
+            results[position] = { result: resp.result };
+          }
+          idToPosition.delete(resp.id);
+        }
+      });
+
+      // Any IDs remaining in the map had no response
+      idToPosition.forEach((position, id) => {
+        results[position] = { error: new Error(`No response received for request ID ${id}`) };
+      });
+
+      return results;
+    } catch (err: any) {
+      if (err.name === "AbortError") {
+        throw new Error(`Batch request timed out after ${this.requestTimeoutMs}ms`);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   async getBlockNumber(): Promise<number> {
