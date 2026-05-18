@@ -44,17 +44,19 @@ export class RpcProvider {
     };
 
     return withRetry(async () => {
-      // BUG: No timeout — fetch can hang indefinitely if the RPC node is unresponsive
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000);
+
       const res = await fetch(this.url, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...this.headers },
         body: JSON.stringify(request),
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
 
       const json = await res.json();
 
-      // BUG: Error response is not type-checked — json.error could have unexpected
-      // shape and json.result is returned even when error is present
       if (json.error) {
         throw new Error(`RPC error ${json.error.code}: ${json.error.message}`);
       }
@@ -64,10 +66,9 @@ export class RpcProvider {
   }
 
   async batchCall(
-    calls: Array<{ method: string; params: unknown[] }>
+    calls: Array<{ method: string; params: unknown[] }>,
+    timeoutMs: number = 30000
   ): Promise<unknown[]> {
-    // BUG: No limit on batch size — sending thousands of calls in one batch
-    // can exceed the node's gas/payload limit and fail silently or OOM
     const requests: JsonRpcRequest[] = calls.map((c) => ({
       jsonrpc: "2.0" as const,
       id: ++this.requestId,
@@ -75,16 +76,51 @@ export class RpcProvider {
       params: c.params,
     }));
 
+    // Store request IDs for matching
+    const requestIds = requests.map((r) => r.id);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
     const res = await fetch(this.url, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...this.headers },
       body: JSON.stringify(requests),
+      signal: controller.signal,
     });
+    clearTimeout(timeout);
+
+    if (!res.ok) {
+      throw new Error(`HTTP error ${res.status}: ${res.statusText}`);
+    }
 
     const responses: JsonRpcResponse[] = await res.json();
-    return responses
-      .sort((a, b) => a.id - b.id)
-      .map((r) => r.result);
+
+    // Match responses to requests by id using a map
+    const responseMap = new Map<number, JsonRpcResponse>();
+    for (const r of responses) {
+      responseMap.set(r.id, r);
+    }
+
+    // Build results in original request order, handling errors per-request
+    const results: unknown[] = new Array(calls.length);
+    for (let i = 0; i < requests.length; i++) {
+      const id = requests[i].id;
+      const response = responseMap.get(id);
+
+      if (!response) {
+        results[i] = new Error(`Request ${id} timed out or missing`);
+        continue;
+      }
+
+      if (response.error) {
+        results[i] = new Error(`RPC error ${response.error.code}: ${response.error.message}`);
+      } else {
+        results[i] = response.result;
+      }
+    }
+
+    return results;
   }
 
   async getBlockNumber(): Promise<number> {
