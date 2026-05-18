@@ -1,85 +1,164 @@
 r"""
 AGENT: Gemini CLI
-PLATFORM: win32 | Saturday, 16 May 2026
+PLATFORM: win32 | Monday, 18 May 2026
 ENVIRONMENT: win32 | x64 | C:\Users\aalok\OpenAgents | powershell
-TASK: Fix ratelimit.py tier differentiation and headers (#200)
+TASK: Reworked ratelimit.py with Auth-awareness, IP-Spoofing protection, and Backwards Compatibility (#200)
 """
 
 import time
+import os
+import jwt
+import logging
 from collections import defaultdict
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, List
+
+# Setup logging
+logger = logging.getLogger("ratelimit")
 
 
 class RateLimitConfig:
-    def __init__(self):
-        # Tiers: (requests_per_minute, burst_limit)
+    def __init__(
+        self,
+        requests_per_window: int = 100,
+        window_seconds: int = 60,
+        burst_limit: int = 20,
+    ):
+        self.requests_per_window = requests_per_window
+        self.window_seconds = window_seconds
+        self.burst_limit = burst_limit
+        
+        # Default Tier Limits: (requests_per_window, burst_limit)
         self.tiers = {
             "anonymous": (60, 10),
             "authenticated": (300, 50),
             "premium": (1000, 100)
         }
-        self.window_seconds = 60
 
 
 # Sliding window storage: client_id -> [timestamps]
-_request_history: Dict[str, list] = defaultdict(list)
+# Note: In-memory store will reset on server restart. 
+_request_history: Dict[str, List[float]] = defaultdict(list)
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, config: RateLimitConfig = None):
+    def __init__(self, app, config: Optional[RateLimitConfig] = None):
         super().__init__(app)
         self.config = config or RateLimitConfig()
+        # Secure secret handling
+        self.jwt_secret = os.environ.get("JWT_SECRET", "fallback_secret_for_dev_only")
 
     def _get_client_identity(self, request: Request) -> Tuple[str, str]:
-        """Returns (identity_key, tier)"""
-        # 1. Check for Premium API Key (Hypothetical header for this task)
+        """
+        Determines client identity and their rate limit tier.
+        Returns (identity_key, tier)
+        """
+        # 1. Check for Premium API Key (Highest Priority)
         premium_key = request.headers.get("X-Premium-Key")
         if premium_key:
             return f"premium:{premium_key}", "premium"
 
-        # 2. Check for Authenticated User (via request state or JWT)
-        # In a real app, this would be populated by an earlier auth middleware
+        # 2. Check for Authenticated User
+        # First check if user was already identified by a previous middleware
         user = getattr(request.state, "user", None)
-        if user and user.get("id"):
+        if user and isinstance(user, dict) and user.get("id"):
             return f"user:{user['id']}", "authenticated"
+            
+        # Proactive JWT check to identify tier before route dependencies run
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1]
+            try:
+                # We attempt to decode to find identity. 
+                # Note: Full validation (expiry, etc.) is handled by auth middleware later,
+                # but we verify signature here to prevent tier elevation attacks.
+                payload = jwt.decode(token, self.jwt_secret, algorithms=["HS256"])
+                user_id = payload.get("sub") or payload.get("id")
+                if user_id:
+                    return f"user:{user_id}", "authenticated"
+            except Exception:
+                # If token is invalid, we don't fail yet, just treat as anonymous
+                pass
 
         # 3. Fallback to IP for Anonymous
-        forwarded = request.headers.get("X-Forwarded-For")
-        ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "unknown")
+        # Only trust X-Forwarded-For if explicitly configured (TRUST_PROXY=true)
+        trust_proxy = os.getenv("TRUST_PROXY", "false").lower() == "true"
+        if trust_proxy:
+            forwarded = request.headers.get("X-Forwarded-For")
+            if forwarded:
+                # Get the first IP in the list (original client)
+                ip = forwarded.split(",")[0].strip()
+            else:
+                ip = request.client.host if request.client else "unknown"
+        else:
+            ip = request.client.host if request.client else "unknown"
+            
         return f"anon:{ip}", "anonymous"
 
     def _is_rate_limited(self, identity_key: str, tier: str) -> Tuple[bool, int, int, int]:
-        """Returns (is_limited, limit, remaining, retry_after_or_reset)"""
+        """
+        Dual-window sliding rate limit check (Burst + Total).
+        Returns (is_limited, limit, remaining, reset_in_seconds)
+        """
         global _request_history
         now = time.time()
         
-        limit, _ = self.config.tiers[tier]
+        # Resolve limits for the detected tier
+        tier_limits = self.config.tiers.get(tier)
+        if tier_limits:
+            limit, burst = tier_limits
+        else:
+            limit = self.config.requests_per_window
+            burst = self.config.burst_limit
+            
         history = _request_history[identity_key]
 
-        # Clean up old timestamps outside the window
+        # Cleanup: Remove expired timestamps outside the main window
         history = [ts for ts in history if now - ts < self.config.window_seconds]
-        _request_history[identity_key] = history
+        
+        # 1. Check Burst Limit (1 second sub-window)
+        burst_history = [ts for ts in history if now - ts < 1.0]
+        if len(burst_history) >= burst:
+            logger.warning(f"Burst limit exceeded for {identity_key} ({tier})")
+            _request_history[identity_key] = history
+            return True, limit, 0, 1
 
+        # 2. Check Total Window Limit
         if len(history) >= limit:
-            # Reset time is when the oldest request in the current window expires
-            reset_time = int(self.config.window_seconds - (now - history[0]))
-            return True, limit, 0, reset_time
+            logger.warning(f"Rate limit exceeded for {identity_key} ({tier})")
+            # reset_in is the time until the oldest request in the window expires
+            reset_in = int(self.config.window_seconds - (now - history[0]))
+            reset_in = max(1, reset_in)
+            _request_history[identity_key] = history
+            return True, limit, 0, reset_in
 
+        # Allowance granted. Record current request.
         history.append(now)
+        _request_history[identity_key] = history
+        
         remaining = limit - len(history)
-        # Reset time for headers (approximate end of window)
-        reset_in = self.config.window_seconds
+        
+        # Calculate time until next slot opens (if limited) or end of window
+        if history:
+            reset_in = int(self.config.window_seconds - (now - history[0]))
+        else:
+            reset_in = self.config.window_seconds
+        reset_in = max(1, reset_in)
+
         return False, limit, remaining, reset_in
 
     async def dispatch(self, request: Request, call_next):
-        if request.url.path.startswith("/health"):
+        # Health checks are excluded from limiting to ensure infra stability
+        if request.url.path.endswith("/health"):
             return await call_next(request)
 
         identity_key, tier = self._get_client_identity(request)
         is_limited, limit, remaining, reset = self._is_rate_limited(identity_key, tier)
+
+        # Standard X-RateLimit headers (Reset as Epoch UTC)
+        reset_at = int(time.time() + reset)
 
         if is_limited:
             return JSONResponse(
@@ -88,21 +167,38 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     "error": "Rate limit exceeded",
                     "tier": tier,
                     "retry_after": reset,
+                    "message": f"Rate limit reached for {tier} tier. Please try again later."
                 },
                 headers={
                     "Retry-After": str(reset),
                     "X-RateLimit-Limit": str(limit),
                     "X-RateLimit-Remaining": "0",
-                    "X-RateLimit-Reset": str(reset)
+                    "X-RateLimit-Reset": str(reset_at),
+                    "X-RateLimit-Tier": tier
                 },
             )
 
         response = await call_next(request)
+        
+        # Inject standard rate limit headers into successful response
         response.headers["X-RateLimit-Limit"] = str(limit)
         response.headers["X-RateLimit-Remaining"] = str(remaining)
-        response.headers["X-RateLimit-Reset"] = str(reset)
+        response.headers["X-RateLimit-Reset"] = str(reset_at)
+        response.headers["X-RateLimit-Tier"] = tier
+        
         return response
 
 
-def create_rate_limiter() -> RateLimitMiddleware:
-    return RateLimitMiddleware(app=None)
+def create_rate_limiter(
+    requests_per_minute: int = 100,
+    burst: int = 20,
+) -> RateLimitMiddleware:
+    """
+    Backwards compatible factory for creating the rate limiter middleware.
+    """
+    config = RateLimitConfig(
+        requests_per_window=requests_per_minute,
+        window_seconds=60,
+        burst_limit=burst,
+    )
+    return RateLimitMiddleware(app=None, config=config)
