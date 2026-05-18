@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-/// @contributor opencode-gaotax2006
-/// @platform You are opencode, an interactive CLI tool...
-/// @runtime os=win32 arch=x64 workingdir=F:\ai-bounty-work\bounty-hunter\openagents shell=powershell
-/// @date 2026-05-17T00:00:00Z
+/**
+ * @contributor Gemini CLI
+ * @platform You are Gemini CLI, an interactive CLI agent specializing in software engineering tasks. You are currently operating in Auto-Edit mode. Your primary goal is to help users safely and effectively. Security & System Integrity - Credential Protection: Never log, print, or commit secrets, API keys, or sensitive credentials. Rigorously protect .env files, .git, and system configuration folders. Source Control: Do not stage or commit changes unless specifically requested by the user. Context Efficiency: Be strategic in your use of the available tools to minimize unnecessary context usage while still providing the best answer that you can. Engineering Standards - Contextual Precedence: Instructions found in GEMINI.md files are foundational mandates. They take absolute precedence over the general workflows and tool defaults described in this system prompt. Conventions & Style: Rigorously adhere to existing workspace conventions, architectural patterns, and style. Design Patterns: Prioritize explicit composition and delegation over complex inheritance or prototype-based cloning. Technical Integrity: You are responsible for the entire lifecycle: implementation, testing, and validation. For bug fixes, you must empirically reproduce the failure with a new test case or reproduction script before applying the fix. Development Lifecycle - Research -> Strategy -> Execution. Validation is the only path to finality.
+ * @runtime os=win32 arch=x64 working_directory=C:\chromeMCP\OpenAgents
+ */
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -14,10 +15,10 @@ contract PaymentEscrow is Ownable {
         address payer;
         address payee;
         address token;
-        uint256 amount;
+        uint256 totalAmount;
+        uint256 releasedAmount;
         uint256 releaseTime;
-        bool released;
-        bool refunded;
+        bool settled;
         bool disputed;
     }
 
@@ -30,8 +31,8 @@ contract PaymentEscrow is Ownable {
     event EscrowReleased(uint256 indexed escrowId, address indexed payee, uint256 amount);
     event EscrowRefunded(uint256 indexed escrowId, address indexed payer, uint256 amount);
     event EscrowDisputed(uint256 indexed escrowId, address indexed initiator);
-    event DisputeResolved(uint256 indexed escrowId, address indexed winner, uint256 payerAmount, uint256 payeeAmount);
-    event EscrowTimedOut(uint256 indexed escrowId);
+    event DisputeResolved(uint256 indexed escrowId, uint256 payerAmount, uint256 payeeAmount);
+    event EscrowPartialRelease(uint256 indexed escrowId, uint256 amount);
 
     constructor() Ownable(msg.sender) {}
 
@@ -51,10 +52,10 @@ contract PaymentEscrow is Ownable {
             payer: msg.sender,
             payee: payee,
             token: token,
-            amount: amount,
+            totalAmount: amount,
+            releasedAmount: 0,
             releaseTime: block.timestamp + lockDuration,
-            released: false,
-            refunded: false,
+            settled: false,
             disputed: false
         });
 
@@ -62,34 +63,55 @@ contract PaymentEscrow is Ownable {
         return escrowId;
     }
 
+    function partialRelease(uint256 escrowId, uint256 amount) external {
+        Escrow storage escrow = escrows[escrowId];
+        require(!escrow.settled, "Already settled");
+        require(!escrow.disputed, "Under dispute");
+        require(msg.sender == escrow.payer, "Not payer");
+        
+        uint256 remaining = escrow.totalAmount - escrow.releasedAmount;
+        require(amount > 0 && amount <= remaining, "Invalid amount");
+
+        escrow.releasedAmount += amount;
+        if (escrow.releasedAmount == escrow.totalAmount) {
+            escrow.settled = true;
+        }
+
+        IERC20(escrow.token).transfer(escrow.payee, amount);
+        emit EscrowPartialRelease(escrowId, amount);
+    }
+
     function releaseEscrow(uint256 escrowId) external {
         Escrow storage escrow = escrows[escrowId];
-        require(!escrow.released && !escrow.refunded, "Already settled");
+        require(!escrow.settled, "Already settled");
         require(!escrow.disputed, "Under dispute");
         require(msg.sender == escrow.payer || msg.sender == owner(), "Not authorized");
 
-        escrow.released = true;
-        IERC20(escrow.token).transfer(escrow.payee, escrow.amount);
+        uint256 amountToRelease = escrow.totalAmount - escrow.releasedAmount;
+        escrow.releasedAmount = escrow.totalAmount;
+        escrow.settled = true;
 
-        emit EscrowReleased(escrowId, escrow.payee, escrow.amount);
+        IERC20(escrow.token).transfer(escrow.payee, amountToRelease);
+        emit EscrowReleased(escrowId, escrow.payee, amountToRelease);
     }
 
     function refundEscrow(uint256 escrowId) external {
         Escrow storage escrow = escrows[escrowId];
-        require(!escrow.released && !escrow.refunded, "Already settled");
+        require(!escrow.settled, "Already settled");
         require(!escrow.disputed, "Under dispute");
         require(block.timestamp > escrow.releaseTime, "Lock not expired");
         require(msg.sender == escrow.payer, "Not payer");
 
-        escrow.refunded = true;
-        IERC20(escrow.token).transfer(escrow.payer, escrow.amount);
+        uint256 amountToRefund = escrow.totalAmount - escrow.releasedAmount;
+        escrow.settled = true;
 
-        emit EscrowRefunded(escrowId, escrow.payer, escrow.amount);
+        IERC20(escrow.token).transfer(escrow.payer, amountToRefund);
+        emit EscrowRefunded(escrowId, escrow.payer, amountToRefund);
     }
 
     function disputeEscrow(uint256 escrowId) external {
         Escrow storage escrow = escrows[escrowId];
-        require(!escrow.released && !escrow.refunded, "Already settled");
+        require(!escrow.settled, "Already settled");
         require(!escrow.disputed, "Already disputed");
         require(msg.sender == escrow.payer || msg.sender == escrow.payee, "Not party");
 
@@ -102,11 +124,13 @@ contract PaymentEscrow is Ownable {
         require(escrow.disputed, "Not disputed");
         require(payerPct <= 100, "Invalid percentage");
 
-        escrow.disputed = false;
-        escrow.released = true;
+        uint256 remaining = escrow.totalAmount - escrow.releasedAmount;
+        uint256 payerAmount = (remaining * payerPct) / 100;
+        uint256 payeeAmount = remaining - payerAmount;
 
-        uint256 payerAmount = (escrow.amount * payerPct) / 100;
-        uint256 payeeAmount = escrow.amount - payerAmount;
+        escrow.disputed = false;
+        escrow.settled = true;
+        escrow.releasedAmount = escrow.totalAmount;
 
         if (payerAmount > 0) {
             IERC20(escrow.token).transfer(escrow.payer, payerAmount);
@@ -115,17 +139,20 @@ contract PaymentEscrow is Ownable {
             IERC20(escrow.token).transfer(escrow.payee, payeeAmount);
         }
 
-        emit DisputeResolved(escrowId, address(0), payerAmount, payeeAmount);
+        emit DisputeResolved(escrowId, payerAmount, payeeAmount);
     }
 
-    function claimTimeout(uint256 escrowId) external {
+    function autoRefund(uint256 escrowId) external {
         Escrow storage escrow = escrows[escrowId];
-        require(!escrow.released && !escrow.refunded, "Already settled");
+        require(!escrow.settled, "Already settled");
+        // Disputed escrows cannot be auto-refunded, must be resolved by owner
+        require(!escrow.disputed, "Under dispute");
         require(block.timestamp > escrow.releaseTime + TIMEOUT_PERIOD, "Timeout not reached");
 
-        escrow.refunded = true;
-        IERC20(escrow.token).transfer(escrow.payer, escrow.amount);
+        uint256 amountToRefund = escrow.totalAmount - escrow.releasedAmount;
+        escrow.settled = true;
 
-        emit EscrowTimedOut(escrowId);
+        IERC20(escrow.token).transfer(escrow.payer, amountToRefund);
+        emit EscrowRefunded(escrowId, escrow.payer, amountToRefund);
     }
 }
