@@ -45,6 +45,7 @@ class Agent(Base):
     model_type = Column(String(32), default="gpt-4")
     config = Column(JSON, default=dict)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    endpoint_url = Column(String(2048), nullable=True)  # NEW: agent endpoint URL
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # BUG: No cascade delete — deleting a user leaves orphaned agents
