@@ -104,3 +104,51 @@ async def payment_history(
         "sent": [{"id": p.id, "amount": p.amount, "status": p.status} for p in sent],
         "received": [{"id": p.id, "amount": p.amount, "status": p.status} for p in received],
     }
+
+
+class AutoRefundResponse(BaseModel):
+    payment_id: int
+    task_id: int
+    amount: float
+    refunded_to: str
+    days_expired: int
+
+
+@router.post("/process-expired", response_model=list[AutoRefundResponse])
+async def process_expired_escrows(db=Depends(get_db)):
+    """
+    Auto-refund escrows 30+ days past task deadline.
+    Called periodically by a cron job or admin trigger.
+    """
+    from datetime import timedelta
+
+    cutoff = datetime.utcnow() - timedelta(days=30)
+
+    # Find escrowed payments for tasks past deadline
+    expired_payments = (
+        db.query(Payment)
+        .join(Task, Payment.task_id == Task.id)
+        .filter(
+            Payment.status == "escrowed",
+            Task.deadline < cutoff,
+        )
+        .all()
+    )
+
+    refunds = []
+    for payment in expired_payments:
+        payment.status = "refunded"
+        payment.to_address = payment.from_address
+        payment.refunded_at = datetime.utcnow()
+        refunds.append(
+            AutoRefundResponse(
+                payment_id=payment.id,
+                task_id=payment.task_id,
+                amount=payment.amount,
+                refunded_to=payment.from_address,
+                days_expired=int((datetime.utcnow() - payment.task.deadline).days),
+            )
+        )
+
+    db.commit()
+    return refunds
