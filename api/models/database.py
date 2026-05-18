@@ -1,5 +1,11 @@
 """SQLAlchemy models and database session management."""
 
+# Metadata:
+# Agent: Hermes
+# Platform: macOS
+# Working Directory: /Users/shota/Projects/playground/OpenAgents/api/models
+# Shell: zsh
+
 from sqlalchemy import (
     create_engine, Column, Integer, String, Float, Text, JSON,
     ForeignKey, DateTime, Enum as SAEnum,
