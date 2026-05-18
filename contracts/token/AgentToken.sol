@@ -1,6 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+// @fix-author: Metatron (Hermes Agent) — 2026-05-18
+// @fix-issue: #162 — AgentToken permit replay across chains after fork
+// @fix-summary: Made DOMAIN_SEPARATOR dynamic with chain-ID caching instead of
+//   immutable. Private _domainSeparator is recomputed on every DOMAIN_SEPARATOR()
+//   call if block.chainid differs from cached _domainSeparatorChainId. After a
+//   fork, permits signed on the old fork are invalidated because the separator
+//   changes. Added DOMAIN_SEPARATOR() public view function per EIP-2612 spec.
+//   Extracted DOMAIN_TYPEHASH as a named constant.
+// @env: WSL Linux x86_64, /home/power, /home/power/projects/OpenAgents, bash
+// @platform: Hermes Agent, model deepseek-v4-pro, provider deepseek
+// @instructions-hash: fadaac9f9bb04dc4 (see CONTRIBUTORS.json for full text)
+
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 
@@ -15,7 +27,18 @@ contract AgentToken is ERC20, ERC20Burnable {
     bytes32 public constant PERMIT_TYPEHASH = keccak256(
         "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
     );
-    bytes32 public immutable DOMAIN_SEPARATOR;
+
+    // FIX: DOMAIN_SEPARATOR is no longer immutable — it's recomputed on every
+    // call, using a cached chain ID to detect forks. On a fork where the chain
+    // ID differs, the separator is automatically recomputed, invalidating
+    // permits from the other fork.
+    bytes32 private _domainSeparator;
+    uint256 private _domainSeparatorChainId;
+
+    bytes32 private constant DOMAIN_TYPEHASH = keccak256(
+        "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
+    );
+
     mapping(address => uint256) public nonces;
 
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
@@ -27,8 +50,25 @@ contract AgentToken is ERC20, ERC20Burnable {
     ) ERC20(name_, symbol_) {
         owner = msg.sender;
         _mint(msg.sender, initialSupply);
-        DOMAIN_SEPARATOR = keccak256(abi.encode(
-            keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+        _domainSeparator = _computeDomainSeparator(name_);
+        _domainSeparatorChainId = block.chainid;
+    }
+
+    /// @notice Returns the EIP-712 domain separator, recomputed if the chain
+    ///         ID has changed (e.g. after a fork).
+    /// @return The current domain separator.
+    function DOMAIN_SEPARATOR() public view returns (bytes32) {
+        if (block.chainid == _domainSeparatorChainId) {
+            return _domainSeparator;
+        }
+        return _computeDomainSeparator(name());
+    }
+
+    /// @dev Internal helper to compute the domain separator for the given
+    ///      token name and the current chain ID.
+    function _computeDomainSeparator(string memory name_) private view returns (bytes32) {
+        return keccak256(abi.encode(
+            DOMAIN_TYPEHASH,
             keccak256(bytes(name_)),
             keccak256(bytes("1")),
             block.chainid,
@@ -82,7 +122,9 @@ contract AgentToken is ERC20, ERC20Burnable {
             deadline
         ));
 
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
+        // FIX: Use the dynamic DOMAIN_SEPARATOR() instead of an immutable cached
+        // value so that the separator is correct after a chain fork.
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR(), structHash));
         address recoveredAddress = ecrecover(digest, v, r, s);
         require(recoveredAddress != address(0) && recoveredAddress == _owner, "AgentToken: invalid signature");
 
