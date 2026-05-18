@@ -7,7 +7,7 @@ from datetime import datetime
 import json
 
 from ..models.database import get_db, Task
-from ..middleware.auth import get_current_user
+from ..middleware.auth import get_current_user, decode_token
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -44,7 +44,15 @@ manager = ConnectionManager()
 
 
 @router.websocket("/ws")
-async def task_websocket(websocket: WebSocket):
+async def task_websocket(websocket: WebSocket, token: str = Query(...)):
+    try:
+        payload = decode_token(token)
+        if payload.get("type") != "access":
+            await websocket.close(code=4001, reason="Invalid token type")
+            return
+    except HTTPException:
+        await websocket.close(code=4001, reason="Unauthorized")
+        return
     await websocket.accept()
     subscriptions = set()
     try:
