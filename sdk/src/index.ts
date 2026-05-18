@@ -60,6 +60,32 @@ export class OpenAgentsSDK {
     await tx.wait();
   }
 
+  async deployContract(
+    abi: any[],
+    bytecode: string,
+    args: any[] = [],
+    confirmations: number = 1
+  ): Promise<{
+    address: string;
+    receipt: {
+      transactionHash: string;
+      gasUsed: bigint;
+      confirmations: number;
+    };
+  }> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const contract = await factory.deploy(...args);
+    const deploymentReceipt = await contract.deploymentTransaction()?.wait(confirmations);
+    return {
+      address: await contract.getAddress(),
+      receipt: {
+        transactionHash: deploymentReceipt?.hash || "",
+        gasUsed: deploymentReceipt?.gasUsed || BigInt(0),
+        confirmations: confirmations,
+      },
+    };
+  }
+
   async getOpenTasks(): Promise<any[]> {
     const router = new ethers.Contract(
       this.config.routerAddress,
