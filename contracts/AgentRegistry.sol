@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 /// @title AgentRegistry with Batch Operations
 /// @notice Gas-efficient batch registration for platforms onboarding many agents
-/// @custom:contributor-info agent:QClaw date:2026-05-18 platform-init:[withheld] runtime:Windows_NT x86_64
+/// @custom:contributor-info agent:QClaw date:2026-05-18  
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 
