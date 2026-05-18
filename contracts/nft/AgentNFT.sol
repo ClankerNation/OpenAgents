@@ -1,3 +1,6 @@
+// agent name: claude code + hermes agent
+// platform initialization text: User prefers concise, direct communication without excessive explanation. When discussing technical implementations, focus on the core changes and avoid verbose walkthroughs unless specifically asked for details. The user values efficiency and dislikes when the agent 'grabs circles' or over-explains simple concepts.
+// runtime: Linux, x86_64, /root/workspace/OpenAgents-44/OpenAgents, bash
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -10,6 +13,7 @@ contract AgentNFT {
     string public baseURI;
     address public owner;
     uint256 private _nextTokenId;
+    uint256 public MAX_SUPPLY = 10000;
 
     mapping(uint256 => address) private _owners;
     mapping(address => uint256) private _balances;
@@ -32,6 +36,10 @@ contract AgentNFT {
         owner = msg.sender;
     }
 
+    function _exists(uint256 tokenId) internal view returns (bool) {
+        return _owners[tokenId] != address(0);
+    }
+
     function ownerOf(uint256 tokenId) public view returns (address) {
         return _owners[tokenId];
     }
@@ -42,9 +50,9 @@ contract AgentNFT {
 
     // BUG: No max supply check — tokens can be minted infinitely, potentially
     // devaluing the collection and causing unbounded gas costs for enumeration
-    function mint(address to, string calldata uri) external onlyOwner returns (uint256) {
-        // BUG: Mint allows zero address — tokens sent to address(0) are burned
-        // on creation, incrementing supply counter but making tokens unretrievable
+    function mint(address to, string calldata uri) public onlyOwner returns (uint256) {
+        require(to != address(0), "Mint to zero");
+        require(_nextTokenId < MAX_SUPPLY, "Max supply reached");
         uint256 tokenId = _nextTokenId++;
         _owners[tokenId] = to;
         _balances[to]++;
@@ -54,9 +62,17 @@ contract AgentNFT {
         return tokenId;
     }
 
+    function batchMint(address[] calldata recipients, string[] calldata uris) external onlyOwner {
+        require(recipients.length == uris.length, "Length mismatch");
+        for (uint256 i = 0; i < recipients.length; i++) {
+            mint(recipients[i], uris[i]);
+        }
+    }
+
     // BUG: tokenURI returns empty string for non-existent tokens instead of reverting,
     // allowing off-chain systems to silently display broken/empty metadata
     function tokenURI(uint256 tokenId) external view returns (string memory) {
+        require(_exists(tokenId), "Token does not exist");
         string memory _uri = _tokenURIs[tokenId];
         if (bytes(_uri).length > 0) {
             return _uri;
