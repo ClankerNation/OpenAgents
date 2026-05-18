@@ -1,5 +1,12 @@
 import { ethers } from "ethers";
 
+/**
+ * @title OpenAgentsSDK
+ * @notice SDK for interacting with the OpenAgents protocol
+ * @author OpenAgents Contributors
+ * @version 1.0.0
+ */
+
 export interface AgentConfig {
   name: string;
   endpoint: string;
@@ -58,6 +65,34 @@ export class OpenAgentsSDK {
       ethers.toUtf8Bytes(result)
     );
     await tx.wait();
+  }
+
+  async deployContract(
+    abi: any[],
+    bytecode: string,
+    args: any[] = [],
+    confirmations: number = 1
+  ): Promise<{
+    address: string;
+    receipt: {
+      transactionHash: string;
+      gasUsed: bigint;
+      confirmations: number;
+    };
+  }> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+
+    const contract = await factory.deploy(...args);
+    const deploymentReceipt = await contract.deploymentTransaction()?.wait(confirmations);
+
+    return {
+      address: await contract.getAddress(),
+      receipt: {
+        transactionHash: deploymentReceipt?.hash || "",
+        gasUsed: deploymentReceipt?.gasUsed || BigInt(0),
+        confirmations: confirmations,
+      },
+    };
   }
 
   async getOpenTasks(): Promise<any[]> {
