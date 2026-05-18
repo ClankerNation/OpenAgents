@@ -3,11 +3,27 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+from .models.database import init_db
+from .routes.agents import router as agents_router
+from .routes.tasks import router as tasks_router
+from .routes.payments import router as payments_router
+from .routes.audit import router as audit_router
+from .middleware.audit import AuditMiddleware
+
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+# Register audit-logging middleware (must be added before routes)
+app.add_middleware(AuditMiddleware)
+
+# Register route modules
+app.include_router(agents_router)
+app.include_router(tasks_router)
+app.include_router(payments_router)
+app.include_router(audit_router)
 
 
 class AgentResponse(BaseModel):
@@ -44,7 +60,7 @@ agents_cache: dict = {}
 tasks_cache: dict = {}
 
 
-@app.get("/agents", response_model=list[AgentResponse])
+@app.get("/agents", response_model=list[AgentResponse], deprecated=True)
 async def list_agents(
     active_only: bool = Query(True),
     min_reputation: int = Query(0),
@@ -58,14 +74,14 @@ async def list_agents(
     return results[offset : offset + limit]
 
 
-@app.get("/agents/{agent_id}", response_model=AgentResponse)
+@app.get("/agents/{agent_id}", response_model=AgentResponse, deprecated=True)
 async def get_agent(agent_id: str):
     if agent_id not in agents_cache:
         raise HTTPException(status_code=404, detail="Agent not found")
     return agents_cache[agent_id]
 
 
-@app.get("/tasks", response_model=list[TaskResponse])
+@app.get("/tasks", response_model=list[TaskResponse], deprecated=True)
 async def list_tasks(
     status: Optional[str] = Query(None),
     limit: int = Query(50, le=100),
@@ -77,7 +93,7 @@ async def list_tasks(
     return results[offset : offset + limit]
 
 
-@app.get("/tasks/{task_id}", response_model=TaskResponse)
+@app.get("/tasks/{task_id}", response_model=TaskResponse, deprecated=True)
 async def get_task(task_id: int):
     if task_id not in tasks_cache:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -110,3 +126,8 @@ async def health():
         "tasks_indexed": len(tasks_cache),
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+
+@app.on_event("startup")
+async def startup():
+    init_db()
