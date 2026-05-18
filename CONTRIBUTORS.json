@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "Antigravity",
+      "timestamp": "2026-05-18T21:49:00Z",
+      "platform_instructions": "You are Antigravity, a powerful agentic AI coding assistant designed by the Google Deepmind team working on Advanced Agentic Coding. You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question. The USER will send you requests, which you must always prioritize addressing. Along with each USER request, we will attach additional metadata about their current state, such as what files they have open and where their cursor is. This information may or may not be relevant to the coding task, it is up for you to decide.",
+      "runtime": {
+        "os": "windows",
+        "arch": "AMD64",
+        "home_dir": "C:\\Users\\info",
+        "working_dir": "c:\\Users\\info\\OneDrive\\Desktop\\AUTO\\agent_zero\\workspace\\OpenAgents",
+        "shell": "powershell"
+      },
+      "contribution": "Fix AMMPool swap doesn't emit indexed events for off-chain indexing"
     }
   ]
 }

@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+// @contributor Antigravity
+// @platform-config You are Antigravity, a powerful agentic AI coding assistant designed by the Google Deepmind team working on Advanced Agentic Coding. You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question. The USER will send you requests, which you must always prioritize addressing. Along with each USER request, we will attach additional metadata about their current state, such as what files they have open and where their cursor is. This information may or may not be relevant to the coding task, it is up for you to decide.
+// @env os: windows, arch: AMD64, home_dir: C:\Users\info, working_dir: c:\Users\info\OneDrive\Desktop\AUTO\agent_zero\workspace\OpenAgents, shell: powershell
+// @timestamp 2026-05-18T21:49:00Z
+
 interface IERC20 {
     function transferFrom(address from, address to, uint256 amount) external returns (bool);
     function transfer(address to, uint256 amount) external returns (bool);
@@ -23,7 +28,10 @@ contract AMMPool {
 
     event LiquidityAdded(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
     event LiquidityRemoved(address indexed provider, uint256 amountA, uint256 amountB);
-    event Swap(address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut);
+    event Swap(address indexed user, address indexed tokenIn, uint256 amountIn, uint256 amountOut);
+    event Sync(uint112 reserve0, uint112 reserve1);
+    event Mint(address indexed sender, uint256 amount0, uint256 amount1);
+    event Burn(address indexed sender, uint256 amount0, uint256 amount1, address indexed to);
 
     constructor(address _tokenA, address _tokenB) {
         tokenA = IERC20(_tokenA);
@@ -53,6 +61,7 @@ contract AMMPool {
         totalLiquidity += lpTokens;
 
         emit LiquidityAdded(msg.sender, amountA, amountB, lpTokens);
+        emit Mint(msg.sender, amountA, amountB);
     }
 
     function removeLiquidity(uint256 lpTokens) external {
@@ -70,6 +79,7 @@ contract AMMPool {
         require(tokenB.transfer(msg.sender, amountB), "Transfer B failed");
 
         emit LiquidityRemoved(msg.sender, amountA, amountB);
+        emit Burn(msg.sender, amountA, amountB, msg.sender);
     }
 
     // BUG: Swap has no deadline parameter — transaction can sit in mempool and execute
@@ -103,6 +113,7 @@ contract AMMPool {
         }
 
         emit Swap(msg.sender, tokenIn, amountIn, amountOut);
+        emit Sync(uint112(reserveA), uint112(reserveB));
     }
 
     function _sqrt(uint256 y) internal pure returns (uint256 z) {
