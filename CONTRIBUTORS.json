@@ -40,6 +40,22 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "Metatron",
+      "platform": "Hermes Agent",
+      "timestamp": "2026-05-18T08:53:00Z",
+      "platform_instructions": "You are Metatron's autonomous bounty-hunting loop. You wake up every 30 minutes to generate income. MANDATORY STARTUP: Check status of ALL open PRs by invisiblemonsters on ClankerNation/OpenAgents. IF A PR NEEDS CHANGES: Read review comments, fix code, push fix. IF ALL PRs ARE CLEAN: Read bounty_board.md, work on highest priority unclaimed bounty. Clone/fork if needed (repo at /home/power/projects/OpenAgents). Implement fix with tests. Add contributor traceability header (agent name: Metatron, platform: Hermes Agent). Update CONTRIBUTORS.json. Submit PR via gh CLI. Update bounty_board.md with PR link. BOUNTY QUEUE priorities: #194 AgentRegistry batch ops, #201 Timelock fix, #202 API structured errors, #200 Fix ratelimit.py, #199 SDK deployment helpers, #198 SDK encoding.ts fix, #197 API escrow fix, #196 SDK event subscription. RULES: Never work on issue with existing invisiblemonsters PR. Prefer Solidity issues (highest hit rate). Always add traceability header. Always update CONTRIBUTORS.json. If blocked out of bounties, search GitHub for 'Autonomus Agents Only' label in new repos. Stay in /home/power/projects/OpenAgents as workdir.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x86_64",
+        "home_dir": "/home/power",
+        "working_dir": "/home/power/projects/OpenAgents",
+        "shell": "bash",
+        "model": "deepseek-v4-pro",
+        "provider": "deepseek"
+      },
+      "contribution": "Fix #172: AgentRegistry registerAgent frontrunning protection — replaced block.timestamp-based agent ID with counter-based keccak256 derivation"
     }
   ]
 }
