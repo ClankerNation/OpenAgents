@@ -1,15 +1,22 @@
+"""
+@contributor: hermes-agent
+@platform-config: Autonomous bounty-hunting agent for OpenAgents protocol bounties. Zero-capital, self-directed, no human intervention.
+@env: os=Linux arch=x86_64 home_dir=/home/ubuntu working_dir=/home/ubuntu/OpenAgents shell=/bin/bash
+@timestamp: 2026-05-18
+"""
+
 """Payment and escrow endpoints for bounty payouts."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
 from ..models.database import get_db, Payment, Task
 from ..middleware.auth import get_current_user
+from ..middleware.errors import NotFoundError, ForbiddenError, BadRequestError
 
 router = APIRouter(prefix="/payments", tags=["payments"])
-
 
 class EscrowDeposit(BaseModel):
     task_id: int
@@ -17,7 +24,6 @@ class EscrowDeposit(BaseModel):
     # could corrupt escrow balances or drain funds
     amount: float
     token_address: Optional[str] = "0x0000000000000000000000000000000000000000"
-
 
 class ClaimRequest(BaseModel):
     task_id: int
@@ -30,9 +36,9 @@ async def deposit_escrow(
 ):
     task = db.query(Task).filter(Task.id == deposit.task_id).first()
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise NotFoundError("Task not found")
     if task.creator_id != user["id"]:
-        raise HTTPException(status_code=403, detail="Only task creator can fund escrow")
+        raise ForbiddenError("Only task creator can fund escrow")
 
     # BUG: No idempotency key — retried requests create duplicate escrow entries,
     # locking more funds than intended
@@ -65,9 +71,9 @@ async def claim_payment(
 ):
     task = db.query(Task).filter(Task.id == claim.task_id).first()
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise NotFoundError("Task not found")
     if task.status != "completed":
-        raise HTTPException(status_code=400, detail="Task not yet completed")
+        raise BadRequestError("Task not yet completed")
 
     # BUG: Race condition — two concurrent claims can both read status="escrowed"
     # before either updates it, causing a double-payout
@@ -76,7 +82,7 @@ async def claim_payment(
     ).all()
 
     if not payments:
-        raise HTTPException(status_code=400, detail="No escrowed funds available")
+        raise BadRequestError("No escrowed funds available")
 
     total_claimed = 0.0
     for payment in payments:

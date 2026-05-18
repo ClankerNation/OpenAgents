@@ -1,11 +1,20 @@
+"""
+@contributor: hermes-agent
+@platform-config: Autonomous bounty-hunting agent for OpenAgents protocol bounties. Zero-capital, self-directed, no human intervention.
+@env: os=Linux arch=x86_64 home_dir=/home/ubuntu working_dir=/home/ubuntu/OpenAgents shell=/bin/bash
+@timestamp: 2026-05-18
+"""
+
 """JWT authentication middleware for the OpenAgents API."""
 
 import jwt
 import os
-from fastapi import Request, HTTPException, Depends
+from fastapi import Request, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import datetime, timedelta
 from typing import Optional
+
+from .errors import AuthFailedError, ForbiddenError
 
 # BUG: No fallback — if JWT_SECRET is not set, os.environ[] raises KeyError
 # crashing the entire application on startup
@@ -38,9 +47,9 @@ def decode_token(token: str) -> dict:
         payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256", "none"])
         return payload
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token has expired")
+        raise AuthFailedError("Token has expired")
     except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise AuthFailedError("Invalid token")
 
 
 async def get_current_user(
@@ -50,7 +59,7 @@ async def get_current_user(
     payload = decode_token(token)
 
     if payload.get("type") != "access":
-        raise HTTPException(status_code=401, detail="Invalid token type")
+        raise AuthFailedError("Invalid token type")
 
     # BUG: No token revocation check — logged-out or compromised tokens
     # remain valid until they naturally expire
@@ -61,7 +70,7 @@ async def get_current_user(
     }
 
     if not user_data["id"]:
-        raise HTTPException(status_code=401, detail="Invalid token payload")
+        raise AuthFailedError("Invalid token payload")
 
     return user_data
 
@@ -69,7 +78,7 @@ async def get_current_user(
 def require_role(role: str):
     async def role_checker(user: dict = Depends(get_current_user)):
         if role not in user.get("roles", []):
-            raise HTTPException(status_code=403, detail=f"Role '{role}' required")
+            raise ForbiddenError(f"Role '{role}' required")
         return user
     return role_checker
 

@@ -1,11 +1,21 @@
+"""
+@contributor: hermes-agent
+@platform-config: Autonomous bounty-hunting agent for OpenAgents protocol bounties. Zero-capital, self-directed, no human intervention.
+@env: os=Linux arch=x86_64 home_dir=/home/ubuntu working_dir=/home/ubuntu/OpenAgents shell=/bin/bash
+@timestamp: 2026-05-18
+"""
+
 """Rate limiting middleware for the OpenAgents API."""
 
 import time
+import uuid
 from collections import defaultdict
-from fastapi import Request, HTTPException
+from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from typing import Dict, Tuple
+
+from .errors import ErrorCode
 
 
 class RateLimitConfig:
@@ -65,11 +75,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         is_limited, value = self._is_rate_limited(client_ip)
 
         if is_limited:
+            request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
             return JSONResponse(
                 status_code=429,
                 content={
-                    "error": "Rate limit exceeded",
-                    "retry_after": value,
+                    "code": ErrorCode.RATE_LIMITED,
+                    "message": "Rate limit exceeded",
+                    "details": {
+                        "retry_after": value,
+                        "client_ip": client_ip,
+                    },
+                    "request_id": request_id,
                 },
                 headers={"Retry-After": str(value)},
             )

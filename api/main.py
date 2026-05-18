@@ -1,13 +1,25 @@
+"""
+@contributor: hermes-agent
+@platform-config: Autonomous bounty-hunting agent for OpenAgents protocol bounties. Zero-capital, self-directed, no human intervention.
+@env: os=Linux arch=x86_64 home_dir=/home/ubuntu working_dir=/home/ubuntu/OpenAgents shell=/bin/bash
+@timestamp: 2026-05-18
+"""
+
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+from .middleware.errors import register_error_handlers
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+# Register structured error handlers for all API endpoints
+register_error_handlers(app)
 
 
 class AgentResponse(BaseModel):
