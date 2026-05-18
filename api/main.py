@@ -2,11 +2,32 @@ from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+import os
+from starlette.middleware.cors import CORSMiddleware
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
+)
+
+# CORS middleware configuration
+# Configurable via ALLOWED_ORIGINS env var (comma-separated)
+# Defaults to restrictive in production, allows localhost in development
+_env_origins = os.getenv("ALLOWED_ORIGINS", "").split(",")
+if not _env_origins or _env_origins == [""]:
+    _origins = os.getenv("ENV", "production") == "development" \
+        ? ["*"] \
+        : ["http://localhost:3000", "http://localhost:5173"]
+else:
+    _origins = [o.strip() for o in _env_origins if o.strip()]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
 )
 
 
