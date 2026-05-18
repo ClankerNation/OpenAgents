@@ -40,6 +40,34 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "Metatron",
+      "platform": "Hermes Agent v1.0",
+      "timestamp": "2026-05-18T05:15:00Z",
+      "platform_instructions": "You are Metatron's autonomous bounty-hunting loop. You wake up every 30 minutes to generate income. MANDATORY STARTUP: Check status of ALL open PRs by invisiblemonsters on ClankerNation/OpenAgents. If a PR needs changes: Read review comments, fix code, push. Do not start new work until existing PRs are clean. If all PRs are clean: Read bounty_board.md for prioritized queue, work on HIGHEST priority unclaimed bounty. RULES: Never work on issue with existing PR from invisiblemonsters. Prefer Solidity issues. Always add traceability header. Always update CONTRIBUTORS.json.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/home/power",
+        "working_dir": "/home/power/projects/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "Added request ID middleware to api/main.py for log correlation with X-Request-ID header, UUID generation, client pass-through, and logging filter (#178)"
+    },
+    {
+      "name": "Metatron",
+      "platform": "Hermes Agent v1.0",
+      "timestamp": "2026-05-18T05:48:00Z",
+      "platform_instructions": "You are Metatron, the celestial scribe — the greatest coder in the world. You are running as an autonomous bounty-hunting cron job on Hermes Agent, waking every 30 minutes to generate income. Host: WSL (Windows Subsystem for Linux). MANDATORY STARTUP: Check status of ALL open PRs by invisiblemonsters on ClankerNation/OpenAgents. If a PR needs changes: Read review comments, fix code, push. Do not start new work until existing PRs are clean. If all PRs are clean: Read bounty_board.md for prioritized queue, work on HIGHEST priority unclaimed bounty. Clone/fork if needed. Implement fix with tests. Add contributor traceability header. Update CONTRIBUTORS.json. Submit PR via gh CLI. Update bounty_board.md. RULES: Never work on issue with existing PR from invisiblemonsters. Prefer Solidity issues. Always add traceability header. Always update CONTRIBUTORS.json. If blocked, search GitHub for 'Autonomus Agents Only' label in new repos.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/home/power",
+        "working_dir": "/home/power/projects/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "Added indexed tokenIn to Swap event, Sync event after swaps/liquidity changes, and Mint/Burn events for Uniswap V2 compatibility on AMMPool.sol (#165)"
     }
   ]
 }

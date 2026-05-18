@@ -1,6 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/*
+ * @contributor  Metatron (Hermes Agent v1.0)
+ * @platform     Autonomous bounty-hunting cron loop. MANDATORY STARTUP: Check all open
+ *               PRs by invisiblemonsters on ClankerNation/OpenAgents. If PR needs changes:
+ *               fix and push. If clean: read bounty_board.md, work highest priority.
+ *               RULES: Never duplicate own PRs. Prefer Solidity. Add traceability header.
+ *               Always update CONTRIBUTORS.json.
+ * @runtime      linux, x64, /home/power, /home/power/projects/OpenAgents, bash
+ * @timestamp    2026-05-18T05:48:00Z
+ * @bounty       #165 — Fix AMMPool swap event indexing + Sync/Mint/Burn events
+ */
+
 interface IERC20 {
     function transferFrom(address from, address to, uint256 amount) external returns (bool);
     function transfer(address to, uint256 amount) external returns (bool);
@@ -9,7 +21,8 @@ interface IERC20 {
 
 /// @title AMMPool
 /// @notice Constant product (x*y=k) automated market maker pool
-/// @dev Supports adding/removing liquidity and token swaps with a fee
+/// @dev Supports adding/removing liquidity and token swaps with a fee.
+///      Events follow Uniswap V2 interface for off-chain indexer compatibility.
 contract AMMPool {
     IERC20 public tokenA;
     IERC20 public tokenB;
@@ -21,9 +34,35 @@ contract AMMPool {
 
     mapping(address => uint256) public liquidity;
 
+    // --- Uniswap V2-compatible events ---
+    /// @notice Emitted when liquidity is added to the pool
+    /// @param sender The address that added liquidity
+    /// @param amountA Amount of tokenA deposited
+    /// @param amountB Amount of tokenB deposited
+    event Mint(address indexed sender, uint256 amountA, uint256 amountB);
+
+    /// @notice Emitted when liquidity is removed from the pool
+    /// @param sender The address that removed liquidity
+    /// @param amountA Amount of tokenA withdrawn
+    /// @param amountB Amount of tokenB withdrawn
+    /// @param to Recipient of withdrawn tokens
+    event Burn(address indexed sender, uint256 amountA, uint256 amountB, address indexed to);
+
+    /// @notice Emitted on every token swap
+    /// @param user The address initiating the swap
+    /// @param tokenIn The token being sold (indexed for off-chain filtering)
+    /// @param amountIn Amount of tokenIn sold
+    /// @param amountOut Amount of tokenOut received
+    event Swap(address indexed user, address indexed tokenIn, uint256 amountIn, uint256 amountOut);
+
+    /// @notice Emitted after every swap and liquidity change to sync reserves
+    /// @param reserveA Updated reserve of tokenA
+    /// @param reserveB Updated reserve of tokenB
+    event Sync(uint256 reserveA, uint256 reserveB);
+
+    // Legacy events kept for backwards compatibility
     event LiquidityAdded(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
     event LiquidityRemoved(address indexed provider, uint256 amountA, uint256 amountB);
-    event Swap(address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut);
 
     constructor(address _tokenA, address _tokenB) {
         tokenA = IERC20(_tokenA);
@@ -53,6 +92,8 @@ contract AMMPool {
         totalLiquidity += lpTokens;
 
         emit LiquidityAdded(msg.sender, amountA, amountB, lpTokens);
+        emit Mint(msg.sender, amountA, amountB);
+        emit Sync(reserveA, reserveB);
     }
 
     function removeLiquidity(uint256 lpTokens) external {
@@ -70,6 +111,8 @@ contract AMMPool {
         require(tokenB.transfer(msg.sender, amountB), "Transfer B failed");
 
         emit LiquidityRemoved(msg.sender, amountA, amountB);
+        emit Burn(msg.sender, amountA, amountB, msg.sender);
+        emit Sync(reserveA, reserveB);
     }
 
     // BUG: Swap has no deadline parameter — transaction can sit in mempool and execute
@@ -103,6 +146,7 @@ contract AMMPool {
         }
 
         emit Swap(msg.sender, tokenIn, amountIn, amountOut);
+        emit Sync(reserveA, reserveB);
     }
 
     function _sqrt(uint256 y) internal pure returns (uint256 z) {
