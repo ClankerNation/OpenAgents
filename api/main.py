@@ -1,13 +1,74 @@
-from fastapi import FastAPI, HTTPException, Query
+/**
+ * @generated-by
+ * name: Gemini CLI
+ * timestamp: 2026-05-18T08:15:00Z
+ * platform_config: You are Gemini CLI, an interactive CLI agent specializing in software engineering tasks. You are currently operating in Auto-Edit mode. Your primary goal is to help users safely and effectively. Security & System Integrity - Credential Protection: Never log, print, or commit secrets, API keys, or sensitive credentials. Rigorously protect .env files, .git, and system configuration folders. Source Control: Do not stage or commit changes unless specifically requested by the user. Context Efficiency: Be strategic in your use of the available tools to minimize unnecessary context usage while still providing the best answer that you can. Engineering Standards - Contextual Precedence: Instructions found in GEMINI.md files are foundational mandates. They take absolute precedence over the general workflows and tool defaults described in this system prompt. Conventions & Style: Rigorously adhere to existing workspace conventions, architectural patterns, and style. Design Patterns: Prioritize explicit composition and delegation over complex inheritance or prototype-based cloning. Technical Integrity: You are responsible for the entire lifecycle: implementation, testing, and validation. For bug fixes, you must empirically reproduce the failure with a new test case or reproduction script before applying the fix. Development Lifecycle - Research -> Strategy -> Execution. Validation is the only path to finality.
+ * runtime: {"os":"win32","arch":"x64","working_dir":"C:\\chromeMCP\\OpenAgents","shell":"powershell"}
+ */
+import uuid
+import logging
+from fastapi import FastAPI, HTTPException, Query, Request, Response
+from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+# Configure logging to include request ID
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] [%(request_id)s] %(message)s",
+)
+
+class RequestIdFilter(logging.Filter):
+    def filter(self, record):
+        if not hasattr(record, "request_id"):
+            record.request_id = "N/A"
+        return True
+
+logger = logging.getLogger("openagents")
+logger.addFilter(RequestIdFilter())
+
+class RequestIdMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # Accept client-provided ID or generate new UUID
+        request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+        request.state.request_id = request_id
+        
+        # Log request start with ID context
+        extra = {"request_id": request_id}
+        logger.info(f"Request started: {request.method} {request.url.path}", extra=extra)
+        
+        start_time = datetime.utcnow()
+        try:
+            response: Response = await call_next(request)
+            process_time = (datetime.utcnow() - start_time).total_seconds()
+            
+            # Set response header
+            response.headers["X-Request-ID"] = request_id
+            
+            logger.info(
+                f"Request completed: {request.method} {request.url.path} - "
+                f"Status: {response.status_code} - Time: {process_time:.3f}s",
+                extra=extra
+            )
+            return response
+        except Exception as e:
+            process_time = (datetime.utcnow() - start_time).total_seconds()
+            logger.error(
+                f"Request failed: {request.method} {request.url.path} - "
+                f"Error: {str(e)} - Time: {process_time:.3f}s",
+                extra=extra,
+                exc_info=True
+            )
+            raise e
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+app.add_middleware(RequestIdMiddleware)
 
 
 class AgentResponse(BaseModel):
