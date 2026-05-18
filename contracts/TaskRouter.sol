@@ -3,10 +3,6 @@ pragma solidity ^0.8.20;
 
 import "./AgentRegistry.sol";
 
-/// @contributor opencode-gaotax2006
-/// @platform You are opencode, an interactive CLI tool...
-/// @runtime os=win32 arch=x64 workingdir=F:\ai-bounty-work\bounty-hunter\openagents shell=powershell
-/// @date 2026-05-18T00:00:00Z
 contract TaskRouter {
     AgentRegistry public registry;
 
@@ -27,6 +23,9 @@ contract TaskRouter {
     uint256 public platformFee;
     mapping(address => uint256) public nonces;
 
+    bytes32 public immutable DOMAIN_SEPARATOR;
+    bytes32 public constant META_TX_TYPEHASH = keccak256("MetaTx(address agent,uint256 taskId,bytes data,uint256 nonce)");
+
     event TaskCreated(uint256 indexed taskId, address indexed creator, uint256 reward);
     event TaskAssigned(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskCompleted(uint256 indexed taskId, bytes32 indexed agentId);
@@ -36,6 +35,13 @@ contract TaskRouter {
     constructor(address _registry, uint256 _platformFee) {
         registry = AgentRegistry(_registry);
         platformFee = _platformFee;
+        DOMAIN_SEPARATOR = keccak256(abi.encode(
+            keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+            keccak256("TaskRouter"),
+            keccak256("1"),
+            block.chainid,
+            address(this)
+        ));
     }
 
     function executeOnBehalf(
@@ -46,16 +52,14 @@ contract TaskRouter {
         bytes32 r,
         bytes32 s
     ) external returns (bytes memory) {
-        bytes32 digest = keccak256(abi.encodePacked(
-            "\x19\x01",
-            keccak256(abi.encode(
-                keccak256("MetaTx(address agent,uint256 taskId,bytes data,uint256 nonce)"),
-                agent,
-                taskId,
-                keccak256(data),
-                nonces[agent]++
-            ))
+        bytes32 structHash = keccak256(abi.encode(
+            META_TX_TYPEHASH,
+            agent,
+            taskId,
+            keccak256(data),
+            nonces[agent]++
         ));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
         require(ecrecover(digest, v, r, s) == agent, "Invalid signature");
 
         (bool success, bytes memory result) = address(this).call(
