@@ -55,16 +55,84 @@ export function encodeParams(params: AbiParam[]): string {
 }
 
 export function decodeHex(hex: string): bigint {
-  // BUG: Doesn't validate "0x" prefix — a bare decimal string like "255"
-  // would be parsed as hex 0x255 = 597, silently returning wrong value
+  // Validate and normalize hex input
+  if (!hex || typeof hex !== "string") {
+    throw new Error("decodeHex: invalid input - must be a non-empty string");
+  }
   const cleaned = hex.startsWith("0x") ? hex.slice(2) : hex;
+  // Validate hex characters only
+  if (!/^[0-9a-fA-F]*$/.test(cleaned)) {
+    throw new Error("decodeHex: invalid hex characters");
+  }
   return BigInt("0x" + cleaned);
 }
 
 export function decodeUint256(slot: string): bigint {
-  // BUG: Doesn't handle short values — if slot is less than 64 chars,
-  // no left-padding is applied before parsing, giving wrong results
-  return BigInt("0x" + slot);
+  // Handle short values by left-padding to 64 chars
+  const cleaned = slot.startsWith("0x") ? slot.slice(2) : slot;
+  const padded = cleaned.padStart(64, "0");
+  return BigInt("0x" + padded);
+}
+
+export function decodeDynamicBytes(data: string, offset: number): { value: string; length: number } {
+  // Decode bytesN where length is embedded in the data
+  // Read offset to find the actual data location
+  const offsetHex = data.slice(offset * 2, (offset + 1) * 2);
+  const actualOffset = parseInt(offsetHex, 16) * 2;
+
+  // Read length from the actual offset
+  const lengthHex = data.slice(actualOffset, actualOffset + 64);
+  const length = parseInt(lengthHex, 16);
+
+  // Read the actual bytes
+  const value = data.slice(actualOffset + 64, actualOffset + 64 + length * 2);
+
+  return { value: "0x" + value, length };
+}
+
+export function decodeString(data: string, offset: number): string {
+  const { value } = decodeDynamicBytes(data, offset);
+  const hexToString = (hex: string) => Buffer.from(hex.slice(2), "hex").toString("utf8");
+  return hexToString(value);
+}
+
+export function decodeArray(data: string, offset: number, elementSize: number): string[] {
+  // Read array length from offset
+  const lengthHex = data.slice(offset * 2, (offset + 1) * 2);
+  const length = parseInt(lengthHex, 16);
+
+  const elements: string[] = [];
+  let dataOffset = (parseInt(data.slice(offset * 2, (offset + 1) * 2), 16)) * 2;
+
+  for (let i = 0; i < length; i++) {
+    elements.push(data.slice(dataOffset + i * elementSize, dataOffset + (i + 1) * elementSize));
+  }
+
+  return elements;
+}
+
+export function decodeParameter(data: string, type: string, offset: number = 0): unknown {
+  // Handle dynamic types: bytes, string, arrays
+  if (type === "bytes") {
+    return decodeDynamicBytes(data, offset).value;
+  }
+  if (type === "string") {
+    return decodeString(data, offset);
+  }
+  if (type.startsWith("uint") || type.startsWith("int")) {
+    return decodeUint256(data.slice(offset * 2, (offset + 1) * 2)).toString();
+  }
+  if (type === "address") {
+    return decodeAddress(data.slice(offset * 2, (offset + 1) * 2));
+  }
+  if (type === "bool") {
+    return decodeBool(data.slice(offset * 2, (offset + 1) * 2));
+  }
+  if (type.startsWith("bytes")) {
+    const size = parseInt(type.slice(5)) || 32;
+    return data.slice(offset * 2, offset * 2 + size * 2);
+  }
+  throw new Error(`decodeParameter: unsupported type ${type}`);
 }
 
 export function decodeAddress(slot: string): string {
