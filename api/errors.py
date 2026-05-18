@@ -4,8 +4,7 @@ Structured error responses with error codes for the OpenAgents API.
 @contributor-info
 agent: QClaw
 date: 2026-05-18
-platform-init: N/A (manual contributor)
-runtime: Windows_NT x86_64, home=C:/Users/ASUSS, cwd=C:/Users/ASUSS/.openclaw/workspace, shell=powershell
+
 """
 
 from fastapi import Request
@@ -17,7 +16,6 @@ from typing import Optional, Any
 from enum import Enum
 import uuid
 import time
-
 
 class ErrorCode(str, Enum):
     """Standardized error codes for the API."""
@@ -32,7 +30,6 @@ class ErrorCode(str, Enum):
     BAD_REQUEST = "BAD_REQUEST"
     INTERNAL_ERROR = "INTERNAL_ERROR"
     SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE"
-
 
 class ErrorResponse(BaseModel):
     """Standard error response schema."""
@@ -53,11 +50,9 @@ class ErrorResponse(BaseModel):
             }
         }
 
-
 def _generate_request_id() -> str:
     """Generate a unique request ID."""
     return f"req_{uuid.uuid4().hex[:12]}"
-
 
 def _error_response(
     status_code: int,
@@ -77,7 +72,6 @@ def _error_response(
         ).model_dump(),
     )
 
-
 # Custom exception classes
 class AppError(Exception):
     """Base application error with structured error info."""
@@ -94,7 +88,6 @@ class AppError(Exception):
         self.details = details
         super().__init__(message)
 
-
 class NotFoundError(AppError):
     def __init__(self, resource: str, resource_id: str = None):
         details = {"resource": resource}
@@ -107,7 +100,6 @@ class NotFoundError(AppError):
             details=details,
         )
 
-
 class AuthFailedError(AppError):
     def __init__(self, reason: str = "Invalid credentials"):
         super().__init__(
@@ -115,7 +107,6 @@ class AuthFailedError(AppError):
             code=ErrorCode.AUTH_FAILED,
             message=reason,
         )
-
 
 class ForbiddenError(AppError):
     def __init__(self, reason: str = "Insufficient permissions"):
@@ -125,7 +116,6 @@ class ForbiddenError(AppError):
             message=reason,
         )
 
-
 class ValidationError(AppError):
     def __init__(self, message: str = "Validation error", details: dict = None):
         super().__init__(
@@ -134,7 +124,6 @@ class ValidationError(AppError):
             message=message,
             details=details,
         )
-
 
 class RateLimitedError(AppError):
     def __init__(self, retry_after: int = None):
@@ -148,7 +137,6 @@ class RateLimitedError(AppError):
             details=details or None,
         )
 
-
 class ConflictError(AppError):
     def __init__(self, resource: str, reason: str = "Resource already exists"):
         super().__init__(
@@ -157,7 +145,6 @@ class ConflictError(AppError):
             message=reason,
             details={"resource": resource},
         )
-
 
 # Exception handlers for FastAPI
 async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
@@ -170,7 +157,6 @@ async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
         details=exc.details,
         request_id=request_id,
     )
-
 
 async def http_exception_handler(
     request: Request, exc: StarletteHTTPException
@@ -200,7 +186,6 @@ async def http_exception_handler(
         request_id=request_id,
     )
 
-
 async def validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
@@ -223,7 +208,6 @@ async def validation_exception_handler(
         request_id=request_id,
     )
 
-
 async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Catch-all handler for unexpected exceptions."""
     request_id = getattr(request.state, "request_id", _generate_request_id())
@@ -235,7 +219,6 @@ async def generic_exception_handler(request: Request, exc: Exception) -> JSONRes
         details={"exception_type": type(exc).__name__},
         request_id=request_id,
     )
-
 
 def register_error_handlers(app):
     """Register all error handlers on a FastAPI app instance."""
