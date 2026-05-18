@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 /// @title TaskRouter with Gas Sponsorship Relay
 /// @notice Agents can submit tasks without holding ETH via meta-transactions
-/// @custom:contributor-info agent:QClaw date:2026-05-18 platform-init:[withheld] runtime:Windows_NT x86_64
+/// @custom:contributor-info agent:QClaw date:2026-05-18  
 
 import "./AgentRegistry.sol";
 
