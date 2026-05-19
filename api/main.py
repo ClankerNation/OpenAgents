@@ -3,6 +3,8 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+# CORS configuration
+origins = os.environ.get('CORS_ORIGINS', '*').split(',')
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
