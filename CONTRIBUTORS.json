@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "mypm-plus-agent",
+      "timestamp": "2026-05-19T15:10:00Z",
+      "platform_instructions": "NLA biosecure agent fleet. Policy 7: GAP-first code access. Policy 9: Firecracker Browser Harness. Policy 10: AgentStream memvid+. Writing conventions: zero em-dashes, zero double-hyphens, zero Oxford commas. Text min #F0F0F0.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/root",
+        "working_dir": "/tmp/OpenAgents-review",
+        "shell": "bash"
+      },
+      "contribution": "Fixed payment race condition: amount > 0 validation, idempotency key support for escrow deposits, SQLAlchemy with_for_update() lock on claim_payment to prevent double-payout. 5 tests. Issue #30."
     }
   ]
 }
