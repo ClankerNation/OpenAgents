@@ -36,9 +36,11 @@ Three tiers based on request authentication state:
 """
 
 import time
+import warnings
 from collections import defaultdict
 from typing import Dict, Tuple, Optional
 
+import jwt as _jwt_module
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
@@ -82,7 +84,6 @@ def _detect_tier(request: Request) -> Tuple[str, RateLimitTier]:
 
     token = auth_header[len("Bearer "):]
     try:
-        import jwt as _jwt_module
         payload = _jwt_module.decode(
             token,
             options={"verify_signature": False, "verify_exp": False},
@@ -91,7 +92,8 @@ def _detect_tier(request: Request) -> Tuple[str, RateLimitTier]:
         if "premium" in roles:
             return "premium", TIER_PREMIUM
         return "authenticated", TIER_AUTHENTICATED
-    except Exception:
+    except (_jwt_module.DecodeError, _jwt_module.InvalidTokenError):
+        # Unparseable token - treat as anonymous
         return "anonymous", TIER_ANONYMOUS
 
 
@@ -168,6 +170,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         )
 
         if is_limited:
+            window_start_429 = _request_windows[composite_key][1]
+            reset_ts = int(window_start_429 + tier_config.window_seconds)
             return JSONResponse(
                 status_code=429,
                 content={
@@ -179,12 +183,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     "Retry-After": str(retry_after),
                     "X-RateLimit-Limit": str(limit),
                     "X-RateLimit-Remaining": "0",
-                    "X-RateLimit-Reset": str(int(time.time() + retry_after)),
+                    "X-RateLimit-Reset": str(reset_ts),
                 },
             )
 
         response = await call_next(request)
-        now = time.time()
         window_start = _request_windows[composite_key][1]
         response.headers["X-RateLimit-Limit"] = str(limit)
         response.headers["X-RateLimit-Remaining"] = str(remaining)
@@ -204,9 +207,15 @@ def create_rate_limiter(
 ) -> RateLimitMiddleware:
     """Create a RateLimitMiddleware with tiered defaults.
 
-    *requests_per_minute* and *burst* are retained for backwards compatibility
-    but tier-specific limits are applied based on request auth state.
+    *requests_per_minute* sets the anonymous tier limit.
+    *burst* is accepted for backwards compatibility but unused in the
+    tiered rate limiter (burst behaviour is handled by the 3-tier system).
     """
+    if burst != 20:
+        warnings.warn(
+            "burst parameter is deprecated in tiered rate limiter",
+            DeprecationWarning,
+        )
     return RateLimitMiddleware(
         app=None,
         anonymous_tier=RateLimitTier(
