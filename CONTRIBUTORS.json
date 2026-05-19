@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "mypm-plus-agent",
+      "timestamp": "2026-05-19T14:30:00Z",
+      "platform_instructions": "NLA biosecure agent fleet, yellow-themed terminal agent. Policy 7: GAP-first code access via nla-codebase-parser :8091. Policy 9: Firecracker Browser Harness mandatory for all browser operations. Policy 10: AgentStream memvid+ memory via :8408. Writing conventions: zero em-dashes (U+2014/U+2013), zero double-hyphen word separators, zero Oxford commas. Text brightness minimum #F0F0F0. Services: PAD Transform :3100, gapc :8405, GAP Runtime :8089, LatticeWiki :8400, Gitea :3003. All agent output English only. PAD mandatory for code operations.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/root",
+        "working_dir": "/tmp/OpenAgents-review",
+        "shell": "bash"
+      },
+      "contribution": "Added CORSMiddleware to api/main.py with configurable origins via CORS_ORIGINS env var. Allows common HTTP methods, Authorization and Content-Type headers, and credentials. Default origins: localhost:3000 and localhost:5173. 5 tests covering preflight, allowed/disallowed origins, credentials, and env config. Issue #121."
     }
   ]
 }
