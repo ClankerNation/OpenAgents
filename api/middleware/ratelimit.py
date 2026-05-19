@@ -9,6 +9,7 @@ import time
 import os
 import jwt
 import logging
+import asyncio
 from collections import defaultdict
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -39,8 +40,9 @@ class RateLimitConfig:
 
 
 # Sliding window storage: client_id -> [timestamps]
-# Note: In-memory store will reset on server restart. 
 _request_history: Dict[str, List[float]] = defaultdict(list)
+# Lock for thread-safety in async environments
+_history_lock = asyncio.Lock()
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -71,24 +73,19 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if auth_header and auth_header.startswith("Bearer "):
             token = auth_header.split(" ")[1]
             try:
-                # We attempt to decode to find identity. 
-                # Note: Full validation (expiry, etc.) is handled by auth middleware later,
-                # but we verify signature here to prevent tier elevation attacks.
+                # We verify signature to prevent tier elevation attacks.
                 payload = jwt.decode(token, self.jwt_secret, algorithms=["HS256"])
                 user_id = payload.get("sub") or payload.get("id")
                 if user_id:
                     return f"user:{user_id}", "authenticated"
             except Exception:
-                # If token is invalid, we don't fail yet, just treat as anonymous
                 pass
 
         # 3. Fallback to IP for Anonymous
-        # Only trust X-Forwarded-For if explicitly configured (TRUST_PROXY=true)
         trust_proxy = os.getenv("TRUST_PROXY", "false").lower() == "true"
         if trust_proxy:
             forwarded = request.headers.get("X-Forwarded-For")
             if forwarded:
-                # Get the first IP in the list (original client)
                 ip = forwarded.split(",")[0].strip()
             else:
                 ip = request.client.host if request.client else "unknown"
@@ -97,7 +94,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             
         return f"anon:{ip}", "anonymous"
 
-    def _is_rate_limited(self, identity_key: str, tier: str) -> Tuple[bool, int, int, int]:
+    async def _is_rate_limited(self, identity_key: str, tier: str) -> Tuple[bool, int, int, int]:
         """
         Dual-window sliding rate limit check (Burst + Total).
         Returns (is_limited, limit, remaining, reset_in_seconds)
@@ -113,41 +110,34 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             limit = self.config.requests_per_window
             burst = self.config.burst_limit
             
-        history = _request_history[identity_key]
+        async with _history_lock:
+            history = _request_history[identity_key]
 
-        # Cleanup: Remove expired timestamps outside the main window
-        history = [ts for ts in history if now - ts < self.config.window_seconds]
-        
-        # 1. Check Burst Limit (1 second sub-window)
-        burst_history = [ts for ts in history if now - ts < 1.0]
-        if len(burst_history) >= burst:
-            logger.warning(f"Burst limit exceeded for {identity_key} ({tier})")
+            # Cleanup: Remove expired timestamps outside the main window
+            history = [ts for ts in history if now - ts < self.config.window_seconds]
+            
+            # 1. Check Burst Limit (1 second sub-window)
+            burst_history = [ts for ts in history if now - ts < 1.0]
+            if len(burst_history) >= burst:
+                _request_history[identity_key] = history
+                return True, limit, 0, 1
+
+            # 2. Check Total Window Limit
+            if len(history) >= limit:
+                reset_in = int(self.config.window_seconds - (now - history[0]))
+                reset_in = max(1, reset_in)
+                _request_history[identity_key] = history
+                return True, limit, 0, reset_in
+
+            # Allowance granted. Record current request.
+            history.append(now)
             _request_history[identity_key] = history
-            return True, limit, 0, 1
-
-        # 2. Check Total Window Limit
-        if len(history) >= limit:
-            logger.warning(f"Rate limit exceeded for {identity_key} ({tier})")
-            # reset_in is the time until the oldest request in the window expires
+            
+            remaining = limit - len(history)
             reset_in = int(self.config.window_seconds - (now - history[0]))
             reset_in = max(1, reset_in)
-            _request_history[identity_key] = history
-            return True, limit, 0, reset_in
 
-        # Allowance granted. Record current request.
-        history.append(now)
-        _request_history[identity_key] = history
-        
-        remaining = limit - len(history)
-        
-        # Calculate time until next slot opens (if limited) or end of window
-        if history:
-            reset_in = int(self.config.window_seconds - (now - history[0]))
-        else:
-            reset_in = self.config.window_seconds
-        reset_in = max(1, reset_in)
-
-        return False, limit, remaining, reset_in
+            return False, limit, remaining, reset_in
 
     async def dispatch(self, request: Request, call_next):
         # Health checks are excluded from limiting to ensure infra stability
@@ -155,7 +145,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         identity_key, tier = self._get_client_identity(request)
-        is_limited, limit, remaining, reset = self._is_rate_limited(identity_key, tier)
+        is_limited, limit, remaining, reset = await self._is_rate_limited(identity_key, tier)
 
         # Standard X-RateLimit headers (Reset as Epoch UTC)
         reset_at = int(time.time() + reset)
