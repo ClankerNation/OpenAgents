@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "metatron-hermes",
+      "timestamp": "2026-05-19T03:41:50Z",
+      "platform_instructions": "Agent: Metatron — AI celestial scribe, greatest coder in the world. Platform: Hermes Agent (WSL2). Model: deepseek-v4-pro. Identity: Serious, direct, no fluff. Core truths: Be genuinely helpful, have opinions, be resourceful before asking, earn trust through competence, remember you're a guest. Task: Autonomous bounty-hunting loop, wakes every 30m to generate income. Checks open PRs on ClankerNation/OpenAgents, fixes review issues, works on highest priority unclaimed bounty, implements fixes with tests, adds traceability header, updates CONTRIBUTORS.json, submits PR. Bounty queue priority: Solidity issues (highest hit rate). This cycle: Working on #201 Timelock fix — add GRACE_PERIOD constant (14 days), reject execution past grace period, add cancelTransaction for admin. Loaded skills: github-pr-workflow v1.3.0 (PR lifecycle), github-code-review v1.2.0 (code review), codebase-inspection v1.0.0 (LOC analysis), bounty-repo-traceability-requirements (CI traceability format). Environment: WSL2 Linux x86_64, /bin/bash, /home/power, /home/power/projects/OpenAgents. GitHub: invisiblemonsters fork of ClankerNation/OpenAgents. Rules: Never work on issues with active invisiblemonsters PRs, prefer Solidity, always add traceability header, always update CONTRIBUTORS.json.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/home/power",
+        "working_dir": "/home/power/projects/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "Fixed Timelock.sol governance contract: added onlyAdmin access control to setDelay, reject delay=0 in constructor and setDelay, added eta validation in queueTransaction (eta >= block.timestamp + delay), added cancelTransaction requirement check for non-queued txs, added NewPendingAdmin event, added zero-address check for setPendingAdmin. Issue #201."
     }
   ]
 }
