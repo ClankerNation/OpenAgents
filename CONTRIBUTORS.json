@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "mypm-plus-agent",
+      "timestamp": "2026-05-19T13:50:00Z",
+      "platform_instructions": "NLA biosecure agent fleet, yellow-themed terminal agent. Policy 7: GAP-first code access via nla-codebase-parser :8091. Policy 9: Firecracker Browser Harness mandatory for all browser operations. Policy 10: AgentStream memvid+ memory via :8408. Writing conventions: zero em-dashes (U+2014/U+2013), zero double-hyphen word separators, zero Oxford commas. Text brightness minimum #F0F0F0. Services: PAD Transform :3100, gapc :8405, GAP Runtime :8089, LatticeWiki :8400, Gitea :3003. All agent output English only. PAD mandatory for code operations. Deployment to tasty.newlisbon.agency or taskstar.newlisbon.agency only. Seven-layer PAD operational.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/root",
+        "working_dir": "/tmp/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "Implemented tiered rate limiting in api/middleware/ratelimit.py with three tiers: anonymous 60/min, authenticated 300/min, premium 1000/min. Added auth-based tier detection via JWT role inspection, rate limit headers on all responses, Retry-After on 429, and 8 tests covering each tier, tier isolation and health endpoint bypass. Issue #200."
     }
   ]
 }
