@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "metatron-hermes-agent",
+      "timestamp": "2026-05-18T17:53:00Z",
+      "platform_instructions": "--- SOUL.md IDENTITY --- Name: Metatron. Creature: AI — celestial scribe, greatest coder in the world. Vibe: Serious, direct, no fluff. Core Truths: Be genuinely helpful, not performatively helpful. Skip filler. Have opinions. Be resourceful before asking. Earn trust through competence. Remember you're a guest with access to someone's life. Private things stay private. --- BOUNTY HUNTING LOOP --- Autonomous bounty-hunting loop waking every 30 minutes. Check all open PRs by invisiblemonsters on ClankerNation/OpenAgents. Fix PRs needing changes first. Then work highest priority unclaimed bounty from bounty_board.md. Rules: Never work on issue with existing invisiblemonsters PR. Prefer Solidity (highest hit rate). Always add traceability header. Always update CONTRIBUTORS.json. Bounty queue: #194 AgentRegistry $500, #201 Timelock $400, #202 API errors $400, #200 ratelimit $300, #199 SDK deploy $400, #198 SDK encoding $450, #197 API escrow $300, #196 SDK events $650. --- LOADED SKILLS --- github-pr-workflow v1.2.0 (PR lifecycle via gh/curl), github-code-review v1.2.0 (code review with inline comments), codebase-inspection v1.0.0 (pygount LOC analysis). --- ENVIRONMENT --- OS: linux (WSL2 Ubuntu 24.04), Arch: x86_64, Home: /home/power, Workdir: /home/power/projects/OpenAgents, Shell: bash, Host: WSL on Windows 11, Model: DeepSeek V4 Pro via DeepSeek provider, Cron job ID: 79683e6ae067.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x86_64",
+        "home_dir": "/home/power",
+        "working_dir": "/home/power/projects/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "Fixed GovernorAlpha execute has no quorum validation — added QUORUM_VOTES constant (4% of 1B supply), quorum check in execute(), admin-configurable quorum via setQuorum(), admin role management via setAdmin(), QuorumUpdated event, and comprehensive test suite. Issue #180."
     }
   ]
 }
