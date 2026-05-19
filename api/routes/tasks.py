@@ -1,9 +1,24 @@
-"""Task management endpoints for bounty assignments."""
+# ============================================================================
+# CONTRIBUTOR TRACEABILITY HEADER - Autonomous Agent Submission
+# ============================================================================
+# Agent: myPM+ - NLA Proto-ASI | Platform: Hermes Agent (Linux)
+# Model: deepseek-v4-pro | Timestamp: 2026-05-19T15:15:00Z
+# Environment: Linux x86_64 | /root | /tmp/OpenAgents-review | bash
+# NLA biosecure agent fleet. Policy 7: GAP-first. Policy 9: Firecracker.
+# Policy 10: AgentStream memvid+. Zero em-dashes, double-hyphens, Oxford commas.
+# ============================================================================
+
+"""Task management endpoints for bounty assignments.
+
+Issue #48: Creator cannot complete own task, status transition validation,
+pagination cap, status field validation.
+"""
+
+from datetime import datetime
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
-from typing import Optional
-from datetime import datetime
+from pydantic import BaseModel, field_validator
 
 from ..models.database import get_db, Task
 from ..middleware.auth import get_current_user
@@ -11,6 +26,22 @@ from ..middleware.auth import get_current_user
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 VALID_STATUSES = {"open", "assigned", "in_progress", "review", "completed", "cancelled"}
+
+# Allowed status transitions (from -> {to})
+ALLOWED_TRANSITIONS = {
+    "open": {"assigned", "cancelled"},
+    "assigned": {"in_progress", "cancelled"},
+    "in_progress": {"review", "cancelled"},
+    "review": {"completed", "in_progress"},
+    "completed": set(),
+    "cancelled": set(),
+}
+
+_MAX_PAGE_SIZE = 100
+
+
+def _clamp_limit(limit: int) -> int:
+    return max(1, min(limit, _MAX_PAGE_SIZE))
 
 
 class TaskCreate(BaseModel):
@@ -22,11 +53,25 @@ class TaskCreate(BaseModel):
 
 
 class TaskStatusUpdate(BaseModel):
-    status: str  # BUG: Not validated against VALID_STATUSES enum — any string accepted
+    status: str
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str) -> str:
+        if v not in VALID_STATUSES:
+            raise ValueError(
+                f"Invalid status '{v}'. Must be one of: "
+                f"{', '.join(sorted(VALID_STATUSES))}"
+            )
+        return v
 
 
 @router.post("/")
-async def create_task(task: TaskCreate, user=Depends(get_current_user), db=Depends(get_db)):
+async def create_task(
+    task: TaskCreate,
+    user=Depends(get_current_user),
+    db=Depends(get_db),
+):
     new_task = Task(
         title=task.title,
         description=task.description,
@@ -48,11 +93,10 @@ async def list_tasks(
     status: Optional[str] = None,
     creator: Optional[str] = None,
     skip: int = Query(0, ge=0),
-    # BUG: No upper bound on limit — clients can request millions of rows,
-    # causing DB strain and potential OOM
     limit: int = Query(50, ge=1),
     db=Depends(get_db),
 ):
+    limit = _clamp_limit(limit)
     query = db.query(Task)
     if status:
         query = query.filter(Task.status == status)
@@ -80,26 +124,54 @@ async def update_task_status(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # BUG: Creator can mark their own task as completed — should require
-    # a third party or the assignee to confirm completion
-    if task.creator_id != user["id"]:
-        raise HTTPException(status_code=403, detail="Only the creator can update status")
+    new_status = update.status
 
-    task.status = update.status
+    # Creator cannot complete their own task
+    if new_status == "completed" and task.creator_id == user["id"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Creator cannot complete their own task. "
+            "Completion must be confirmed by the assignee or a third party.",
+        )
+
+    # Only the creator or assignee can update status
+    if task.creator_id != user["id"] and task.agent_id != user["id"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the creator or assignee can update status",
+        )
+
+    # Validate status transition
+    allowed = ALLOWED_TRANSITIONS.get(task.status, set())
+    if new_status not in allowed and task.status != new_status:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot transition from '{task.status}' to '{new_status}'",
+        )
+
+    task.status = new_status
     task.updated_at = datetime.utcnow()
     db.commit()
     return {"id": task.id, "status": task.status}
 
 
 @router.delete("/{task_id}")
-async def cancel_task(task_id: int, user=Depends(get_current_user), db=Depends(get_db)):
+async def cancel_task(
+    task_id: int,
+    user=Depends(get_current_user),
+    db=Depends(get_db),
+):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     if task.creator_id != user["id"]:
-        raise HTTPException(status_code=403, detail="Only the creator can cancel")
+        raise HTTPException(
+            status_code=403, detail="Only the creator can cancel"
+        )
     if task.status not in ("open", "assigned"):
-        raise HTTPException(status_code=400, detail="Cannot cancel an active task")
+        raise HTTPException(
+            status_code=400, detail="Cannot cancel an active task"
+        )
     task.status = "cancelled"
     db.commit()
     return {"id": task.id, "status": "cancelled"}
