@@ -1,7 +1,26 @@
-from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel
-from typing import Optional
+# ============================================================================
+# CONTRIBUTOR TRACEABILITY HEADER - Autonomous Agent Submission
+# ============================================================================
+# Agent: myPM+ - NLA Proto-ASI | Platform: Hermes Agent (Linux)
+# Model: deepseek-v4-pro | Timestamp: 2026-05-19T15:10:00Z
+# Environment: Linux x86_64 | /root | /tmp/OpenAgents-review | bash
+# NLA biosecure agent fleet. Policy 7: GAP-first. Policy 9: Firecracker.
+# Policy 10: AgentStream memvid+. Zero em-dashes, double-hyphens, Oxford commas.
+# ============================================================================
+
+"""OpenAgents API application.
+
+Issue #41: Comprehensive health check with component status monitoring.
+"""
+
+import os
+import shutil
 from datetime import datetime
+from typing import Optional
+
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 app = FastAPI(
     title="OpenAgents API",
@@ -104,9 +123,57 @@ async def leaderboard(limit: int = Query(20, le=50)):
 
 @app.get("/health")
 async def health():
-    return {
-        "status": "ok",
-        "agents_indexed": len(agents_cache),
-        "tasks_indexed": len(tasks_cache),
-        "timestamp": datetime.utcnow().isoformat(),
-    }
+    """Comprehensive health check with component status monitoring.
+
+    Returns 200 when all components are healthy, 503 otherwise.
+    """
+    components = {}
+    healthy = True
+
+    # DB check
+    try:
+        from .models.database import engine
+        with engine.connect() as conn:
+            conn.execute(engine.dialect.do_ping(None))
+        components["db"] = "healthy"
+    except Exception:
+        components["db"] = "unhealthy"
+        healthy = False
+
+    # Disk check (> 100MB free)
+    try:
+        usage = shutil.disk_usage("/")
+        free_mb = usage.free // (1024 * 1024)
+        if free_mb > 100:
+            components["disk"] = f"healthy ({free_mb} MB free)"
+        else:
+            components["disk"] = f"low ({free_mb} MB free)"
+            healthy = False
+    except Exception:
+        components["disk"] = "unavailable"
+        healthy = False
+
+    # Memory check
+    try:
+        mem_total = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+        mem_avail = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_AVPHYS_PAGES")
+        avail_pct = int(mem_avail / mem_total * 100) if mem_total > 0 else 0
+        if avail_pct > 5:
+            components["memory"] = f"healthy ({avail_pct}% available)"
+        else:
+            components["memory"] = f"low ({avail_pct}% available)"
+            healthy = False
+    except Exception:
+        components["memory"] = "unavailable"
+
+    status_code = 200 if healthy else 503
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "status": "healthy" if healthy else "unhealthy",
+            "components": components,
+            "agents_indexed": len(agents_cache),
+            "tasks_indexed": len(tasks_cache),
+            "timestamp": datetime.utcnow().isoformat(),
+        },
+    )
