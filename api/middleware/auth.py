@@ -3,6 +3,7 @@
 import jwt
 import os
 from fastapi import Request, HTTPException, Depends
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import datetime, timedelta
 from typing import Optional
@@ -38,9 +39,9 @@ def decode_token(token: str) -> dict:
         payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256", "none"])
         return payload
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token has expired")
+        raise HTTPException(status_code=401, detail={"code": "AUTH_FAILED", "message": "Token has expired", "details": {}})
     except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise HTTPException(status_code=401, detail={"code": "AUTH_FAILED", "message": "Invalid token", "details": {}})
 
 
 async def get_current_user(
@@ -50,7 +51,7 @@ async def get_current_user(
     payload = decode_token(token)
 
     if payload.get("type") != "access":
-        raise HTTPException(status_code=401, detail="Invalid token type")
+        raise HTTPException(status_code=401, detail={"code": "AUTH_FAILED", "message": "Invalid token type", "details": {}})
 
     # BUG: No token revocation check — logged-out or compromised tokens
     # remain valid until they naturally expire
@@ -61,7 +62,7 @@ async def get_current_user(
     }
 
     if not user_data["id"]:
-        raise HTTPException(status_code=401, detail="Invalid token payload")
+        raise HTTPException(status_code=401, detail={"code": "AUTH_FAILED", "message": "Invalid token payload", "details": {}})
 
     return user_data
 
@@ -69,7 +70,7 @@ async def get_current_user(
 def require_role(role: str):
     async def role_checker(user: dict = Depends(get_current_user)):
         if role not in user.get("roles", []):
-            raise HTTPException(status_code=403, detail=f"Role '{role}' required")
+            raise HTTPException(status_code=403, detail={"code": "AUTH_FAILED", "message": f"Role '{role}' required", "details": {}})
         return user
     return role_checker
 

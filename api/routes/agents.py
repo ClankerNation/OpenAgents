@@ -1,12 +1,33 @@
 """Agent CRUD endpoints for the OpenAgents platform."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from starlette.requests import Request
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
 from ..models.database import get_db, Agent
 from ..middleware.auth import get_current_user
+
+
+@router.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={"code": "VALIDATION_ERROR", "message": "Validation failed", "details": exc.errors()},
+    )
+
+
+@router.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=exc.detail if isinstance(exc.detail, dict) else {"code": "INTERNAL_ERROR", "message": str(exc.detail), "details": {}},
+    )
+
+# @fix-author: name=Engineer, date=2024-01-01, description=Add structured error responses with error codes
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -37,7 +58,7 @@ async def create_agent(agent: AgentCreate, user=Depends(get_current_user), db=De
     db.add(new_agent)
     db.commit()
     db.refresh(new_agent)
-    return {"id": new_agent.id, "name": new_agent.name, "owner": user["address"]}
+    return {"code": "SUCCESS", "message": "Agent created", "details": {"id": new_agent.id, "name": new_agent.name, "owner": user["address"]}}
 
 
 @router.get("/")
