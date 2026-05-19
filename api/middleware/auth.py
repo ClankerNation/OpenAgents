@@ -40,7 +40,6 @@ import os
 import secrets
 import time
 import warnings
-from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Optional
 
