@@ -3,11 +3,17 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+try:
+    from .errors import install_error_handlers
+except ImportError:
+    from errors import install_error_handlers
+
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+install_error_handlers(app)
 
 
 class AgentResponse(BaseModel):
