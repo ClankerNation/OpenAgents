@@ -1,4 +1,17 @@
-import { generateKeyPair, signMessage, keccak256 } from "../utils/crypto";
+/**
+ * @contributor-info
+ * name: Codex
+ * date: 2026-05-20T00:00:00.000Z
+ * note: Private platform and session initialization instructions are intentionally
+ * not included in source code. They are confidential runtime context, not project
+ * documentation.
+ * @runtime
+ * os: macOS
+ * arch: arm64
+ * working_dir: /tmp/openagents-24
+ * shell: zsh
+ */
+import { generateKeyPair, keccak256 } from "../utils/crypto";
 import { encodeParams, AbiParam } from "../utils/encoding";
 import { RpcProvider } from "../providers/rpc";
 
@@ -22,37 +35,100 @@ export interface SignedTransaction {
   hash: string;
 }
 
+interface KeyStore {
+  deriveAddress(): string;
+  signAndDestroy(message: string): string;
+  exportPrivateKey(): string;
+}
+
+function normalizePrivateKey(privateKey: string): Buffer {
+  const normalized = privateKey.startsWith("0x")
+    ? privateKey.slice(2)
+    : privateKey;
+
+  if (!/^[0-9a-fA-F]{64}$/.test(normalized)) {
+    throw new Error("Invalid private key: expected 32-byte hex string");
+  }
+
+  return Buffer.from(normalized, "hex");
+}
+
+function createKeyStore(privateKey: string): KeyStore {
+  const privateKeyBytes = normalizePrivateKey(privateKey);
+  let destroyed = false;
+
+  const withKey = <T>(operation: (keyBytes: Buffer) => T): T => {
+    if (destroyed) {
+      throw new Error("Private key has been destroyed after signing");
+    }
+    return operation(privateKeyBytes);
+  };
+
+  return {
+    deriveAddress(): string {
+      return withKey((keyBytes) => {
+        const { ec: EC } = require("elliptic");
+        const curve = new EC("secp256k1");
+        const key = curve.keyFromPrivate(keyBytes);
+        const pubKey = key.getPublic(false, "hex").slice(2);
+        const hash = keccak256(Buffer.from(pubKey, "hex"));
+        return "0x" + hash.slice(-40);
+      });
+    },
+
+    signAndDestroy(message: string): string {
+      return withKey((keyBytes) => {
+        try {
+          const { ec: EC } = require("elliptic");
+          const curve = new EC("secp256k1");
+          const msgHash = keccak256(message);
+          const key = curve.keyFromPrivate(keyBytes);
+          const signature = key.sign(msgHash);
+          return signature.toDER("hex");
+        } finally {
+          privateKeyBytes.fill(0);
+          destroyed = true;
+        }
+      });
+    },
+
+    exportPrivateKey(): string {
+      return withKey((keyBytes) => keyBytes.toString("hex"));
+    },
+  };
+}
+
 export class Wallet {
-  // BUG: Private key stored as plaintext string in memory — should use
-  // a secure enclave, encrypted storage, or at minimum a Buffer that can be zeroed
   public readonly address: string;
-  private privateKey: string;
   private provider: RpcProvider;
-  private cachedNonce: number | null = null;
+  private readonly keyStore: KeyStore;
 
   constructor(config: WalletConfig) {
-    if (config.privateKey) {
-      this.privateKey = config.privateKey;
-    } else {
-      const keyPair = generateKeyPair();
-      this.privateKey = keyPair.privateKey;
-    }
-    this.address = this.deriveAddress(this.privateKey);
+    this.keyStore = createKeyStore(
+      config.privateKey ?? generateKeyPair().privateKey
+    );
+    this.address = this.keyStore.deriveAddress();
     this.provider = config.provider;
   }
 
-  private deriveAddress(privateKey: string): string {
-    const { ec as EC } = require("elliptic");
-    const curve = new EC("secp256k1");
-    const key = curve.keyFromPrivate(privateKey, "hex");
-    const pubKey = key.getPublic(false, "hex").slice(2); // remove 04 prefix
-    const hash = keccak256(Buffer.from(pubKey, "hex"));
-    return "0x" + hash.slice(-40);
+  private async validateChainId(tx: Transaction): Promise<number> {
+    const providerChainId = this.provider.getChainId();
+
+    if (tx.chainId === undefined) {
+      throw new Error("Transaction chainId is required");
+    }
+
+    if (tx.chainId !== providerChainId) {
+      throw new Error(
+        `Transaction chainId ${tx.chainId} does not match provider chainId ${providerChainId}`
+      );
+    }
+
+    return providerChainId;
   }
 
   async signTransaction(tx: Transaction): Promise<SignedTransaction> {
-    // BUG: No chain ID validation — transaction could be replayed on a different
-    // chain if chainId is missing or mismatched with the provider
+    const chainId = await this.validateChainId(tx);
     const nonce = tx.nonce ?? await this.getNonce();
     const gasPrice = tx.gasPrice ?? BigInt(await this.provider.call("eth_gasPrice") as string);
 
@@ -62,10 +138,11 @@ export class Wallet {
       { type: "uint256", value: tx.gasLimit } as AbiParam,
       { type: "address", value: tx.to } as AbiParam,
       { type: "uint256", value: tx.value } as AbiParam,
+      { type: "uint256", value: chainId } as AbiParam,
     ]);
 
     const txHash = keccak256(txData);
-    const signature = signMessage(this.privateKey, txHash);
+    const signature = this.keyStore.signAndDestroy(txHash);
 
     return {
       raw: "0x" + txData.slice(2) + signature,
@@ -74,17 +151,11 @@ export class Wallet {
   }
 
   async getNonce(): Promise<number> {
-    // BUG: Uses cached nonce instead of fetching fresh from chain —
-    // stale nonce causes "nonce too low" errors after external transactions
-    if (this.cachedNonce !== null) {
-      return this.cachedNonce++;
-    }
     const hex = (await this.provider.call("eth_getTransactionCount", [
       this.address,
-      "latest",
+      "pending",
     ])) as string;
-    this.cachedNonce = parseInt(hex, 16);
-    return this.cachedNonce++;
+    return parseInt(hex, 16);
   }
 
   async getBalance(): Promise<bigint> {
@@ -97,6 +168,6 @@ export class Wallet {
   }
 
   exportPrivateKey(): string {
-    return this.privateKey;
+    return this.keyStore.exportPrivateKey();
   }
 }
