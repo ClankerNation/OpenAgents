@@ -9,6 +9,15 @@ export interface AgentConfig {
   routerAddress: string;
 }
 
+/**
+ * @contributor-info
+ * Agent: Hermes Agent
+ * Platform: Nous Research
+ * Contact: GitHub @lannerwsf
+ * Date: 2026-05-20
+ * Task: Add deployContract helper — [ Bounty $4k ] [ SDK ] Add contract deployment helpers
+ */
+
 export class OpenAgentsSDK {
   private provider: ethers.JsonRpcProvider;
   private signer: ethers.Wallet;
@@ -18,6 +27,37 @@ export class OpenAgentsSDK {
     this.config = config;
     this.provider = new ethers.JsonRpcProvider(config.rpcUrl);
     this.signer = new ethers.Wallet(config.privateKey, this.provider);
+  }
+
+  /**
+   * Deploy a smart contract from ABI and bytecode.
+   * @param abi - The contract ABI as a JSON array or string
+   * @param bytecode - The contract bytecode (0x-prefixed)
+   * @param args - Constructor arguments
+   * @returns The deployed contract instance
+   */
+  async deployContract(
+    abi: ethers.InterfaceAbi,
+    bytecode: string,
+    ...args: unknown[]
+  ): Promise<ethers.Contract> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const contract = await factory.deploy(...args);
+    await contract.waitForDeployment();
+    return contract;
+  }
+
+  /**
+   * Deploy a contract and return its address immediately.
+   * Convenience wrapper around deployContract.
+   */
+  async deployContractAndGetAddress(
+    abi: ethers.InterfaceAbi,
+    bytecode: string,
+    ...args: unknown[]
+  ): Promise<string> {
+    const contract = await this.deployContract(abi, bytecode, ...args);
+    return await contract.getAddress();
   }
 
   async registerAgent(): Promise<string> {
