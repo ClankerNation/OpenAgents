@@ -34,7 +34,13 @@ export class SessionManager {
     if (typeof window !== "undefined" && window.localStorage) {
       const stored = localStorage.getItem(`session_${this.wallet.address}`);
       if (stored) {
-        this.currentToken = JSON.parse(stored);
+        const parsed: SessionToken = JSON.parse(stored);
+        if (parsed.expiresAt && parsed.expiresAt < Math.floor(Date.now() / 1000)) {
+            localStorage.removeItem(`session_${this.wallet.address}`);
+            this.currentToken = null;
+        } else {
+            this.currentToken = parsed;
+        }
       }
     }
   }
@@ -74,10 +80,12 @@ export class SessionManager {
   }
 
   async getToken(): Promise<string> {
-    // BUG: No expiry check — returns the cached token even if it has expired,
-    // causing 401 errors on subsequent API calls
+    // Expiry check added
+    
     if (this.currentToken) {
-      return this.currentToken.token;
+      if (this.currentToken.expiresAt > Math.floor(Date.now() / 1000)) {
+        return this.currentToken.token;
+      }
     }
     const session = await this.authenticate();
     return session.token;

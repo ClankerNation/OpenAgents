@@ -11,7 +11,7 @@ export interface Transaction {
   to: string;
   value: bigint;
   data: string;
-  gasLimit: bigint;
+  gasLimit?: bigint;
   gasPrice?: bigint;
   nonce?: number;
   chainId?: number;
@@ -92,6 +92,30 @@ export class Wallet {
   }
 
   async sendTransaction(tx: Transaction): Promise<string> {
+    // Simulate transaction execution (eth_call) to ensure it wont revert on-chain
+    try {
+      await this.provider.call("eth_call", [{
+        from: this.address,
+        to: tx.to,
+        value: "0x" + tx.value.toString(16),
+        data: tx.data
+      }, "latest"]);
+    } catch (error) {
+      throw new Error(`Transaction simulation failed: ${error}`);
+    }
+
+    if (!tx.gasLimit || tx.gasLimit === 0n) {
+      const estimatedGasHex = await this.provider.call("eth_estimateGas", [{
+        from: this.address,
+        to: tx.to,
+        value: "0x" + tx.value.toString(16),
+        data: tx.data
+      }]) as string;
+      
+      const estimatedGas = BigInt(estimatedGasHex);
+      tx.gasLimit = (estimatedGas * 120n) / 100n; // 20% safety margin
+    }
+
     const signed = await this.signTransaction(tx);
     return (await this.provider.call("eth_sendRawTransaction", [signed.raw])) as string;
   }

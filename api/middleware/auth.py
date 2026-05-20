@@ -35,7 +35,7 @@ def decode_token(token: str) -> dict:
     try:
         # BUG: Algorithm not pinned in decode — attacker can forge a token with
         # alg: "none" and bypass signature verification entirely
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256", "none"])
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
         return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token has expired")
