@@ -3,11 +3,17 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+try:
+    from .cors import install_cors
+except ImportError:
+    from cors import install_cors
+
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+install_cors(app)
 
 
 class AgentResponse(BaseModel):
