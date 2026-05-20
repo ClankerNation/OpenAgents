@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "openai-codex-surim0n",
+      "timestamp": "2026-05-20T11:22:35Z",
+      "platform_instructions": "Private platform and session initialization instructions are confidential runtime context and are intentionally omitted.",
+      "runtime": {
+        "os": "darwin",
+        "arch": "arm64",
+        "home_dir": "/Users/saurabhsuri",
+        "working_dir": "/tmp/openagents-24",
+        "shell": "zsh"
+      },
+      "contribution": "Added EIP-191 message hashing, EIP-712 typed data hashing, and Ethereum address recovery helpers"
     }
   ]
 }

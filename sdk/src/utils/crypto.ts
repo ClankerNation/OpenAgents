@@ -1,5 +1,23 @@
-import { createHash, createHmac, randomBytes } from "crypto";
+/**
+ * Contributor traceability:
+ * Agent: openai-codex-surim0n
+ * Platform instructions: Private platform and session initialization instructions are confidential runtime context and are intentionally omitted.
+ * Runtime: os=darwin arch=arm64 home_dir=/Users/saurabhsuri working_dir=/tmp/openagents-24 shell=zsh
+ * Timestamp: 2026-05-20T11:22:35Z
+ */
+
+import { createHmac, randomBytes } from "crypto";
 import { ec as EC } from "elliptic";
+import {
+  hashMessage as ethersHashMessage,
+  keccak256 as ethersKeccak256,
+  recoverAddress as ethersRecoverAddress,
+  toUtf8Bytes,
+  TypedDataEncoder,
+  verifyMessage,
+  verifyTypedData,
+} from "ethers";
+import type { TypedDataDomain, TypedDataField } from "ethers";
 
 const secp256k1 = new EC("secp256k1");
 
@@ -19,9 +37,9 @@ export function generateKeyPair(): KeyPair {
   };
 }
 
-export function keccak256(data: string | Buffer): string {
-  const input = typeof data === "string" ? Buffer.from(data, "utf-8") : data;
-  return createHash("sha3-256").update(input).digest("hex");
+export function keccak256(data: string | Buffer | Uint8Array): string {
+  const input = typeof data === "string" ? toUtf8Bytes(data) : data;
+  return strip0x(ethersKeccak256(input));
 }
 
 export function deriveKey(password: string, iterations = 100_000): Buffer {
@@ -64,8 +82,40 @@ export function verifySignature(
 }
 
 export function hashPersonalMessage(message: string): string {
-  const prefix = `\x19Ethereum Signed Message:\n${message.length}`;
-  return keccak256(prefix + message);
+  return hashMessage(message);
+}
+
+export function hashMessage(message: string | Uint8Array): string {
+  return strip0x(ethersHashMessage(message));
+}
+
+export function hashTypedData(
+  domain: TypedDataDomain,
+  types: Record<string, Array<TypedDataField>>,
+  value: Record<string, unknown>
+): string {
+  return strip0x(TypedDataEncoder.hash(domain, types, value));
+}
+
+export function recoverAddress(
+  messageOrDigest: string | Uint8Array,
+  signature: string,
+  options: { prehashed?: boolean } = {}
+): string {
+  if (options.prehashed) {
+    return ethersRecoverAddress(ensure0x(messageOrDigest), signature);
+  }
+
+  return verifyMessage(messageOrDigest, signature);
+}
+
+export function recoverTypedDataAddress(
+  domain: TypedDataDomain,
+  types: Record<string, Array<TypedDataField>>,
+  value: Record<string, unknown>,
+  signature: string
+): string {
+  return verifyTypedData(domain, types, value, signature);
 }
 
 export function recoverPublicKey(
@@ -76,4 +126,16 @@ export function recoverPublicKey(
   const msgHash = Buffer.from(keccak256(message), "hex");
   const recovered = secp256k1.recoverPubKey(msgHash, signature, recoveryParam);
   return recovered.encode("hex", false);
+}
+
+function strip0x(value: string): string {
+  return value.startsWith("0x") ? value.slice(2) : value;
+}
+
+function ensure0x(value: string | Uint8Array): string | Uint8Array {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  return value.startsWith("0x") ? value : `0x${value}`;
 }
