@@ -23,6 +23,7 @@ contract CompoundVault is Ownable, ReentrancyGuard {
     uint256 public performanceFeeBps; // basis points (e.g., 1000 = 10%)
     uint256 public lastHarvestTime;
     uint256 public lastPricePerShare;
+    bool public emergencyPaused;
 
     mapping(address => uint256) public userShares;
 
@@ -47,9 +48,18 @@ contract CompoundVault is Ownable, ReentrancyGuard {
         lastPricePerShare = 1e18;
     }
 
+    function setEmergencyPause(bool _paused) external onlyOwner {
+        emergencyPaused = _paused;
+    }
+
+    modifier whenNotPaused() {
+        require(!emergencyPaused, "Vault: paused");
+        _;
+    }
+
     /// @notice Deposit base tokens and receive vault shares.
     /// @param amount Amount of base token to deposit.
-    function deposit(uint256 amount) external nonReentrant {
+    function deposit(uint256 amount) external nonReentrant whenNotPaused {
         require(amount > 0, "Vault: zero amount");
 
         uint256 sharesToMint;
@@ -69,7 +79,7 @@ contract CompoundVault is Ownable, ReentrancyGuard {
 
     /// @notice Withdraw base tokens by burning vault shares.
     /// @param shareAmount Number of shares to redeem.
-    function withdraw(uint256 shareAmount) external nonReentrant {
+    function withdraw(uint256 shareAmount) external nonReentrant whenNotPaused {
         require(shareAmount > 0 && userShares[msg.sender] >= shareAmount, "Vault: invalid");
 
         uint256 assets = (shareAmount * totalDeposited) / totalShares;
@@ -78,6 +88,18 @@ contract CompoundVault is Ownable, ReentrancyGuard {
         totalShares -= shareAmount;
         totalDeposited -= assets;
 
+        baseToken.safeTransfer(msg.sender, assets);
+        emit Withdrawn(msg.sender, assets, shareAmount);
+    }
+
+    function emergencyWithdraw() external nonReentrant {
+        require(emergencyPaused, "Vault: not paused");
+        uint256 shareAmount = userShares[msg.sender];
+        require(shareAmount > 0, "Vault: zero shares");
+        uint256 assets = (shareAmount * totalDeposited) / totalShares;
+        userShares[msg.sender] = 0;
+        totalShares -= shareAmount;
+        totalDeposited -= assets;
         baseToken.safeTransfer(msg.sender, assets);
         emit Withdrawn(msg.sender, assets, shareAmount);
     }

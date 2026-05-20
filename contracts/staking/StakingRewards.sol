@@ -70,7 +70,7 @@ contract StakingRewards is ReentrancyGuard {
         // After periodFinish, this keeps accruing phantom rewards indefinitely,
         // allowing stakers to drain more rewards than were actually deposited.
         return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / _totalSupply
+            (lastTimeRewardApplicable() - lastUpdateTime) * rewardRate * 1e18 / _totalSupply
         );
     }
 

@@ -41,6 +41,7 @@ contract MultiTokenStaking is Ownable, ReentrancyGuard {
     // BUG: Missing zero-address validation — rewardToken can be set to address(0),
     // causing all reward transfers to silently burn tokens or revert unpredictably.
     constructor(address _rewardToken, uint256 _rewardPerSecond) Ownable(msg.sender) {
+        require(_rewardToken != address(0), "MultiStaking: zero address reward token");
         rewardToken = IERC20(_rewardToken);
         rewardPerSecond = _rewardPerSecond;
     }
@@ -51,7 +52,11 @@ contract MultiTokenStaking is Ownable, ReentrancyGuard {
     // BUG: No duplicate token check — the same token can be added multiple times,
     // causing reward accounting to break as totalAllocPoint inflates and existing
     // stakers in the original pool get diluted unexpectedly.
+    mapping(address => bool) public isPoolAdded;
+
     function addPool(uint256 _allocPoint, address _stakeToken) external onlyOwner {
+        require(!isPoolAdded[_stakeToken], "MultiStaking: pool already exists");
+        isPoolAdded[_stakeToken] = true;
         totalAllocPoint += _allocPoint;
         poolInfo.push(PoolInfo({
             stakeToken: IERC20(_stakeToken),
@@ -78,7 +83,7 @@ contract MultiTokenStaking is Ownable, ReentrancyGuard {
         // BUG: Reward calculation can overflow for large elapsed * rewardPerSecond * allocPoint
         // values. With high rewardPerSecond (e.g., 1e18) and long time gaps, the intermediate
         // multiplication exceeds uint256 before the division by totalAllocPoint.
-        uint256 reward = elapsed * rewardPerSecond * pool.allocPoint / totalAllocPoint;
+        uint256 reward = elapsed * ((rewardPerSecond * pool.allocPoint) / totalAllocPoint);
         pool.accRewardPerShare += reward * 1e12 / pool.totalStaked;
         pool.lastRewardTime = block.timestamp;
     }
@@ -139,7 +144,7 @@ contract MultiTokenStaking is Ownable, ReentrancyGuard {
         uint256 accRewardPerShare = pool.accRewardPerShare;
         if (block.timestamp > pool.lastRewardTime && pool.totalStaked > 0) {
             uint256 elapsed = block.timestamp - pool.lastRewardTime;
-            uint256 reward = elapsed * rewardPerSecond * pool.allocPoint / totalAllocPoint;
+            uint256 reward = elapsed * ((rewardPerSecond * pool.allocPoint) / totalAllocPoint);
             accRewardPerShare += reward * 1e12 / pool.totalStaked;
         }
         return user.amount * accRewardPerShare / 1e12 - user.rewardDebt;

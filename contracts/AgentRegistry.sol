@@ -17,6 +17,7 @@ contract AgentRegistry is Ownable {
     mapping(bytes32 => Agent) public agents;
     mapping(address => bytes32[]) public ownerAgents;
     bytes32[] public agentIds;
+    uint256 public activeAgentCount;
 
     uint256 public registrationFee;
     uint256 public minReputation;
@@ -50,6 +51,7 @@ contract AgentRegistry is Ownable {
 
         ownerAgents[msg.sender].push(agentId);
         agentIds.push(agentId);
+        activeAgentCount++;
 
         emit AgentRegistered(agentId, msg.sender, name);
         return agentId;
@@ -57,7 +59,9 @@ contract AgentRegistry is Ownable {
 
     function deactivateAgent(bytes32 agentId) external {
         require(agents[agentId].owner == msg.sender, "Not agent owner");
+        require(agents[agentId].active, "Already inactive");
         agents[agentId].active = false;
+        if (activeAgentCount > 0) activeAgentCount--;
         emit AgentDeactivated(agentId);
     }
 
@@ -79,10 +83,8 @@ contract AgentRegistry is Ownable {
         return agents[agentId];
     }
 
-    function getActiveAgentCount() external view returns (uint256 count) {
-        for (uint256 i = 0; i < agentIds.length; i++) {
-            if (agents[agentIds[i]].active) count++;
-        }
+    function getActiveAgentCount() external view returns (uint256) {
+        return activeAgentCount;
     }
 
     function setRegistrationFee(uint256 _fee) external onlyOwner {

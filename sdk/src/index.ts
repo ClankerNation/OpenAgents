@@ -88,4 +88,23 @@ export class OpenAgentsSDK {
 
     return openTasks;
   }
+
+  /**
+   * Deploy a new smart contract to the blockchain.
+   * @param abi The contract ABI
+   * @param bytecode The contract bytecode (hex string)
+   * @param args Constructor arguments
+   * @returns The deployed contract instance
+   */
+  async deployContract(abi: any[], bytecode: string, ...args: any[]): Promise<ethers.Contract> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    
+    // Deploy the contract
+    const contract = await factory.deploy(...args);
+    
+    // Wait for the deployment transaction to be mined
+    await contract.waitForDeployment();
+    
+    return contract as ethers.Contract;
+  }
 }

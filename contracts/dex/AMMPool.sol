@@ -18,6 +18,7 @@ contract AMMPool {
     uint256 public reserveB;
     uint256 public totalLiquidity;
     uint256 public constant FEE_BPS = 30; // 0.3%
+    uint256 public constant MINIMUM_LIQUIDITY = 1000;
 
     mapping(address => uint256) public liquidity;
 
@@ -38,6 +39,10 @@ contract AMMPool {
 
         if (totalLiquidity == 0) {
             lpTokens = _sqrt(amountA * amountB);
+            require(lpTokens > MINIMUM_LIQUIDITY, "Insufficient initial liquidity");
+            // Permanently lock the first 1000 MINIMUM_LIQUIDITY tokens
+            lpTokens -= MINIMUM_LIQUIDITY;
+            totalLiquidity += MINIMUM_LIQUIDITY; // implicitly mints to address(0)
         } else {
             uint256 lpA = (amountA * totalLiquidity) / reserveA;
             uint256 lpB = (amountB * totalLiquidity) / reserveB;

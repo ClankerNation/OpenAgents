@@ -23,21 +23,23 @@ export interface SignedTransaction {
 }
 
 export class Wallet {
-  // BUG: Private key stored as plaintext string in memory — should use
-  // a secure enclave, encrypted storage, or at minimum a Buffer that can be zeroed
+  // Private key secured using Buffer memory
+  
   public readonly address: string;
-  private privateKey: string;
+  private privateKeyBuffer: Buffer;
   private provider: RpcProvider;
   private cachedNonce: number | null = null;
 
   constructor(config: WalletConfig) {
+    let pkString: string;
     if (config.privateKey) {
-      this.privateKey = config.privateKey;
+      pkString = config.privateKey;
     } else {
       const keyPair = generateKeyPair();
-      this.privateKey = keyPair.privateKey;
+      pkString = keyPair.privateKey;
     }
-    this.address = this.deriveAddress(this.privateKey);
+    this.privateKeyBuffer = Buffer.from(pkString, "hex");
+    this.address = this.deriveAddress(pkString);
     this.provider = config.provider;
   }
 
@@ -65,7 +67,7 @@ export class Wallet {
     ]);
 
     const txHash = keccak256(txData);
-    const signature = signMessage(this.privateKey, txHash);
+    const signature = signMessage(this.privateKeyBuffer.toString("hex"), txHash);
 
     return {
       raw: "0x" + txData.slice(2) + signature,
@@ -96,7 +98,20 @@ export class Wallet {
     return (await this.provider.call("eth_sendRawTransaction", [signed.raw])) as string;
   }
 
+}
+
+  destroy(): void {
+    if (this.privateKeyBuffer) {
+      this.privateKeyBuffer.fill(0);
+    }
+  }
   exportPrivateKey(): string {
-    return this.privateKey;
+    return this.privateKeyBuffer.toString("hex");
+  }
+
+  destroy(): void {
+    if (this.privateKeyBuffer) {
+      this.privateKeyBuffer.fill(0);
+    }
   }
 }

@@ -13,6 +13,7 @@ contract PaymentEscrow is Ownable {
         uint256 releaseTime;
         bool released;
         bool refunded;
+        bool disputed;
     }
 
     mapping(uint256 => Escrow) public escrows;
@@ -21,6 +22,8 @@ contract PaymentEscrow is Ownable {
     event EscrowCreated(uint256 indexed escrowId, address indexed payer, uint256 amount);
     event EscrowReleased(uint256 indexed escrowId, address indexed payee, uint256 amount);
     event EscrowRefunded(uint256 indexed escrowId, address indexed payer, uint256 amount);
+    event EscrowDisputed(uint256 indexed escrowId);
+    event DisputeResolved(uint256 indexed escrowId, bool toPayee);
 
     constructor() Ownable(msg.sender) {}
 
@@ -43,7 +46,8 @@ contract PaymentEscrow is Ownable {
             amount: amount,
             releaseTime: block.timestamp + lockDuration,
             released: false,
-            refunded: false
+            refunded: false,
+            disputed: false
         });
 
         emit EscrowCreated(escrowId, msg.sender, amount);
@@ -52,7 +56,8 @@ contract PaymentEscrow is Ownable {
 
     function releaseEscrow(uint256 escrowId) external {
         Escrow storage escrow = escrows[escrowId];
-        require(!escrow.released && !escrow.refunded, "Already settled");
+        require(!escrow.released require(!escrow.released && !escrow.refunded, "Already settled");require(!escrow.released && !escrow.refunded, "Already settled"); !escrow.refunded, "Already settled");
+        require(!escrow.disputed, "Escrow is disputed");
         require(msg.sender == escrow.payer || msg.sender == owner(), "Not authorized");
 
         escrow.released = true;
@@ -63,7 +68,8 @@ contract PaymentEscrow is Ownable {
 
     function refundEscrow(uint256 escrowId) external {
         Escrow storage escrow = escrows[escrowId];
-        require(!escrow.released && !escrow.refunded, "Already settled");
+        require(!escrow.released require(!escrow.released && !escrow.refunded, "Already settled");require(!escrow.released && !escrow.refunded, "Already settled"); !escrow.refunded, "Already settled");
+        require(!escrow.disputed, "Escrow is disputed");
         require(block.timestamp > escrow.releaseTime, "Lock not expired");
         require(msg.sender == escrow.payer, "Not payer");
 
@@ -71,5 +77,30 @@ contract PaymentEscrow is Ownable {
         IERC20(escrow.token).transfer(escrow.payer, escrow.amount);
 
         emit EscrowRefunded(escrowId, escrow.payer, escrow.amount);
+}
+
+    function raiseDispute(uint256 escrowId) external {
+        Escrow storage escrow = escrows[escrowId];
+        require(!escrow.released && !escrow.refunded, "Already settled");
+        require(msg.sender == escrow.payer || msg.sender == escrow.payee, "Not authorized");
+        require(!escrow.disputed, "Already disputed");
+
+        escrow.disputed = true;
+        emit EscrowDisputed(escrowId);
+    }
+
+    function resolveDispute(uint256 escrowId, bool payPayee) external onlyOwner {
+        Escrow storage escrow = escrows[escrowId];
+        require(!escrow.released && !escrow.refunded, "Already settled");
+        require(escrow.disputed, "Not disputed");
+
+        if (payPayee) {
+            escrow.released = true;
+            IERC20(escrow.token).transfer(escrow.payee, escrow.amount);
+        } else {
+            escrow.refunded = true;
+            IERC20(escrow.token).transfer(escrow.payer, escrow.amount);
+        }
+        emit DisputeResolved(escrowId, payPayee);
     }
 }
