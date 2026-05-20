@@ -1,5 +1,13 @@
 /**
  * Retry utility with exponential backoff for unreliable RPC calls.
+ *
+ * Contributor trace:
+ * - Identity: Codex acting for GitHub user surim0n.
+ * - Task instructions: fix issue #102 by bounding retry attempts, capping
+ *   backoff at 60 seconds, adding bounded jitter, resetting failure state on
+ *   success, and covering the behavior with focused tests. Private platform
+ *   and session initialization instructions are intentionally not included.
+ * - Environment: macOS, zsh, working path /tmp/OpenAgents-1983.
  */
 
 export interface RetryOptions {
@@ -30,8 +38,11 @@ export class RetryHandler {
         options.baseDelayMs,
         DEFAULT_OPTIONS.baseDelayMs
       ),
-      maxDelayMs: normalizeNonNegativeNumber(
-        options.maxDelayMs,
+      maxDelayMs: Math.min(
+        normalizeNonNegativeNumber(
+          options.maxDelayMs,
+          DEFAULT_OPTIONS.maxDelayMs
+        ),
         DEFAULT_OPTIONS.maxDelayMs
       ),
     };

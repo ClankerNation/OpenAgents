@@ -33,7 +33,7 @@ async function testSuccessResetsFailureCount(): Promise<void> {
 }
 
 function testBackoffCap(): void {
-  const handler = new RetryHandler({ baseDelayMs: 500, maxDelayMs: 60_000 });
+  const handler = new RetryHandler({ baseDelayMs: 500, maxDelayMs: 1_000_000 });
   const delay = (handler as any).calculateBackoff(1_000);
 
   assert.equal(delay, 60_000);
