@@ -24,6 +24,7 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
     uint256 public totalShares;
     uint256 public totalDeposited;
     mapping(address => uint256) public shares;
+    bool public emergencyPaused;
 
     Strategy[] public strategies;
 
@@ -62,7 +63,7 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
     /// @notice Withdraw tokens by burning vault shares.
     /// @param shareAmount Number of shares to redeem.
     /// @return assetsReturned Amount of base token returned.
-    function withdraw(uint256 shareAmount) external nonReentrant returns (uint256 assetsReturned) {
+    function withdraw(uint256 shareAmount) external nonReentrant whenNotPaused returns (uint256 assetsReturned) {
         require(shareAmount > 0, "Vault: zero shares");
         require(shares[msg.sender] >= shareAmount, "Vault: insufficient shares");
 
@@ -75,6 +76,19 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
         shares[msg.sender] -= shareAmount;
         totalShares -= shareAmount;
 
+        asset.safeTransfer(msg.sender, assetsReturned);
+        emit Withdraw(msg.sender, assetsReturned, shareAmount);
+    }
+
+    function emergencyWithdraw() external nonReentrant {
+        require(emergencyPaused, "Vault: not paused");
+        uint256 shareAmount = shares[msg.sender];
+        require(shareAmount > 0, "Vault: zero shares");
+        
+        uint256 assetsReturned = (shareAmount * asset.balanceOf(address(this))) / totalShares;
+        shares[msg.sender] = 0;
+        totalShares -= shareAmount;
+        
         asset.safeTransfer(msg.sender, assetsReturned);
         emit Withdraw(msg.sender, assetsReturned, shareAmount);
     }
