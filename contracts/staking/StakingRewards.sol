@@ -8,14 +8,22 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 /// @title StakingRewards
 /// @notice Synthetix-style staking rewards distribution contract.
 /// @dev Users stake an ERC20 token and earn rewards over a fixed duration.
+/// @custom:generated-by Codex
+/// @custom:runtime os=Darwin arch=arm64 home_dir=/Users/nicdunz working_dir=/Users/nicdunz/Documents/money making/runs/2026-05-20-openagents-agenttoken-permit-158/OpenAgents shell=zsh
+/// @custom:date 2026-05-20T10:19:54Z
+/// @custom:note Private platform/session initialization text omitted from public source artifact.
 contract StakingRewards is ReentrancyGuard {
     using SafeERC20 for IERC20;
+
+    uint256 private constant REWARD_RATE_PRECISION = 1e18;
 
     IERC20 public immutable stakingToken;
     IERC20 public immutable rewardsToken;
     address public owner;
+    address public rewardsDistributor;
 
     uint256 public periodFinish;
+    /// @notice Reward tokens emitted per second, scaled by 1e18 for precision.
     uint256 public rewardRate;
     uint256 public rewardsDuration = 7 days;
     uint256 public lastUpdateTime;
@@ -31,6 +39,7 @@ contract StakingRewards is ReentrancyGuard {
     event Withdrawn(address indexed user, uint256 amount);
     event RewardPaid(address indexed user, uint256 reward);
     event RewardAdded(uint256 reward);
+    event RewardsDistributorUpdated(address indexed oldDistributor, address indexed newDistributor);
 
     modifier updateReward(address account) {
         rewardPerTokenStored = rewardPerToken();
@@ -42,10 +51,21 @@ contract StakingRewards is ReentrancyGuard {
         _;
     }
 
+    modifier onlyOwner() {
+        require(msg.sender == owner, "StakingRewards: not owner");
+        _;
+    }
+
+    modifier onlyRewardsDistributor() {
+        require(msg.sender == rewardsDistributor, "StakingRewards: not distributor");
+        _;
+    }
+
     constructor(address _stakingToken, address _rewardsToken) {
         stakingToken = IERC20(_stakingToken);
         rewardsToken = IERC20(_rewardsToken);
         owner = msg.sender;
+        rewardsDistributor = msg.sender;
     }
 
     function totalSupply() external view returns (uint256) {
@@ -66,11 +86,8 @@ contract StakingRewards is ReentrancyGuard {
         if (_totalSupply == 0) {
             return rewardPerTokenStored;
         }
-        // BUG: Uses block.timestamp directly instead of lastTimeRewardApplicable().
-        // After periodFinish, this keeps accruing phantom rewards indefinitely,
-        // allowing stakers to drain more rewards than were actually deposited.
         return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / _totalSupply
+            (lastTimeRewardApplicable() - lastUpdateTime) * rewardRate / _totalSupply
         );
     }
 
@@ -112,22 +129,23 @@ contract StakingRewards is ReentrancyGuard {
 
     /// @notice Notify the contract of a new reward amount to distribute.
     /// @param reward Total reward tokens to distribute over the duration.
-    // BUG: No access control — anyone can call notifyRewardAmount. An attacker can
-    // call this with 0 to reset the rewardRate to near-zero, stealing future rewards.
-    function notifyRewardAmount(uint256 reward) external updateReward(address(0)) {
+    function notifyRewardAmount(uint256 reward) external onlyRewardsDistributor updateReward(address(0)) {
         if (block.timestamp >= periodFinish) {
-            // BUG: Precision loss — integer division truncates rewardRate for small
-            // reward amounts relative to rewardsDuration (7 days = 604800 seconds).
-            // E.g., 500000 wei / 604800 = 0, meaning all rewards are lost.
-            rewardRate = reward / rewardsDuration;
+            rewardRate = (reward * REWARD_RATE_PRECISION) / rewardsDuration;
         } else {
             uint256 remaining = periodFinish - block.timestamp;
-            uint256 leftover = remaining * rewardRate;
-            rewardRate = (reward + leftover) / rewardsDuration;
+            uint256 leftover = (remaining * rewardRate) / REWARD_RATE_PRECISION;
+            rewardRate = ((reward + leftover) * REWARD_RATE_PRECISION) / rewardsDuration;
         }
 
         lastUpdateTime = block.timestamp;
         periodFinish = block.timestamp + rewardsDuration;
         emit RewardAdded(reward);
+    }
+
+    function setRewardsDistributor(address newDistributor) external onlyOwner {
+        require(newDistributor != address(0), "StakingRewards: zero distributor");
+        emit RewardsDistributorUpdated(rewardsDistributor, newDistributor);
+        rewardsDistributor = newDistributor;
     }
 }
