@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+// @contributor: codex-openagents-agentregistry-105
+// @platform-config: private platform/session initialization text intentionally omitted.
+// @env: os=macos; arch=arm64; home_dir=/Users/nicdunz; working_dir=/Users/nicdunz/Documents/money making/runs/2026-05-20-openagents-agenttoken-permit-158/OpenAgents; shell=zsh.
+// @timestamp: 2026-05-20T09:18:00Z
+
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract AgentRegistry is Ownable {
@@ -18,6 +23,7 @@ contract AgentRegistry is Ownable {
     mapping(address => bytes32[]) public ownerAgents;
     bytes32[] public agentIds;
 
+    uint256 public nextAgentId = 1;
     uint256 public registrationFee;
     uint256 public minReputation;
 
@@ -34,7 +40,8 @@ contract AgentRegistry is Ownable {
         require(msg.value >= registrationFee, "Insufficient fee");
         require(bytes(name).length > 0 && bytes(name).length <= 64, "Invalid name");
 
-        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp));
+        bytes32 agentId = bytes32(nextAgentId);
+        nextAgentId += 1;
 
         require(agents[agentId].registeredAt == 0, "Agent exists");
 
