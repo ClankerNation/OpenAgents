@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-// @generated-by: codex-openagents-prizesplit-126
-// @platform-config: private platform/session initialization text intentionally omitted.
-// @env: os=macos; arch=arm64; home_dir=/Users/nicdunz; working_dir=/Users/nicdunz/Documents/money making/runs/2026-05-20-openagents-agenttoken-permit-158/OpenAgents; shell=zsh.
-// @timestamp: 2026-05-20T09:22:00Z
-
 /// @title PrizeSplit
 /// @notice Distributes prize pool among multiple winners with configurable shares
 /// @dev Winners claim their share after the admin finalizes the round
