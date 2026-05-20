@@ -10,7 +10,14 @@ from ..middleware.auth import get_current_user
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
-VALID_STATUSES = {"open", "assigned", "in_progress", "review", "completed", "cancelled"}
+VALID_STATUSES = {
+    "open",
+    "assigned",
+    "in_progress",
+    "review",
+    "completed",
+    "cancelled",
+}
 
 
 class TaskCreate(BaseModel):
@@ -22,11 +29,16 @@ class TaskCreate(BaseModel):
 
 
 class TaskStatusUpdate(BaseModel):
-    status: str  # BUG: Not validated against VALID_STATUSES enum — any string accepted
+    # BUG: Not validated against VALID_STATUSES enum — any string accepted
+    status: str
 
 
 @router.post("/")
-async def create_task(task: TaskCreate, user=Depends(get_current_user), db=Depends(get_db)):
+async def create_task(
+    task: TaskCreate,
+    user=Depends(get_current_user),
+    db=Depends(get_db),
+):
     new_task = Task(
         title=task.title,
         description=task.description,
@@ -34,7 +46,6 @@ async def create_task(task: TaskCreate, user=Depends(get_current_user), db=Depen
         creator_id=user["id"],
         agent_id=task.agent_id,
         status="open",
-        created_at=datetime.utcnow(),
         deadline=task.deadline,
     )
     db.add(new_task)
@@ -58,7 +69,12 @@ async def list_tasks(
         query = query.filter(Task.status == status)
     if creator:
         query = query.filter(Task.creator_id == creator)
-    return query.order_by(Task.created_at.desc()).offset(skip).limit(limit).all()
+    return (
+        query.order_by(Task.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
 
 @router.get("/{task_id}")
@@ -83,23 +99,35 @@ async def update_task_status(
     # BUG: Creator can mark their own task as completed — should require
     # a third party or the assignee to confirm completion
     if task.creator_id != user["id"]:
-        raise HTTPException(status_code=403, detail="Only the creator can update status")
+        raise HTTPException(
+            status_code=403,
+            detail="Only the creator can update status",
+        )
 
     task.status = update.status
-    task.updated_at = datetime.utcnow()
     db.commit()
     return {"id": task.id, "status": task.status}
 
 
 @router.delete("/{task_id}")
-async def cancel_task(task_id: int, user=Depends(get_current_user), db=Depends(get_db)):
+async def cancel_task(
+    task_id: int,
+    user=Depends(get_current_user),
+    db=Depends(get_db),
+):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     if task.creator_id != user["id"]:
-        raise HTTPException(status_code=403, detail="Only the creator can cancel")
+        raise HTTPException(
+            status_code=403,
+            detail="Only the creator can cancel",
+        )
     if task.status not in ("open", "assigned"):
-        raise HTTPException(status_code=400, detail="Cannot cancel an active task")
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot cancel an active task",
+        )
     task.status = "cancelled"
     db.commit()
     return {"id": task.id, "status": "cancelled"}
