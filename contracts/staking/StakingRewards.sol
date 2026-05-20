@@ -26,6 +26,7 @@ contract StakingRewards is ReentrancyGuard {
 
     uint256 private _totalSupply;
     mapping(address => uint256) private _balances;
+    mapping(address => uint256) public stakeStartTime;
 
     event Staked(address indexed user, uint256 amount);
     event Withdrawn(address indexed user, uint256 amount);
@@ -54,6 +55,16 @@ contract StakingRewards is ReentrancyGuard {
 
     function balanceOf(address account) external view returns (uint256) {
         return _balances[account];
+    }
+
+
+    function getBoostMultiplier(address account) public view returns (uint256) {
+        if (stakeStartTime[account] == 0) return 100;
+        uint256 stakedDuration = block.timestamp - stakeStartTime[account];
+        if (stakedDuration >= 365 days) return 200; // 2x boost
+        if (stakedDuration >= 180 days) return 150; // 1.5x boost
+        if (stakedDuration >= 30 days) return 110;  // 1.1x boost
+        return 100;
     }
 
     function lastTimeRewardApplicable() public view returns (uint256) {
@@ -86,6 +97,7 @@ contract StakingRewards is ReentrancyGuard {
         require(amount > 0, "Cannot stake 0");
         _totalSupply += amount;
         _balances[msg.sender] += amount;
+        if (stakeStartTime[msg.sender] == 0) stakeStartTime[msg.sender] = block.timestamp;
         stakingToken.safeTransferFrom(msg.sender, address(this), amount);
         emit Staked(msg.sender, amount);
     }
