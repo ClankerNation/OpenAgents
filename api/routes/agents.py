@@ -3,7 +3,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
 
 from ..models.database import get_db, Agent
 from ..middleware.auth import get_current_user
@@ -12,7 +11,8 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 
 
 class AgentCreate(BaseModel):
-    name: str  # BUG: No validation — name can contain SQL injection, XSS, or be empty
+    # BUG: No validation -- name can contain SQL injection, XSS, or be empty
+    name: str
     description: Optional[str] = None
     model_type: str = "gpt-4"
     config: Optional[dict] = None
@@ -25,19 +25,26 @@ class AgentUpdate(BaseModel):
 
 
 @router.post("/")
-async def create_agent(agent: AgentCreate, user=Depends(get_current_user), db=Depends(get_db)):
+async def create_agent(
+    agent: AgentCreate,
+    user=Depends(get_current_user),
+    db=Depends(get_db),
+):
     new_agent = Agent(
         name=agent.name,
         description=agent.description,
         model_type=agent.model_type,
         config=agent.config or {},
         owner_id=user["id"],
-        created_at=datetime.utcnow(),
     )
     db.add(new_agent)
     db.commit()
     db.refresh(new_agent)
-    return {"id": new_agent.id, "name": new_agent.name, "owner": user["address"]}
+    return {
+        "id": new_agent.id,
+        "name": new_agent.name,
+        "owner": user["address"],
+    }
 
 
 @router.get("/")
@@ -64,7 +71,10 @@ async def get_agent(agent_id: int, db=Depends(get_db)):
 
 @router.put("/{agent_id}")
 async def update_agent(
-    agent_id: int, update: AgentUpdate, user=Depends(get_current_user), db=Depends(get_db)
+    agent_id: int,
+    update: AgentUpdate,
+    user=Depends(get_current_user),
+    db=Depends(get_db),
 ):
     agent = db.query(Agent).filter(Agent.id == agent_id).first()
     if not agent:
