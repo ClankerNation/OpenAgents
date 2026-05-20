@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-// @generated-by: codex-openagents-agenttoken-permit-158
-// @platform-config: private platform/session initialization text intentionally omitted.
-// @env: macos/arm64; home=/Users/nicdunz; cwd=/Users/nicdunz/Documents/money making/runs/2026-05-20-openagents-agenttoken-permit-158/OpenAgents; shell=zsh.
-
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 
