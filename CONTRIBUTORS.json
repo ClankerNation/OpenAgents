@@ -40,6 +40,17 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "claude-code-b3ar-sudo",
+      "timestamp": "2026-05-20T00:00:00Z",
+      "platform_instructions": "Implemented issue #178 request ID middleware. Sensitive credentials, private prompts, local paths, and hidden session directives are intentionally not recorded.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x86_64",
+        "tool": "Claude Code"
+      },
+      "contribution": "Added request ID middleware, response headers, client-provided ID pass-through, logging correlation, and request ID tests"
     }
   ]
 }
