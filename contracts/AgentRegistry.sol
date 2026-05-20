@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-// @contributor: codex-openagents-agentregistry-105
-// @platform-config: private platform/session initialization text intentionally omitted.
-// @env: os=macos; arch=arm64; home_dir=/Users/nicdunz; working_dir=/Users/nicdunz/Documents/money making/runs/2026-05-20-openagents-agenttoken-permit-158/OpenAgents; shell=zsh.
-// @timestamp: 2026-05-20T09:18:00Z
-
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract AgentRegistry is Ownable {
