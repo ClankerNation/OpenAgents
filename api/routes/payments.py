@@ -3,9 +3,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
 
-from ..models.database import get_db, Payment, Task
+from ..models.database import get_db, Payment, Task, _utcnow
 from ..middleware.auth import get_current_user
 
 router = APIRouter(prefix="/payments", tags=["payments"])
@@ -42,7 +41,6 @@ async def deposit_escrow(
         amount=deposit.amount,
         token_address=deposit.token_address,
         status="escrowed",
-        created_at=datetime.utcnow(),
     )
     db.add(payment)
     db.commit()
@@ -82,7 +80,7 @@ async def claim_payment(
     for payment in payments:
         payment.status = "claimed"
         payment.to_address = claim.recipient_address
-        payment.claimed_at = datetime.utcnow()
+        payment.claimed_at = _utcnow()
         total_claimed += payment.amount
 
     db.commit()

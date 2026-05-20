@@ -3,7 +3,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
 
 from ..models.database import get_db, Agent
 from ..middleware.auth import get_current_user
@@ -32,7 +31,6 @@ async def create_agent(agent: AgentCreate, user=Depends(get_current_user), db=De
         model_type=agent.model_type,
         config=agent.config or {},
         owner_id=user["id"],
-        created_at=datetime.utcnow(),
     )
     db.add(new_agent)
     db.commit()

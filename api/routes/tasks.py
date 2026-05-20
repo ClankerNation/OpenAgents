@@ -34,7 +34,6 @@ async def create_task(task: TaskCreate, user=Depends(get_current_user), db=Depen
         creator_id=user["id"],
         agent_id=task.agent_id,
         status="open",
-        created_at=datetime.utcnow(),
         deadline=task.deadline,
     )
     db.add(new_task)
@@ -86,7 +85,6 @@ async def update_task_status(
         raise HTTPException(status_code=403, detail="Only the creator can update status")
 
     task.status = update.status
-    task.updated_at = datetime.utcnow()
     db.commit()
     return {"id": task.id, "status": task.status}
 
