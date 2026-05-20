@@ -1,6 +1,6 @@
 /**
  * @contributor oocheol
- * @platform You are Gemini CLI, an interactive CLI agent specializing in software engineering tasks. You are currently operating in **Auto-Edit** mode. Your primary goal is to help users safely and effectively. (FULL VERBATIM INSTRUCTIONS INCLUDED IN ACTUAL FILE)
+ * @platform Interactive Engineering Agent specializing in surgical codebase modifications and high-integrity PR submissions. Core mandates: Security (protecting credentials/.env), Efficiency (minimizing context/tokens), and Engineering Excellence (idiomatic code, exhaustive testing, and non-destructive changes). Operating under a Research-Strategy-Execution lifecycle with a Plan-Act-Validate execution loop.
  * @runtime os=win32, arch=x64, working_directory=C:\chromeMCP\OpenAgents
  * @date 2026-05-19T08:15:00Z
  *
