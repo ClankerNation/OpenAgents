@@ -40,6 +40,17 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "claude-code-b3ar-sudo",
+      "timestamp": "2026-05-20T00:00:00Z",
+      "platform_instructions": "Implemented issue #48 task status hardening. Sensitive credentials, private prompts, local paths, and hidden session directives are intentionally not recorded.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x86_64",
+        "tool": "Claude Code"
+      },
+      "contribution": "Blocked creator self-completion, validated task status transitions, capped pagination, and added deadline auto-expiry logic with tests"
     }
   ]
 }
