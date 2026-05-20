@@ -1,19 +1,28 @@
-"""SQLAlchemy models and database session management."""
+"""SQLAlchemy models and database session management.
 
-from sqlalchemy import (
-    create_engine, Column, Integer, String, Float, Text, JSON,
-    ForeignKey, DateTime, Enum as SAEnum,
-)
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
-from datetime import datetime
+Contributor traceability:
+@contributor claude-code-b3ar-sudo
+@platform Issue #37 database indexes and cascades; private credentials, hidden prompts, and local paths intentionally omitted.
+@runtime linux x86_64, Claude Code
+@date 2026-05-20
+"""
+
+from datetime import datetime, timezone
 import os
+
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, JSON, String, Text, create_engine
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import relationship, sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./openagents.db")
 
 engine = create_engine(DATABASE_URL, echo=False)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def get_db():
@@ -28,26 +37,25 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    address = Column(String(42), unique=True, nullable=False)
-    username = Column(String(64), unique=True, nullable=True)
-    # BUG: No index on address — wallet lookups on every auth request do full table scans
-    created_at = Column(DateTime, default=datetime.utcnow)  # BUG: naive datetime, no timezone
+    address = Column(String(42), unique=True, nullable=False, index=True)
+    username = Column(String(64), unique=True, nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
 
-    agents = relationship("Agent", back_populates="owner")
+    agents = relationship("Agent", back_populates="owner", cascade="all, delete-orphan", passive_deletes=True)
 
 
 class Agent(Base):
     __tablename__ = "agents"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(128), nullable=False)
+    name = Column(String(128), nullable=False, index=True)
     description = Column(Text, nullable=True)
-    model_type = Column(String(32), default="gpt-4")
+    model_type = Column(String(32), default="gpt-4", index=True)
     config = Column(JSON, default=dict)
-    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    owner_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
 
-    # BUG: No cascade delete — deleting a user leaves orphaned agents
     owner = relationship("User", back_populates="agents")
     tasks = relationship("Task", back_populates="agent")
 
@@ -59,12 +67,12 @@ class Task(Base):
     title = Column(String(256), nullable=False)
     description = Column(Text, nullable=True)
     reward_amount = Column(Float, nullable=False)
-    status = Column(String(32), default="open")
-    creator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    agent_id = Column(Integer, ForeignKey("agents.id"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, nullable=True)
-    deadline = Column(DateTime, nullable=True)
+    status = Column(String(32), default="open", nullable=False, index=True)
+    creator_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    agent_id = Column(Integer, ForeignKey("agents.id"), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+    deadline = Column(DateTime(timezone=True), nullable=True, index=True)
 
     agent = relationship("Agent", back_populates="tasks")
     payments = relationship("Payment", back_populates="task")
@@ -74,14 +82,14 @@ class Payment(Base):
     __tablename__ = "payments"
 
     id = Column(Integer, primary_key=True, index=True)
-    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
-    from_address = Column(String(42), nullable=False)
-    to_address = Column(String(42), nullable=True)
+    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False, index=True)
+    from_address = Column(String(42), nullable=False, index=True)
+    to_address = Column(String(42), nullable=True, index=True)
     amount = Column(Float, nullable=False)
-    token_address = Column(String(42), default="0x0000000000000000000000000000000000000000")
-    status = Column(String(32), default="pending")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    claimed_at = Column(DateTime, nullable=True)
+    token_address = Column(String(42), default="0x0000000000000000000000000000000000000000", index=True)
+    status = Column(String(32), default="pending", nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    claimed_at = Column(DateTime(timezone=True), nullable=True)
 
     task = relationship("Task", back_populates="payments")
 
