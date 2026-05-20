@@ -30,8 +30,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     address = Column(String(42), unique=True, nullable=False)
     username = Column(String(64), unique=True, nullable=True)
-    # BUG: No index on address — wallet lookups on every auth request do full table scans
-    created_at = Column(DateTime, default=datetime.utcnow)  # BUG: naive datetime, no timezone
+    created_at = Column(DateTime, default=datetime.utcnow)
 
     agents = relationship("Agent", back_populates="owner")
 
@@ -46,8 +45,13 @@ class Agent(Base):
     config = Column(JSON, default=dict)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Reputation scoring fields
+    reputation = Column(Integer, default=100)  # Initial reputation
+    tasks_completed = Column(Integer, default=0)
+    disputes_lost = Column(Integer, default=0)
+    last_activity_at = Column(DateTime, default=datetime.utcnow)
 
-    # BUG: No cascade delete — deleting a user leaves orphaned agents
     owner = relationship("User", back_populates="agents")
     tasks = relationship("Task", back_populates="agent")
 
