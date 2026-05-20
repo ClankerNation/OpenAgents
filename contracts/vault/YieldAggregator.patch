@@ -1,0 +1,60 @@
+--- contracts/vault/YieldAggregator.sol
++++ contracts/vault/YieldAggregator.sol
+@@ -23,6 +23,7 @@
+     uint256 public totalShares;
+     uint256 public totalDeposited;
+     mapping(address => uint256) public shares;
++    bool public emergencyPaused;
+ 
+     Strategy[] public strategies;
+ 
+@@ -34,10 +35,19 @@
+         asset = IERC20(_asset);
+     }
+ 
++    function setEmergencyPause(bool _paused) external onlyOwner {
++        emergencyPaused = _paused;
++    }
++
++    modifier whenNotPaused() {
++        require(!emergencyPaused, "Vault: paused");
++        _;
++    }
++
+     /// @notice Deposit tokens into the vault and receive shares.
+     /// @param amount Amount of base token to deposit.
+     /// @return sharesMinted Number of shares issued to the depositor.
+-    function deposit(uint256 amount) external nonReentrant returns (uint256 sharesMinted) {
++    function deposit(uint256 amount) external nonReentrant whenNotPaused returns (uint256 sharesMinted) {
+         require(amount > 0, "Vault: zero deposit");
+ 
+         if (totalShares == 0) {
+@@ -62,7 +72,7 @@
+     /// @notice Withdraw tokens by burning vault shares.
+     /// @param shareAmount Number of shares to redeem.
+     /// @return assetsReturned Amount of base token returned.
+-    function withdraw(uint256 shareAmount) external nonReentrant returns (uint256 assetsReturned) {
++    function withdraw(uint256 shareAmount) external nonReentrant whenNotPaused returns (uint256 assetsReturned) {
+         require(shareAmount > 0, "Vault: zero shares");
+         require(shares[msg.sender] >= shareAmount, "Vault: insufficient shares");
+ 
+@@ -79,6 +89,19 @@
+         emit Withdraw(msg.sender, assetsReturned, shareAmount);
+     }
+ 
++    function emergencyWithdraw() external nonReentrant {
++        require(emergencyPaused, "Vault: not paused");
++        uint256 shareAmount = shares[msg.sender];
++        require(shareAmount > 0, "Vault: zero shares");
++        
++        uint256 assetsReturned = (shareAmount * asset.balanceOf(address(this))) / totalShares;
++        shares[msg.sender] = 0;
++        totalShares -= shareAmount;
++        
++        asset.safeTransfer(msg.sender, assetsReturned);
++        emit Withdraw(msg.sender, assetsReturned, shareAmount);
++    }
++
+     /// @notice Add a new yield strategy.
+     /// @param target Address of the strategy contract.
+     // BUG: Strategy target can be zero address — allocating funds to address(0)

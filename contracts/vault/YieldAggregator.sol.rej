@@ -1,0 +1,23 @@
+--- YieldAggregator.sol
++++ YieldAggregator.sol
+@@ -35,10 +36,19 @@
+         asset = IERC20(_asset);
+     }
+ 
++    function setEmergencyPause(bool _paused) external onlyOwner {
++        emergencyPaused = _paused;
++    }
++
++    modifier whenNotPaused() {
++        require(!emergencyPaused, "Vault: paused");
++        _;
++    }
++
+     /// @notice Deposit tokens into the vault and receive shares.
+     /// @param amount Amount of base token to deposit.
+     /// @return sharesMinted Number of shares issued to the depositor.
+-    function deposit(uint256 amount) external nonReentrant returns (uint256 sharesMinted) {
++    function deposit(uint256 amount) external nonReentrant whenNotPaused returns (uint256 sharesMinted) {
+         require(amount > 0, "Vault: zero deposit");
+ 
+         if (totalShares == 0) {

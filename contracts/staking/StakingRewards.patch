@@ -1,0 +1,67 @@
+--- contracts/staking/StakingRewards.sol
++++ contracts/staking/StakingRewards.sol
+@@ -26,6 +26,7 @@
+ 
+     uint256 private _totalSupply;
+     mapping(address => uint256) private _balances;
++    mapping(address => uint256) public stakeStartTime;
+ 
+     event Staked(address indexed user, uint256 amount);
+     event Withdrawn(address indexed user, uint256 amount);
+@@ -48,6 +49,15 @@
+         _;
+     }
+ 
++    function getBoostMultiplier(address account) public view returns (uint256) {
++        if (stakeStartTime[account] == 0) return 100;
++        uint256 stakedDuration = block.timestamp - stakeStartTime[account];
++        if (stakedDuration >= 365 days) return 200; // 2x boost
++        if (stakedDuration >= 180 days) return 150; // 1.5x boost
++        if (stakedDuration >= 30 days) return 110;  // 1.1x boost
++        return 100;
++    }
++
+     function lastTimeRewardApplicable() public view returns (uint256) {
+         return block.timestamp < periodFinish ? block.timestamp : periodFinish;
+     }
+@@ -69,14 +79,25 @@
+         // BUG: Uses block.timestamp directly instead of lastTimeRewardApplicable().
+         // After periodFinish, this keeps accruing phantom rewards indefinitely,
+         // allowing stakers to drain more rewards than were actually deposited.
+-        return rewardPerTokenStored + (
+-            (lastTimeRewardApplicable() - lastUpdateTime) * rewardRate * 1e18 / _totalSupply
+-        );
++        uint256 baseReward = rewardPerTokenStored + (
++             (lastTimeRewardApplicable() - lastUpdateTime) * rewardRate * 1e18 / _totalSupply
++         );
++        return baseReward;
++    }
++
++    function earned(address account) public view returns (uint256) {
++        uint256 baseEarned = ((_balances[account] * (rewardPerToken() - userRewardPerTokenPaid[account])) / 1e18) + rewards[account];
++        uint256 boost = getBoostMultiplier(account);
++        return (baseEarned * boost) / 100;
+     }
+-
+-    function earned(address account) public view returns (uint256) {
+-        return ((_balances[account] * (rewardPerToken() - userRewardPerTokenPaid[account])) / 1e18) + rewards[account];
+-    }
+ 
+     function getRewardForDuration() external view returns (uint256) {
+         return rewardRate * rewardsDuration;
+@@ -87,6 +108,7 @@
+         require(amount > 0, "Cannot stake 0");
+         _totalSupply += amount;
+         _balances[msg.sender] += amount;
++        if (stakeStartTime[msg.sender] == 0) stakeStartTime[msg.sender] = block.timestamp;
+         stakingToken.safeTransferFrom(msg.sender, address(this), amount);
+         emit Staked(msg.sender, amount);
+     }
+@@ -96,6 +118,7 @@
+         require(amount > 0, "Cannot withdraw 0");
+         _totalSupply -= amount;
+         _balances[msg.sender] -= amount;
++        if (_balances[msg.sender] == 0) stakeStartTime[msg.sender] = 0;
+         stakingToken.safeTransfer(msg.sender, amount);
+         emit Withdrawn(msg.sender, amount);
+     }
