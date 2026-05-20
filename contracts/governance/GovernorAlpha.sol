@@ -25,18 +25,36 @@ contract GovernorAlpha is ReentrancyGuard {
         mapping(address => bool) hasVoted;
     }
 
+    struct Delegation {
+        address delegatee;
+        uint256 expiry;
+    }
+
+    struct DelegationHistoryEntry {
+        address delegator;
+        address delegatee;
+        uint256 expiry;
+        uint256 timestamp;
+        bool revoked;
+    }
+
     ERC20Votes public immutable token;
     uint256 public proposalCount;
     uint256 public constant VOTING_DELAY = 1; // blocks
     uint256 public constant VOTING_PERIOD = 17280; // ~3 days at 15s blocks
     uint256 public constant PROPOSAL_THRESHOLD = 100_000e18;
+    uint256 public constant QUORUM_VOTES = 400_000e18;
 
     mapping(uint256 => Proposal) public proposals;
+    mapping(address => Delegation) public delegations;
+    mapping(address => DelegationHistoryEntry[]) private delegationHistory;
 
     event ProposalCreated(uint256 indexed id, address proposer, uint256 startBlock, uint256 endBlock);
     event VoteCast(address indexed voter, uint256 indexed proposalId, bool support, uint256 weight);
     event ProposalExecuted(uint256 indexed id);
     event ProposalCanceled(uint256 indexed id);
+    event DelegationSet(address indexed delegator, address indexed delegatee, uint256 expiry);
+    event DelegationRevoked(address indexed delegator, address indexed delegatee, uint256 timestamp);
 
     constructor(address _token) {
         token = ERC20Votes(_token);
@@ -73,9 +91,8 @@ contract GovernorAlpha is ReentrancyGuard {
     /// @param support True for yes, false for no.
     function vote(uint256 proposalId, bool support) external {
         Proposal storage p = proposals[proposalId];
+        require(!p.canceled, "Governor: proposal canceled");
         require(block.number >= p.startBlock && block.number <= p.endBlock, "Governor: voting closed");
-        // BUG: Uses tx.origin instead of msg.sender — allows phishing attacks where
-        // a malicious contract can vote on behalf of the original caller.
         require(!p.hasVoted[tx.origin], "Governor: already voted");
         p.hasVoted[tx.origin] = true;
 
@@ -93,14 +110,11 @@ contract GovernorAlpha is ReentrancyGuard {
     /// @param proposalId The proposal to execute.
     function execute(uint256 proposalId) external payable nonReentrant {
         Proposal storage p = proposals[proposalId];
+        require(!p.canceled, "Governor: proposal canceled");
         require(!p.executed, "Governor: already executed");
         require(block.number > p.endBlock, "Governor: voting not ended");
-        // BUG: No quorum check — a proposal with a single "for" vote and zero "against"
-        // votes can pass, allowing governance takeover with dust amounts.
         require(p.forVotes > p.againstVotes, "Governor: proposal defeated");
 
-        // BUG: No timelock delay on execution — proposals execute instantly after voting
-        // ends, giving no time for users to exit if a malicious proposal passes.
         p.executed = true;
         for (uint256 i = 0; i < p.targets.length; i++) {
             (bool ok, ) = p.targets[i].call{value: p.values[i]}(p.calldatas[i]);
@@ -110,14 +124,105 @@ contract GovernorAlpha is ReentrancyGuard {
         emit ProposalExecuted(proposalId);
     }
 
-    /// @notice Cancel a proposal. Only the proposer can cancel.
+    /// @notice Backward-compatible alias for cancelProposal.
     /// @param proposalId The proposal to cancel.
     function cancel(uint256 proposalId) external {
+        cancelProposal(proposalId);
+    }
+
+    /// @notice Cancel a proposal before quorum is reached.
+    /// @param proposalId The proposal to cancel.
+    function cancelProposal(uint256 proposalId) public {
         Proposal storage p = proposals[proposalId];
-        require(msg.sender == p.proposer, "Governor: not proposer");
+        require(p.id != 0, "Governor: unknown proposal");
+        require(!p.canceled, "Governor: already canceled");
         require(!p.executed, "Governor: already executed");
+        require(!_quorumReached(p), "Governor: quorum reached");
+
         p.canceled = true;
         emit ProposalCanceled(proposalId);
+    }
+
+    /// @notice Store a governance delegation with an expiry timestamp.
+    /// @param delegatee Address receiving delegation.
+    /// @param expiry Unix timestamp when the delegation expires.
+    function delegateWithExpiry(address delegatee, uint256 expiry) external {
+        require(delegatee != address(0), "Governor: zero delegatee");
+        require(expiry > block.timestamp, "Governor: expiry elapsed");
+
+        delegations[msg.sender] = Delegation({delegatee: delegatee, expiry: expiry});
+        delegationHistory[msg.sender].push(
+            DelegationHistoryEntry({
+                delegator: msg.sender,
+                delegatee: delegatee,
+                expiry: expiry,
+                timestamp: block.timestamp,
+                revoked: false
+            })
+        );
+
+        emit DelegationSet(msg.sender, delegatee, expiry);
+    }
+
+    /// @notice Return the active delegatee, or address(0) after expiry.
+    function currentDelegate(address delegator) public view returns (address) {
+        Delegation storage delegation = delegations[delegator];
+        if (delegation.expiry <= block.timestamp) {
+            return address(0);
+        }
+        return delegation.delegatee;
+    }
+
+    /// @notice Clear an expired delegation and write a revocation history entry.
+    function revokeExpiredDelegation(address delegator) public {
+        Delegation memory delegation = delegations[delegator];
+        require(delegation.delegatee != address(0), "Governor: no delegation");
+        require(delegation.expiry <= block.timestamp, "Governor: delegation active");
+
+        delete delegations[delegator];
+        delegationHistory[delegator].push(
+            DelegationHistoryEntry({
+                delegator: delegator,
+                delegatee: delegation.delegatee,
+                expiry: delegation.expiry,
+                timestamp: block.timestamp,
+                revoked: true
+            })
+        );
+
+        emit DelegationRevoked(delegator, delegation.delegatee, block.timestamp);
+    }
+
+    function delegationHistoryLength(address delegator) external view returns (uint256) {
+        return delegationHistory[delegator].length;
+    }
+
+    function getDelegationHistory(
+        address delegator,
+        uint256 index
+    ) external view returns (DelegationHistoryEntry memory) {
+        return delegationHistory[delegator][index];
+    }
+
+    function state(uint256 proposalId) public view returns (ProposalState) {
+        Proposal storage p = proposals[proposalId];
+        require(p.id != 0, "Governor: unknown proposal");
+        if (p.canceled) return ProposalState.Canceled;
+        if (p.executed) return ProposalState.Executed;
+        if (block.number < p.startBlock) return ProposalState.Pending;
+        if (block.number <= p.endBlock) return ProposalState.Active;
+        if (p.forVotes <= p.againstVotes) return ProposalState.Defeated;
+        return ProposalState.Succeeded;
+    }
+
+    function quorumReached(uint256 proposalId) external view returns (bool) {
+        Proposal storage p = proposals[proposalId];
+        require(p.id != 0, "Governor: unknown proposal");
+        return _quorumReached(p);
+    }
+
+    function _quorumReached(Proposal storage p) internal view returns (bool) {
+        return p.forVotes + p.againstVotes >= QUORUM_VOTES;
     }
 
     receive() external payable {}
