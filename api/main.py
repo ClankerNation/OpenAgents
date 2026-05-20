@@ -3,6 +3,11 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+try:
+    from .health import health_response
+except ImportError:
+    from health import health_response
+
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
@@ -104,9 +109,4 @@ async def leaderboard(limit: int = Query(20, le=50)):
 
 @app.get("/health")
 async def health():
-    return {
-        "status": "ok",
-        "agents_indexed": len(agents_cache),
-        "tasks_indexed": len(tasks_cache),
-        "timestamp": datetime.utcnow().isoformat(),
-    }
+    return health_response()
