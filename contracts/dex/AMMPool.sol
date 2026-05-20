@@ -18,12 +18,14 @@ contract AMMPool {
     uint256 public reserveB;
     uint256 public totalLiquidity;
     uint256 public constant FEE_BPS = 30; // 0.3%
+    uint256 public constant MINIMUM_LIQUIDITY = 1000;
 
     mapping(address => uint256) public liquidity;
 
     event LiquidityAdded(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
     event LiquidityRemoved(address indexed provider, uint256 amountA, uint256 amountB);
     event Swap(address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut);
+    event Sync(uint256 reserveA, uint256 reserveB);
 
     constructor(address _tokenA, address _tokenB) {
         tokenA = IERC20(_tokenA);
@@ -37,7 +39,11 @@ contract AMMPool {
         require(amountA > 0 && amountB > 0, "Zero amounts");
 
         if (totalLiquidity == 0) {
-            lpTokens = _sqrt(amountA * amountB);
+            uint256 rootLiquidity = _sqrt(amountA * amountB);
+            require(rootLiquidity > MINIMUM_LIQUIDITY, "Insufficient liquidity");
+            lpTokens = rootLiquidity - MINIMUM_LIQUIDITY;
+            liquidity[address(0)] = MINIMUM_LIQUIDITY;
+            totalLiquidity = MINIMUM_LIQUIDITY;
         } else {
             uint256 lpA = (amountA * totalLiquidity) / reserveA;
             uint256 lpB = (amountB * totalLiquidity) / reserveB;
@@ -53,6 +59,7 @@ contract AMMPool {
         totalLiquidity += lpTokens;
 
         emit LiquidityAdded(msg.sender, amountA, amountB, lpTokens);
+        emit Sync(reserveA, reserveB);
     }
 
     function removeLiquidity(uint256 lpTokens) external {
@@ -70,6 +77,7 @@ contract AMMPool {
         require(tokenB.transfer(msg.sender, amountB), "Transfer B failed");
 
         emit LiquidityRemoved(msg.sender, amountA, amountB);
+        emit Sync(reserveA, reserveB);
     }
 
     // BUG: Swap has no deadline parameter — transaction can sit in mempool and execute
@@ -103,6 +111,13 @@ contract AMMPool {
         }
 
         emit Swap(msg.sender, tokenIn, amountIn, amountOut);
+        emit Sync(reserveA, reserveB);
+    }
+
+    function sync() external {
+        reserveA = tokenA.balanceOf(address(this));
+        reserveB = tokenB.balanceOf(address(this));
+        emit Sync(reserveA, reserveB);
     }
 
     function _sqrt(uint256 y) internal pure returns (uint256 z) {
