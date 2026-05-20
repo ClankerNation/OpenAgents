@@ -1,18 +1,25 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+// @contributor cursor-auto-agent
+// @platform-config Cursor Agent session — ION DEX / OpenAgents bounty #21. Rules: UTF-8 source, Hardhat verify before PR.
+// @env os=Windows_NT, arch=x64, home=C:\Users\admin, working_dir=D:\openclaw-tools\OpenAgents, shell=powershell
+// @timestamp 2026-05-20T12:00:00Z
+// @bounty ClankerNation/OpenAgents#21 — donation attack on YieldAggregator deposit
+pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /// @title YieldAggregator
 /// @notice Vault that accepts deposits and allocates capital across yield strategies.
-/// @dev Implements a simplified vault pattern. Users deposit a base token and receive
-///      shares proportional to their ownership of the vault's total assets.
+/// @dev Share mint/burn uses internal accounting (totalDeposited + strategyReturns) so direct
+///      token donations cannot inflate share price or withdrawal payouts.
 contract YieldAggregator is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
+
+    /// @notice Max vault balance excess over internal assets before withdraw reverts (5% = 500 bps).
+    uint256 public constant MAX_PRICE_DEVIATION_BPS = 500;
 
     struct Strategy {
         address target;
@@ -23,6 +30,7 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
     IERC20 public immutable asset;
     uint256 public totalShares;
     uint256 public totalDeposited;
+    uint256 public strategyReturns;
     mapping(address => uint256) public shares;
 
     Strategy[] public strategies;
@@ -31,25 +39,33 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
     event Withdraw(address indexed user, uint256 assets, uint256 sharesBurned);
     event StrategyAdded(uint256 indexed strategyId, address target);
     event StrategyAllocated(uint256 indexed strategyId, uint256 amount);
+    event StrategyReturnsReported(uint256 amount);
 
     constructor(address _asset) Ownable(msg.sender) {
+        require(_asset != address(0), "Vault: zero asset");
         asset = IERC20(_asset);
+    }
+
+    /// @notice Assets tracked for share pricing (excludes unsolicited donations).
+    function internalAssets() public view returns (uint256) {
+        return totalDeposited + strategyReturns;
     }
 
     /// @notice Deposit tokens into the vault and receive shares.
     /// @param amount Amount of base token to deposit.
-    /// @return sharesMinted Number of shares issued to the depositor.
-    // BUG: No slippage check on deposit — the share price can be manipulated via
-    // donation attacks (sending tokens directly to the vault) between the user's
-    // approval and deposit, causing them to receive far fewer shares than expected.
-    function deposit(uint256 amount) external nonReentrant returns (uint256 sharesMinted) {
+    /// @param minShares Minimum shares expected (slippage / donation front-run protection).
+    function deposit(uint256 amount, uint256 minShares) external nonReentrant returns (uint256 sharesMinted) {
         require(amount > 0, "Vault: zero deposit");
+        require(minShares > 0, "Vault: zero minShares");
 
+        uint256 accounted = internalAssets();
         if (totalShares == 0) {
             sharesMinted = amount;
         } else {
-            sharesMinted = (amount * totalShares) / totalAssets();
+            sharesMinted = (amount * totalShares) / accounted;
         }
+
+        require(sharesMinted >= minShares, "Vault: insufficient shares minted");
 
         asset.safeTransferFrom(msg.sender, address(this), amount);
         totalShares += sharesMinted;
@@ -61,16 +77,26 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
 
     /// @notice Withdraw tokens by burning vault shares.
     /// @param shareAmount Number of shares to redeem.
-    /// @return assetsReturned Amount of base token returned.
     function withdraw(uint256 shareAmount) external nonReentrant returns (uint256 assetsReturned) {
         require(shareAmount > 0, "Vault: zero shares");
         require(shares[msg.sender] >= shareAmount, "Vault: insufficient shares");
 
-        // BUG: Uses balanceOf instead of internal accounting (totalDeposited + strategy gains).
-        // If tokens are donated directly to the vault or a strategy returns funds outside
-        // the normal flow, this inflates the withdrawal amount, allowing early withdrawers
-        // to drain more than their share at the expense of later users.
-        assetsReturned = (shareAmount * asset.balanceOf(address(this))) / totalShares;
+        uint256 sharesBefore = totalShares;
+        uint256 accounted = internalAssets();
+        assetsReturned = (shareAmount * accounted) / sharesBefore;
+
+        uint256 vaultBalance = asset.balanceOf(address(this));
+        if (vaultBalance > accounted) {
+            uint256 deviation = ((vaultBalance - accounted) * 10_000) / accounted;
+            require(deviation <= MAX_PRICE_DEVIATION_BPS, "Vault: price deviation exceeds 5%");
+        }
+
+        require(assetsReturned <= vaultBalance, "Vault: insufficient vault balance");
+
+        uint256 depBurn = (totalDeposited * shareAmount) / sharesBefore;
+        uint256 retBurn = (strategyReturns * shareAmount) / sharesBefore;
+        totalDeposited -= depBurn;
+        strategyReturns -= retBurn;
 
         shares[msg.sender] -= shareAmount;
         totalShares -= shareAmount;
@@ -80,24 +106,17 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
     }
 
     /// @notice Add a new yield strategy.
-    /// @param target Address of the strategy contract.
-    // BUG: Strategy target can be zero address — allocating funds to address(0)
-    // would burn them permanently via the external call.
     function addStrategy(address target) external onlyOwner {
-        strategies.push(Strategy({
-            target: target,
-            allocated: 0,
-            active: true
-        }));
+        require(target != address(0), "Vault: zero strategy address");
+        strategies.push(Strategy({target: target, allocated: 0, active: true}));
         emit StrategyAdded(strategies.length - 1, target);
     }
 
     /// @notice Allocate vault funds to a strategy.
-    /// @param strategyId Index of the strategy.
-    /// @param amount Amount to allocate.
     function allocate(uint256 strategyId, uint256 amount) external onlyOwner {
         Strategy storage s = strategies[strategyId];
         require(s.active, "Vault: strategy inactive");
+        require(s.target != address(0), "Vault: strategy zero address");
         require(asset.balanceOf(address(this)) >= amount, "Vault: insufficient balance");
 
         s.allocated += amount;
@@ -105,8 +124,15 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
         emit StrategyAllocated(strategyId, amount);
     }
 
+    /// @notice Record yield returned from strategies into internal accounting.
+    function reportReturns(uint256 amount) external onlyOwner {
+        require(amount > 0, "Vault: zero returns");
+        asset.safeTransferFrom(msg.sender, address(this), amount);
+        strategyReturns += amount;
+        emit StrategyReturnsReported(amount);
+    }
+
     /// @notice Deactivate a strategy.
-    /// @param strategyId Index of the strategy.
     function deactivateStrategy(uint256 strategyId) external onlyOwner {
         strategies[strategyId].active = false;
     }
@@ -122,9 +148,10 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
         return total;
     }
 
-    /// @notice Preview shares for a given deposit amount.
+    /// @notice Preview shares for a given deposit amount (uses internal accounting).
     function previewDeposit(uint256 amount) external view returns (uint256) {
+        uint256 accounted = internalAssets();
         if (totalShares == 0) return amount;
-        return (amount * totalShares) / totalAssets();
+        return (amount * totalShares) / accounted;
     }
 }
