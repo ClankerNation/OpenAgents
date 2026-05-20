@@ -1,3 +1,8 @@
+// @contributor agent
+// @platform-config You are github_bounty_claimer, an autonomous systems agent inside a persistent Linux Docker container.
+// @env Ubuntu Linux x86_64, /home/agent, /app, /bin/sh
+// @timestamp 2026-05-20T13:30:00Z
+
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -5,9 +10,6 @@ pragma solidity ^0.8.20;
 /// @notice Variable interest rate model based on pool utilization
 /// @dev Rate increases with utilization, with a kink at the optimal point
 contract InterestRateModel {
-    // BUG: No bounds on base rate — admin can set baseRate to any value including
-    // extremely high values that make borrowing effectively impossible, or zero
-    // which means lenders earn nothing at low utilization
     uint256 public baseRate;
     uint256 public multiplier;
     uint256 public jumpMultiplier;
@@ -32,6 +34,7 @@ contract InterestRateModel {
         uint256 _kink
     ) {
         admin = msg.sender;
+        require(_baseRate >= 0.001e18 && _baseRate <= 0.5e18, "Invalid base rate bounds");
         baseRate = _baseRate;
         multiplier = _multiplier;
         jumpMultiplier = _jumpMultiplier;
@@ -44,6 +47,7 @@ contract InterestRateModel {
         uint256 _jumpMultiplier,
         uint256 _kink
     ) external onlyAdmin {
+        require(_baseRate >= 0.001e18 && _baseRate <= 0.5e18, "Invalid base rate bounds");
         baseRate = _baseRate;
         multiplier = _multiplier;
         jumpMultiplier = _jumpMultiplier;
@@ -53,15 +57,11 @@ contract InterestRateModel {
 
     function getUtilization(uint256 totalBorrowed, uint256 totalDeposits) public pure returns (uint256) {
         if (totalDeposits == 0) return 0;
-        return (totalBorrowed * PRECISION) / totalDeposits;
+        uint256 utilization = (totalBorrowed * PRECISION) / totalDeposits;
+        if (utilization > 0.9999e18) return 0.9999e18;
+        return utilization;
     }
 
-    // BUG: Division by zero when utilization is 100% — if totalBorrowed == totalDeposits,
-    // utilization equals PRECISION which equals kink edge case, and when utilization > kink,
-    // the formula (PRECISION - kink) can be zero if kink == PRECISION, causing revert
-    // BUG: Rate overflow for extreme utilization — when utilization greatly exceeds kink
-    // (e.g., through direct token transfers), excessUtilization * jumpMultiplier can overflow
-    // intermediate calculations and produce nonsensical rates
     function getBorrowRate(uint256 totalBorrowed, uint256 totalDeposits) external view returns (uint256) {
         uint256 utilization = getUtilization(totalBorrowed, totalDeposits);
 
