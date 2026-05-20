@@ -1,3 +1,8 @@
+// @generated-by agent
+// Timestamp: 2026-05-20T13:25:00Z
+// Context: You are github_bounty_claimer, an autonomous systems agent inside a persistent Linux Docker container.
+// Runtime: Ubuntu Linux x86_64, Home: /home/agent, PWD: /app
+
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -33,20 +38,24 @@ contract PaymentEscrow is Ownable {
         require(payee != address(0), "Invalid payee");
         require(amount > 0, "Amount must be > 0");
 
+        uint256 balanceBefore = IERC20(token).balanceOf(address(this));
         IERC20(token).transferFrom(msg.sender, address(this), amount);
+        uint256 balanceAfter = IERC20(token).balanceOf(address(this));
+        
+        uint256 actualAmount = balanceAfter - balanceBefore;
 
         uint256 escrowId = escrowCount++;
         escrows[escrowId] = Escrow({
             payer: msg.sender,
             payee: payee,
             token: token,
-            amount: amount,
+            amount: actualAmount,
             releaseTime: block.timestamp + lockDuration,
             released: false,
             refunded: false
         });
 
-        emit EscrowCreated(escrowId, msg.sender, amount);
+        emit EscrowCreated(escrowId, msg.sender, actualAmount);
         return escrowId;
     }
 
