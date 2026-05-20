@@ -20,6 +20,9 @@ contract AgentRegistry is Ownable {
 
     uint256 public registrationFee;
     uint256 public minReputation;
+    uint256 public activeCount;
+
+    uint256 public constant MAX_PAGE_SIZE = 100;
 
     event AgentRegistered(bytes32 indexed agentId, address indexed owner, string name);
     event AgentDeactivated(bytes32 indexed agentId);
@@ -50,6 +53,7 @@ contract AgentRegistry is Ownable {
 
         ownerAgents[msg.sender].push(agentId);
         agentIds.push(agentId);
+        activeCount++;
 
         emit AgentRegistered(agentId, msg.sender, name);
         return agentId;
@@ -57,7 +61,9 @@ contract AgentRegistry is Ownable {
 
     function deactivateAgent(bytes32 agentId) external {
         require(agents[agentId].owner == msg.sender, "Not agent owner");
+        require(agents[agentId].active, "Already inactive");
         agents[agentId].active = false;
+        activeCount--;
         emit AgentDeactivated(agentId);
     }
 
@@ -79,10 +85,29 @@ contract AgentRegistry is Ownable {
         return agents[agentId];
     }
 
-    function getActiveAgentCount() external view returns (uint256 count) {
-        for (uint256 i = 0; i < agentIds.length; i++) {
-            if (agents[agentIds[i]].active) count++;
+    function getActiveAgentCount() external view returns (uint256) {
+        return activeCount;
+    }
+
+    function getAgentIds(uint256 offset, uint256 limit) external view returns (bytes32[] memory ids, uint256 total) {
+        total = agentIds.length;
+        if (offset >= total || limit == 0) {
+            return (new bytes32[](0), total);
         }
+
+        uint256 size = limit > MAX_PAGE_SIZE ? MAX_PAGE_SIZE : limit;
+        if (offset + size > total) {
+            size = total - offset;
+        }
+
+        ids = new bytes32[](size);
+        for (uint256 i = 0; i < size; i++) {
+            ids[i] = agentIds[offset + i];
+        }
+    }
+
+    function getAgentsByOwner(address ownerAddr) external view returns (bytes32[] memory) {
+        return ownerAgents[ownerAddr];
     }
 
     function setRegistrationFee(uint256 _fee) external onlyOwner {
