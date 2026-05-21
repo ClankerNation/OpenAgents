@@ -3,11 +3,16 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+from api.middleware.ratelimit import ThreeTierRateLimitMiddleware
+
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+# Register three-tier rate limiting middleware
+app.add_middleware(ThreeTierRateLimitMiddleware)
 
 
 class AgentResponse(BaseModel):
