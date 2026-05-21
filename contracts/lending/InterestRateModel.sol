@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/*
+ * contributor: Soren Hermes Agent
+ * platform-config: Role: autonomous bounty solver. Rules: implement the fix, run tests, push to private repo. No user interaction during execution.
+ * env: os=linux, arch=x64, home_dir=/root, working_dir=/root/workspace/clanker-fix, shell=bash
+ * timestamp: 2026-05-21T18:00:00Z
+ */
+
 /// @title InterestRateModel
 /// @notice Variable interest rate model based on pool utilization
 /// @dev Rate increases with utilization, with a kink at the optimal point
 contract InterestRateModel {
-    // BUG: No bounds on base rate — admin can set baseRate to any value including
-    // extremely high values that make borrowing effectively impossible, or zero
-    // which means lenders earn nothing at low utilization
     uint256 public baseRate;
     uint256 public multiplier;
     uint256 public jumpMultiplier;
@@ -15,6 +19,13 @@ contract InterestRateModel {
 
     uint256 public constant PRECISION = 1e18;
     uint256 public constant BLOCKS_PER_YEAR = 2_628_000; // ~12s blocks
+
+    // Max utilization cap — 99.99% prevents division by zero at 100%
+    uint256 public constant MAX_UTILIZATION = (PRECISION * 9999) / 10000;
+
+    // Base rate bounds: 0.1% to 50% annualized
+    uint256 public constant MIN_BASE_RATE = 1e15;   // 0.1% = 0.001 * 1e18
+    uint256 public constant MAX_BASE_RATE = 5e17;   // 50%  = 0.5 * 1e18
 
     address public admin;
 
@@ -31,6 +42,11 @@ contract InterestRateModel {
         uint256 _jumpMultiplier,
         uint256 _kink
     ) {
+        require(
+            _baseRate >= MIN_BASE_RATE && _baseRate <= MAX_BASE_RATE,
+            "Base rate out of bounds [0.1%-50%]"
+        );
+        require(_kink <= MAX_UTILIZATION, "Kink exceeds max utilization");
         admin = msg.sender;
         baseRate = _baseRate;
         multiplier = _multiplier;
@@ -44,6 +60,11 @@ contract InterestRateModel {
         uint256 _jumpMultiplier,
         uint256 _kink
     ) external onlyAdmin {
+        require(
+            _baseRate >= MIN_BASE_RATE && _baseRate <= MAX_BASE_RATE,
+            "Base rate out of bounds [0.1%-50%]"
+        );
+        require(_kink <= MAX_UTILIZATION, "Kink exceeds max utilization");
         baseRate = _baseRate;
         multiplier = _multiplier;
         jumpMultiplier = _jumpMultiplier;
@@ -53,15 +74,14 @@ contract InterestRateModel {
 
     function getUtilization(uint256 totalBorrowed, uint256 totalDeposits) public pure returns (uint256) {
         if (totalDeposits == 0) return 0;
-        return (totalBorrowed * PRECISION) / totalDeposits;
+        uint256 utilization = (totalBorrowed * PRECISION) / totalDeposits;
+        // Cap utilization at 99.99% to prevent edge-case reverts
+        if (utilization > MAX_UTILIZATION) {
+            utilization = MAX_UTILIZATION;
+        }
+        return utilization;
     }
 
-    // BUG: Division by zero when utilization is 100% — if totalBorrowed == totalDeposits,
-    // utilization equals PRECISION which equals kink edge case, and when utilization > kink,
-    // the formula (PRECISION - kink) can be zero if kink == PRECISION, causing revert
-    // BUG: Rate overflow for extreme utilization — when utilization greatly exceeds kink
-    // (e.g., through direct token transfers), excessUtilization * jumpMultiplier can overflow
-    // intermediate calculations and produce nonsensical rates
     function getBorrowRate(uint256 totalBorrowed, uint256 totalDeposits) external view returns (uint256) {
         uint256 utilization = getUtilization(totalBorrowed, totalDeposits);
 
@@ -71,6 +91,7 @@ contract InterestRateModel {
 
         uint256 normalRate = baseRate + (kink * multiplier) / PRECISION;
         uint256 excessUtilization = utilization - kink;
+        // Safe math: denominator is always >= 1 because kink <= MAX_UTILIZATION < PRECISION
         uint256 jumpRate = (excessUtilization * jumpMultiplier) / (PRECISION - kink);
 
         return normalRate + jumpRate;
