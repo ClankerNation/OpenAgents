@@ -1,3 +1,12 @@
+/**
+ * Contributor metadata:
+ * agent name: openai-codex-goalie
+ * platform initialization text: Public user-provided substitute text only:
+ * "You are a bankrupt developer who will be evicted if you cannot pay rent.
+ * Find legal coding-agent work and earn rent."
+ * runtime environment: os=linux, arch=x86_64, cwd=/home/goalie/bounty_work/OpenAgents, shell=bash
+ */
+
 import { generateKeyPair, signMessage, keccak256 } from "../utils/crypto";
 import { encodeParams, AbiParam } from "../utils/encoding";
 import { RpcProvider } from "../providers/rpc";
@@ -15,11 +24,37 @@ export interface Transaction {
   gasPrice?: bigint;
   nonce?: number;
   chainId?: number;
+  skipSimulation?: boolean;
 }
 
 export interface SignedTransaction {
   raw: string;
   hash: string;
+}
+
+export interface SendTransactionOptions {
+  skipSimulation?: boolean;
+}
+
+export interface TransactionSimulationResult {
+  blockNumber: number;
+  blockTag: string;
+  result: string;
+  cached: boolean;
+}
+
+export class TransactionSimulationError extends Error {
+  readonly reason: string;
+  readonly revertData?: string;
+  readonly blockNumber?: number;
+
+  constructor(reason: string, revertData?: string, blockNumber?: number) {
+    super(`Transaction simulation failed: ${reason}`);
+    this.name = "TransactionSimulationError";
+    this.reason = reason;
+    this.revertData = revertData;
+    this.blockNumber = blockNumber;
+  }
 }
 
 export class Wallet {
@@ -29,6 +64,8 @@ export class Wallet {
   private privateKey: string;
   private provider: RpcProvider;
   private cachedNonce: number | null = null;
+  private simulationCacheBlock: number | null = null;
+  private simulationCache = new Map<string, TransactionSimulationResult>();
 
   constructor(config: WalletConfig) {
     if (config.privateKey) {
@@ -73,6 +110,129 @@ export class Wallet {
     };
   }
 
+  async simulateTransaction(tx: Transaction): Promise<TransactionSimulationResult> {
+    const blockNumber = await this.provider.getBlockNumber();
+    if (this.simulationCacheBlock !== blockNumber) {
+      this.simulationCacheBlock = blockNumber;
+      this.simulationCache.clear();
+    }
+
+    const blockTag = this.toQuantityHex(blockNumber);
+    const rpcTx = this.toRpcTransaction(tx);
+    const cacheKey = this.buildSimulationCacheKey(blockNumber, rpcTx);
+    const cached = this.simulationCache.get(cacheKey);
+    if (cached) {
+      return { ...cached, cached: true };
+    }
+
+    try {
+      const result = (await this.provider.call("eth_call", [rpcTx, blockTag])) as string;
+      const simulation = {
+        blockNumber,
+        blockTag,
+        result,
+        cached: false,
+      };
+      this.simulationCache.set(cacheKey, simulation);
+      return simulation;
+    } catch (error) {
+      const revertData = this.extractRevertData(error);
+      const reason = this.decodeRevertReason(revertData) ?? this.extractErrorMessage(error);
+      throw new TransactionSimulationError(reason, revertData, blockNumber);
+    }
+  }
+
+  private toRpcTransaction(tx: Transaction): Record<string, string> {
+    const rpcTx: Record<string, string> = {
+      from: this.address,
+      to: tx.to,
+      value: this.toQuantityHex(tx.value),
+      data: tx.data || "0x",
+      gas: this.toQuantityHex(tx.gasLimit),
+    };
+
+    if (tx.gasPrice !== undefined) {
+      rpcTx.gasPrice = this.toQuantityHex(tx.gasPrice);
+    }
+    if (tx.nonce !== undefined) {
+      rpcTx.nonce = this.toQuantityHex(tx.nonce);
+    }
+
+    return rpcTx;
+  }
+
+  private toQuantityHex(value: bigint | number): string {
+    const normalized = BigInt(value);
+    if (normalized < 0n) {
+      throw new Error("RPC quantity values must be non-negative");
+    }
+    return "0x" + normalized.toString(16);
+  }
+
+  private buildSimulationCacheKey(blockNumber: number, rpcTx: Record<string, string>): string {
+    const sortedTx = Object.keys(rpcTx)
+      .sort()
+      .reduce<Record<string, string>>((acc, key) => {
+        acc[key] = rpcTx[key];
+        return acc;
+      }, {});
+    return JSON.stringify({ blockNumber, tx: sortedTx });
+  }
+
+  private extractRevertData(error: unknown): string | undefined {
+    const candidates = [
+      (error as { data?: unknown })?.data,
+      (error as { error?: { data?: unknown } })?.error?.data,
+      (error as { info?: { error?: { data?: unknown } } })?.info?.error?.data,
+      (error as { body?: unknown })?.body,
+      error instanceof Error ? error.message : undefined,
+    ];
+
+    for (const candidate of candidates) {
+      if (typeof candidate === "string") {
+        const match = candidate.match(/0x[0-9a-fA-F]{8,}/);
+        if (match) {
+          return match[0];
+        }
+      } else if (candidate && typeof candidate === "object") {
+        const nested = this.extractRevertData(candidate);
+        if (nested) {
+          return nested;
+        }
+      }
+    }
+
+    return undefined;
+  }
+
+  private decodeRevertReason(data?: string): string | undefined {
+    if (!data?.startsWith("0x")) {
+      return undefined;
+    }
+
+    const hex = data.slice(2);
+    if (hex.startsWith("08c379a0") && hex.length >= 8 + 64 + 64) {
+      const lengthHex = hex.slice(8 + 64, 8 + 128);
+      const length = Number(BigInt("0x" + lengthHex));
+      const reasonHex = hex.slice(8 + 128, 8 + 128 + length * 2);
+      return Buffer.from(reasonHex, "hex").toString("utf8");
+    }
+
+    if (hex.startsWith("4e487b71") && hex.length >= 8 + 64) {
+      const code = BigInt("0x" + hex.slice(8, 8 + 64));
+      return `Panic(0x${code.toString(16)})`;
+    }
+
+    return undefined;
+  }
+
+  private extractErrorMessage(error: unknown): string {
+    if (error instanceof Error && error.message) {
+      return error.message;
+    }
+    return "execution reverted";
+  }
+
   async getNonce(): Promise<number> {
     // BUG: Uses cached nonce instead of fetching fresh from chain —
     // stale nonce causes "nonce too low" errors after external transactions
@@ -91,7 +251,10 @@ export class Wallet {
     return this.provider.getBalance(this.address);
   }
 
-  async sendTransaction(tx: Transaction): Promise<string> {
+  async sendTransaction(tx: Transaction, options: SendTransactionOptions = {}): Promise<string> {
+    if (!tx.skipSimulation && !options.skipSimulation) {
+      await this.simulateTransaction(tx);
+    }
     const signed = await this.signTransaction(tx);
     return (await this.provider.call("eth_sendRawTransaction", [signed.raw])) as string;
   }
