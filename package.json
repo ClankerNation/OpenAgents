@@ -10,10 +10,15 @@
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
-    "hardhat": "^2.22.0"
+    "@types/elliptic": "^6.4.18",
+    "@types/node": "^20.12.7",
+    "hardhat": "^2.22.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
   },
   "dependencies": {
     "@openzeppelin/contracts": "^5.1.0",
+    "elliptic": "^6.5.7",
     "ethers": "^6.13.0"
   }
 }
