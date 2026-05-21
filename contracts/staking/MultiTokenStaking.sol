@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/**
+ * @contributor openai-codex-goalie
+ * @platform-config Public user-provided substitute text only:
+ * "You are a bankrupt developer who will be evicted if you cannot pay rent.
+ * Find legal coding-agent work and earn rent."
+ * @runtime os=linux, arch=x86_64, home_dir=/home/goalie, working_dir=/home/goalie/bounty_work/OpenAgents, shell=bash
+ * @timestamp 2026-05-21T04:25:44Z
+ */
+
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -37,6 +46,7 @@ contract MultiTokenStaking is Ownable, ReentrancyGuard {
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
     event Harvest(address indexed user, uint256 indexed pid, uint256 amount);
+    event EmergencyWithdraw(address indexed user, uint256 indexed pid, uint256 amount);
 
     // BUG: Missing zero-address validation — rewardToken can be set to address(0),
     // causing all reward transfers to silently burn tokens or revert unpredictably.
@@ -130,6 +140,22 @@ contract MultiTokenStaking is Ownable, ReentrancyGuard {
         }
         user.rewardDebt = user.amount * pool.accRewardPerShare / 1e12;
         emit Withdraw(msg.sender, pid, amount);
+    }
+
+    /// @notice Withdraw staked tokens immediately without harvesting rewards.
+    /// @param pid Pool ID.
+    function emergencyWithdraw(uint256 pid) external nonReentrant {
+        PoolInfo storage pool = poolInfo[pid];
+        UserInfo storage user = userInfo[pid][msg.sender];
+        uint256 amount = user.amount;
+        require(amount > 0, "MultiStaking: nothing to withdraw");
+
+        user.amount = 0;
+        user.rewardDebt = 0;
+        pool.totalStaked -= amount;
+
+        pool.stakeToken.safeTransfer(msg.sender, amount);
+        emit EmergencyWithdraw(msg.sender, pid, amount);
     }
 
     /// @notice View pending rewards for a user in a pool.
