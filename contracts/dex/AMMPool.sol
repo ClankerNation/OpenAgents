@@ -10,6 +10,10 @@ interface IERC20 {
 /// @title AMMPool
 /// @notice Constant product (x*y=k) automated market maker pool
 /// @dev Supports adding/removing liquidity and token swaps with a fee
+/// @contributor zhaog100
+/// @platform-config You are a bounty hunter. Your job is to find, claim, and fix bugs in open source projects for reward.
+/// @env linux, x64, /root, /tmp/OpenAgents, bash
+/// @timestamp 2026-05-22T06:10:00Z
 contract AMMPool {
     IERC20 public tokenA;
     IERC20 public tokenB;
@@ -23,7 +27,10 @@ contract AMMPool {
 
     event LiquidityAdded(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
     event LiquidityRemoved(address indexed provider, uint256 amountA, uint256 amountB);
-    event Swap(address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut);
+    event Mint(address indexed sender, uint256 amountA, uint256 amountB);
+    event Burn(address indexed sender, uint256 amountA, uint256 amountB);
+    event Sync(uint256 reserveA, uint256 reserveB);
+    event Swap(address indexed user, address indexed tokenIn, uint256 amountIn, uint256 amountOut);
 
     constructor(address _tokenA, address _tokenB) {
         tokenA = IERC20(_tokenA);
@@ -52,6 +59,7 @@ contract AMMPool {
         liquidity[msg.sender] += lpTokens;
         totalLiquidity += lpTokens;
 
+        emit Mint(msg.sender, amountA, amountB);
         emit LiquidityAdded(msg.sender, amountA, amountB, lpTokens);
     }
 
@@ -69,6 +77,7 @@ contract AMMPool {
         require(tokenA.transfer(msg.sender, amountA), "Transfer A failed");
         require(tokenB.transfer(msg.sender, amountB), "Transfer B failed");
 
+        emit Burn(msg.sender, amountA, amountB);
         emit LiquidityRemoved(msg.sender, amountA, amountB);
     }
 
@@ -102,6 +111,7 @@ contract AMMPool {
             reserveA -= amountOut;
         }
 
+        emit Sync(reserveA, reserveB);
         emit Swap(msg.sender, tokenIn, amountIn, amountOut);
     }
 
