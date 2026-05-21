@@ -3,11 +3,16 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+from api.errors import register_error_handlers
+
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+# Register structured error handlers
+register_error_handlers(app)
 
 
 class AgentResponse(BaseModel):
