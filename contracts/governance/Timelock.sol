@@ -36,10 +36,11 @@ contract Timelock {
     /// @param _delay New delay in seconds.
     // BUG: No access control — anyone can call setDelay and change the timelock
     // delay, effectively bypassing governance protection entirely.
-    function setDelay(uint256 _delay) external {
+    function setDelay(uint256 _delay) external onlyAdmin {
         // BUG: Delay can be set to 0, which defeats the purpose of a timelock
         // since transactions can be executed immediately after queueing.
         require(_delay <= MAXIMUM_DELAY, "Timelock: delay exceeds max");
+        require(_delay >= 1 hours, "Timelock: delay too short");
         delay = _delay;
         emit NewDelay(_delay);
     }
@@ -69,6 +70,7 @@ contract Timelock {
         bytes calldata data,
         uint256 eta
     ) external onlyAdmin returns (bytes32 txHash) {
+        require(eta >= block.timestamp + delay, "Timelock: eta too soon");
         // BUG: Missing eta validation — does not check that eta >= block.timestamp + delay.
         // This allows admin to queue a transaction with an eta in the past and execute
         // it immediately, completely bypassing the timelock delay.
