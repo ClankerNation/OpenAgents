@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -7,7 +8,28 @@ app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
+    openapi_tags=[
+        {"name": "agents", "description": "Agent discovery and management"},
+        {"name": "tasks", "description": "Bounty task operations"},
+        {"name": "auth", "description": "Authentication (JWT, API key)"},
+    ],
+    swagger_ui_init_oauth={"appName": "OpenAgents API", "usePkceWithAuthorizationCodeGrant": True},
 )
+
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    schema = get_openapi(title=app.title, version=app.version, description=app.description, routes=app.routes)
+    schema["components"]["securitySchemes"] = {
+        "BearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"},
+        "ApiKeyAuth": {"type": "apiKey", "in": "header", "name": "X-API-Key"},
+    }
+    schema["security"] = [{"BearerAuth": []}, {"ApiKeyAuth": []}]
+    app.openapi_schema = schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
 
 
 class AgentResponse(BaseModel):
