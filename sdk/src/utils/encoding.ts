@@ -11,7 +11,12 @@ export interface AbiParam {
 
 export function encodeUint256(value: bigint | number): string {
   const n = BigInt(value);
-  // BUG: No overflow check — values > 2^256-1 silently wrap/truncate
+  if (n > 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffn) {
+    throw new Error("encodeUint256: value exceeds uint256 max");
+  }
+  if (n < 0n) {
+    throw new Error("encodeUint256: negative value not allowed");
+  }
   return n.toString(16).padStart(64, "0");
 }
 
@@ -55,16 +60,15 @@ export function encodeParams(params: AbiParam[]): string {
 }
 
 export function decodeHex(hex: string): bigint {
-  // BUG: Doesn't validate "0x" prefix — a bare decimal string like "255"
-  // would be parsed as hex 0x255 = 597, silently returning wrong value
-  const cleaned = hex.startsWith("0x") ? hex.slice(2) : hex;
-  return BigInt("0x" + cleaned);
+  if (!/^0x[0-9a-fA-F]+$/.test(hex)) {
+    throw new Error("decodeHex: invalid hex string, must start with 0x");
+  }
+  return BigInt(hex);
 }
 
 export function decodeUint256(slot: string): bigint {
-  // BUG: Doesn't handle short values — if slot is less than 64 chars,
-  // no left-padding is applied before parsing, giving wrong results
-  return BigInt("0x" + slot);
+  const padded = slot.length < 64 ? slot.padStart(64, "0") : slot;
+  return BigInt("0x" + padded);
 }
 
 export function decodeAddress(slot: string): string {
