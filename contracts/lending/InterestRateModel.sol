@@ -36,6 +36,7 @@ contract InterestRateModel {
         multiplier = _multiplier;
         jumpMultiplier = _jumpMultiplier;
         kink = _kink;
+        emit RateParamsUpdated(_baseRate, _multiplier, _jumpMultiplier, _kink);
     }
 
     function updateParams(
@@ -44,6 +45,8 @@ contract InterestRateModel {
         uint256 _jumpMultiplier,
         uint256 _kink
     ) external onlyAdmin {
+        require(_kink <= PRECISION, "kink exceeds precision");
+        require(_baseRate <= 1e17, "base rate too high");
         baseRate = _baseRate;
         multiplier = _multiplier;
         jumpMultiplier = _jumpMultiplier;
