@@ -11,6 +11,10 @@ from ..middleware.auth import get_current_user
 router = APIRouter(prefix="/agents", tags=["agents"])
 
 
+import re
+
+URL_PATTERN = re.compile(r"^https?://[^\s/$.?#].[^\s]*$")
+
 class AgentCreate(BaseModel):
     name: str  # BUG: No validation — name can contain SQL injection, XSS, or be empty
     description: Optional[str] = None
@@ -26,6 +30,10 @@ class AgentUpdate(BaseModel):
 
 @router.post("/")
 async def create_agent(agent: AgentCreate, user=Depends(get_current_user), db=Depends(get_db)):
+    if agent.config and "endpoint_url" in agent.config:
+        url = agent.config["endpoint_url"]
+        if not URL_PATTERN.match(url):
+            raise HTTPException(status_code=400, detail=f"Invalid endpoint URL: {url}")
     new_agent = Agent(
         name=agent.name,
         description=agent.description,
