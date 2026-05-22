@@ -7,6 +7,7 @@ from datetime import datetime
 
 from ..models.database import get_db, Task
 from ..middleware.auth import get_current_user
+from fastapi import WebSocket, WebSocketDisconnect
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -89,6 +90,32 @@ async def update_task_status(
     task.updated_at = datetime.utcnow()
     db.commit()
     return {"id": task.id, "status": task.status}
+
+
+class ConnectionManager:
+    def __init__(self):
+        self.active: list[WebSocket] = []
+    async def connect(self, ws: WebSocket):
+        await ws.accept()
+        self.active.append(ws)
+    def disconnect(self, ws: WebSocket):
+        self.active.remove(ws)
+    async def broadcast(self, message: dict):
+        for connection in self.active:
+            await connection.send_json(message)
+
+manager = ConnectionManager()
+
+
+@router.websocket("/ws")
+async def task_websocket(ws: WebSocket):
+    await manager.connect(ws)
+    try:
+        while True:
+            data = await ws.receive_json()
+            await manager.broadcast({"type": "task_update", "data": data})
+    except WebSocketDisconnect:
+        manager.disconnect(ws)
 
 
 @router.delete("/{task_id}")
