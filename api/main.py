@@ -2,13 +2,45 @@ from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+from fastapi.responses import JSONResponse
+
+
+from fastapi.exceptions import RequestValidationError
+from starlette.requests import Request
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=422,
+        content={"code": "VALIDATION_ERROR", "message": "Request validation failed", "details": {"errors": exc.errors()}},
+    )
 
 app = FastAPI(
+
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
 
+
+
+class ErrorResponse(BaseModel):
+    code: str
+    message: str
+    details: dict = {}
+
+ERROR_CODES = {
+    "VALIDATION_ERROR": "Request validation failed",
+    "NOT_FOUND": "Resource not found",
+    "AUTH_FAILED": "Authentication failed",
+    "RATE_LIMITED": "Rate limit exceeded",
+    "INTERNAL_ERROR": "Internal server error",
+}
+
+
+def json_error(code: str, message: str = None, details: dict = None, status: int = 400):
+    raise HTTPException(status_code=status, detail={"code": code, "message": message or ERROR_CODES.get(code, "Unknown error"), "details": details or {}})
 
 class AgentResponse(BaseModel):
     agent_id: str
@@ -61,7 +93,7 @@ async def list_agents(
 @app.get("/agents/{agent_id}", response_model=AgentResponse)
 async def get_agent(agent_id: str):
     if agent_id not in agents_cache:
-        raise HTTPException(status_code=404, detail="Agent not found")
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Agent not found", "details": {}})
     return agents_cache[agent_id]
 
 
@@ -80,7 +112,7 @@ async def list_tasks(
 @app.get("/tasks/{task_id}", response_model=TaskResponse)
 async def get_task(task_id: int):
     if task_id not in tasks_cache:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": "Task not found", "details": {}})
     return tasks_cache[task_id]
 
 
