@@ -31,13 +31,19 @@ export class WebSocketProvider extends EventEmitter {
 
   async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
+      if (this.ws) {
+        this.ws.onopen = null;
+        this.ws.onmessage = null;
+        this.ws.onclose = null;
+        this.ws.onerror = null;
+        this.ws = null;
+      }
       this.ws = new WebSocket(this.url);
 
       this.ws.onopen = () => {
         this.isConnected = true;
         this.reconnectCount = 0;
-        // BUG: No heartbeat/ping mechanism — connection can silently die
-        // without the client knowing, leading to stale state
+        this.resubscribe();
         this.emit("connected");
         resolve();
       };
@@ -56,8 +62,6 @@ export class WebSocketProvider extends EventEmitter {
 
       this.ws.onclose = () => {
         this.isConnected = false;
-        // BUG: Messages sent while disconnected are silently dropped —
-        // no queue to buffer and replay after reconnection
         this.emit("disconnected");
         this.attemptReconnect();
       };
@@ -67,6 +71,16 @@ export class WebSocketProvider extends EventEmitter {
         this.emit("error", err);
       };
     });
+  }
+
+  private resubscribe(): void {
+    const subs = Array.from(this.subscriptions.entries());
+    this.subscriptions.clear();
+    for (const [, callback] of subs) {
+      this.send("eth_subscribe", []).then((subId) => {
+        this.subscriptions.set(subId as string, callback);
+      }).catch(() => {});
+    }
   }
 
   private attemptReconnect(): void {
