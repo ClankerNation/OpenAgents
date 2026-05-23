@@ -23,7 +23,8 @@ contract AMMPool {
 
     event LiquidityAdded(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
     event LiquidityRemoved(address indexed provider, uint256 amountA, uint256 amountB);
-    event Swap(address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut);
+    event Swap(address indexed user, address indexed tokenIn, uint256 amountIn, uint256 amountOut);
+    event Sync(uint256 reserveA, uint256 reserveB);
 
     constructor(address _tokenA, address _tokenB) {
         tokenA = IERC20(_tokenA);
@@ -103,6 +104,7 @@ contract AMMPool {
         }
 
         emit Swap(msg.sender, tokenIn, amountIn, amountOut);
+        emit Sync(reserveA, reserveB);
     }
 
     function _sqrt(uint256 y) internal pure returns (uint256 z) {
