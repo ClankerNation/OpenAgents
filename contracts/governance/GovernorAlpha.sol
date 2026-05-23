@@ -22,6 +22,7 @@ contract GovernorAlpha is ReentrancyGuard {
         uint256 againstVotes;
         bool executed;
         bool canceled;
+        uint256 snapshotBlock;
         mapping(address => bool) hasVoted;
     }
 
