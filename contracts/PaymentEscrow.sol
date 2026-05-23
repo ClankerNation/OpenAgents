@@ -5,6 +5,12 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract PaymentEscrow is Ownable {
+    address public pendingOwner;
+    uint256 public ownershipTransferTimestamp;
+    uint256 public constant TIMELOCK_DELAY = 2 days;
+
+    event OwnershipTransferStarted(address indexed currentOwner, address indexed pendingOwner);
+    event OwnershipTransferCancelled(address indexed currentOwner);
     struct Escrow {
         address payer;
         address payee;
@@ -23,6 +29,29 @@ contract PaymentEscrow is Ownable {
     event EscrowRefunded(uint256 indexed escrowId, address indexed payer, uint256 amount);
 
     constructor() Ownable(msg.sender) {}
+
+    function transferOwnership(address newOwner) external {
+        require(msg.sender == owner, "Not owner");
+        require(newOwner != address(0), "Zero address");
+        pendingOwner = newOwner;
+        ownershipTransferTimestamp = block.timestamp + TIMELOCK_DELAY;
+        emit OwnershipTransferStarted(owner, newOwner);
+    }
+
+    function acceptOwnership() external {
+        require(msg.sender == pendingOwner, "Not pending owner");
+        require(block.timestamp >= ownershipTransferTimestamp, "Timelock not expired");
+        owner = pendingOwner;
+        pendingOwner = address(0);
+        ownershipTransferTimestamp = 0;
+        emit OwnershipTransferred(owner, owner);
+    }
+    function cancelOwnershipTransfer() external {
+        require(msg.sender == owner, "Not owner");
+        pendingOwner = address(0);
+        ownershipTransferTimestamp = 0;
+        emit OwnershipTransferCancelled(msg.sender);
+    }
 
     function createEscrow(
         address payee,
