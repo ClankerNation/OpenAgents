@@ -21,14 +21,22 @@ contract ChainlinkAdapter {
 
     struct FeedConfig {
         AggregatorV3Interface feed;
-        uint256 heartbeat; // max seconds between updates
+        uint256 heartbeat;
+        bool active;
+    }
+
+    struct DerivedFeed {
+        address baseToken;
+        address quoteToken;
         bool active;
     }
 
     mapping(address => FeedConfig) public feeds;
+    mapping(bytes32 => DerivedFeed) public derivedFeeds;
 
     event FeedRegistered(address indexed token, address feed, uint256 heartbeat);
     event FeedDeactivated(address indexed token);
+    event DerivedFeedRegistered(bytes32 indexed feedId, address baseToken, address quoteToken);
 
     modifier onlyAdmin() {
         require(msg.sender == admin, "Not admin");
@@ -61,6 +69,46 @@ contract ChainlinkAdapter {
         emit FeedDeactivated(token);
     }
 
+    function registerDerivedFeed(address baseToken, address quoteToken) external onlyAdmin {
+        require(feeds[baseToken].active, "Base feed not active");
+        require(feeds[quoteToken].active, "Quote feed not active");
+        bytes32 feedId = keccak256(abi.encodePacked(baseToken, quoteToken));
+        derivedFeeds[feedId] = DerivedFeed({
+            baseToken: baseToken,
+            quoteToken: quoteToken,
+            active: true
+        });
+        emit DerivedFeedRegistered(feedId, baseToken, quoteToken);
+    }
+
+    function getDerivedPrice(address baseToken, address quoteToken) external view returns (uint256) {
+        bytes32 feedId = keccak256(abi.encodePacked(baseToken, quoteToken));
+        require(derivedFeeds[feedId].active, "Derived feed not active");
+
+        uint256 basePrice = _getRawPrice(baseToken);
+        uint256 quotePrice = _getRawPrice(quoteToken);
+        require(quotePrice > 0, "Zero quote price");
+
+        return (basePrice * PRECISION) / quotePrice;
+    }
+
+    function _getRawPrice(address token) internal view returns (uint256) {
+        FeedConfig storage config = feeds[token];
+        require(config.active, "Feed not active");
+
+        (, int256 answer, , , ) = config.feed.latestRoundData();
+        require(answer > 0, "Negative price");
+
+        uint256 price = uint256(answer);
+        uint8 feedDecimals = config.feed.decimals();
+        if (feedDecimals < TARGET_DECIMALS) {
+            price = price * (10 ** (TARGET_DECIMALS - feedDecimals));
+        } else if (feedDecimals > TARGET_DECIMALS) {
+            price = price / (10 ** (feedDecimals - TARGET_DECIMALS));
+        }
+        return price;
+    }
+
     // BUG: No roundId completeness check — answeredInRound should equal roundId to
     // confirm the answer is from the current round; without this check, the contract
     // may return an answer from a previous round that hasn't been updated
@@ -69,29 +117,7 @@ contract ChainlinkAdapter {
     // BUG: Negative price not rejected — Chainlink can return negative prices for
     // certain feeds; casting a negative int256 to uint256 produces a huge incorrect value
     function getPrice(address token) external view returns (uint256) {
-        FeedConfig storage config = feeds[token];
-        require(config.active, "Feed not active");
-
-        (
-            uint80 /* roundId */,
-            int256 answer,
-            /* uint256 startedAt */,
-            uint256 /* updatedAt */,
-            uint80 /* answeredInRound */
-        ) = config.feed.latestRoundData();
-
-        // No validation of roundId, staleness, or negative price
-        uint256 price = uint256(answer);
-
-        // Normalize to 18 decimals
-        uint8 feedDecimals = config.feed.decimals();
-        if (feedDecimals < TARGET_DECIMALS) {
-            price = price * (10 ** (TARGET_DECIMALS - feedDecimals));
-        } else if (feedDecimals > TARGET_DECIMALS) {
-            price = price / (10 ** (feedDecimals - TARGET_DECIMALS));
-        }
-
-        return price;
+        return _getRawPrice(token);
     }
 
     function getFeedInfo(address token) external view returns (
