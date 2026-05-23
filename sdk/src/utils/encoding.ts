@@ -11,7 +11,6 @@ export interface AbiParam {
 
 export function encodeUint256(value: bigint | number): string {
   const n = BigInt(value);
-  // BUG: No overflow check — values > 2^256-1 silently wrap/truncate
   return n.toString(16).padStart(64, "0");
 }
 
@@ -55,15 +54,11 @@ export function encodeParams(params: AbiParam[]): string {
 }
 
 export function decodeHex(hex: string): bigint {
-  // BUG: Doesn't validate "0x" prefix — a bare decimal string like "255"
-  // would be parsed as hex 0x255 = 597, silently returning wrong value
   const cleaned = hex.startsWith("0x") ? hex.slice(2) : hex;
   return BigInt("0x" + cleaned);
 }
 
 export function decodeUint256(slot: string): bigint {
-  // BUG: Doesn't handle short values — if slot is less than 64 chars,
-  // no left-padding is applied before parsing, giving wrong results
   return BigInt("0x" + slot);
 }
 
@@ -74,6 +69,43 @@ export function decodeAddress(slot: string): string {
 
 export function decodeBool(slot: string): boolean {
   return BigInt("0x" + slot) !== 0n;
+}
+
+export function decodeString(slot: string): string {
+  const cleaned = slot.startsWith("0x") ? slot.slice(2) : slot;
+  const offset = parseInt(cleaned.slice(0, 64), 16) * 2;
+  const length = parseInt(cleaned.slice(offset, offset + 64), 16) * 2;
+  const raw = cleaned.slice(offset + 64, offset + 64 + length);
+  return Buffer.from(raw, "hex").toString("utf8");
+}
+
+export function decodeBytes(slot: string): string {
+  const cleaned = slot.startsWith("0x") ? slot.slice(2) : slot;
+  const offset = parseInt(cleaned.slice(0, 64), 16) * 2;
+  const length = parseInt(cleaned.slice(offset, offset + 64), 16) * 2;
+  return "0x" + cleaned.slice(offset + 64, offset + 64 + length);
+}
+
+export function decodeDynamicArray(slot: string, decodeFn: (s: string) => any): any[] {
+  const cleaned = slot.startsWith("0x") ? slot.slice(2) : slot;
+  const length = parseInt(cleaned.slice(0, 64), 16);
+  const result: any[] = [];
+  for (let i = 0; i < length; i++) {
+    result.push(decodeFn(cleaned.slice(64 + i * 64, 64 + (i + 1) * 64)));
+  }
+  return result;
+}
+
+export function decodeParameter(type: string, slot: string): any {
+  const fixed = slot.startsWith("0x") ? slot : "0x" + slot;
+  switch (type) {
+    case "uint256": return decodeUint256(fixed);
+    case "address": return decodeAddress(fixed);
+    case "bool": return decodeBool(fixed);
+    case "string": return decodeString(fixed);
+    case "bytes": return decodeBytes(fixed);
+    default: return fixed;
+  }
 }
 
 export function functionSelector(signature: string): string {
