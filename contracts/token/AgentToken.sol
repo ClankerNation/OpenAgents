@@ -15,8 +15,24 @@ contract AgentToken is ERC20, ERC20Burnable {
     bytes32 public constant PERMIT_TYPEHASH = keccak256(
         "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
     );
-    bytes32 public immutable DOMAIN_SEPARATOR;
+    bytes32 private _cachedDomainSeparator;
+    uint256 private _cachedChainId;
     mapping(address => uint256) public nonces;
+
+        function DOMAIN_SEPARATOR() public view returns (bytes32) {
+        if (block.chainid == _cachedChainId) return _cachedDomainSeparator;
+        return _buildDomainSeparator();
+    }
+
+    function _buildDomainSeparator() internal view returns (bytes32) {
+        return keccak256(abi.encode(
+            keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+            keccak256(bytes(name())),
+            keccak256(bytes("1")),
+            block.chainid,
+            address(this)
+        ));
+    }
 
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
@@ -82,7 +98,7 @@ contract AgentToken is ERC20, ERC20Burnable {
             deadline
         ));
 
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR(), structHash));
         address recoveredAddress = ecrecover(digest, v, r, s);
         require(recoveredAddress != address(0) && recoveredAddress == _owner, "AgentToken: invalid signature");
 
