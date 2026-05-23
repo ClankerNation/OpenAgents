@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "./AgentRegistry.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 contract TaskRouter {
     AgentRegistry public registry;
@@ -26,6 +27,7 @@ contract TaskRouter {
     event TaskAssigned(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskCompleted(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskDisputed(uint256 indexed taskId);
+    event ExecutedOnBehalf(bytes32 indexed taskId, address indexed relayer);
 
     constructor(address _registry, uint256 _platformFee) {
         registry = AgentRegistry(_registry);
@@ -93,6 +95,23 @@ contract TaskRouter {
         task.status = TaskStatus.Cancelled;
         (bool success, ) = msg.sender.call{value: task.reward}("");
         require(success, "Refund failed");
+    }
+
+    function executeOnBehalf(uint256 taskId, bytes calldata result, bytes calldata signature) external {
+        Task storage task = tasks[taskId];
+        require(task.status == TaskStatus.Assigned, "Not assigned");
+        AgentRegistry.Agent memory agent = registry.getAgent(task.assignedAgent);
+        bytes32 message = keccak256(abi.encodePacked(taskId, result));
+        address signer = ECDSA.recover(ECDSA.toEthSignedMessageHash(message), signature);
+        require(signer == agent.owner, "Invalid signature");
+        task.result = result;
+        task.status = TaskStatus.Completed;
+        uint256 fee = task.reward * platformFee / 10000;
+        uint256 payout = task.reward - fee;
+        (bool success, ) = agent.owner.call{value: payout}("");
+        require(success, "Payout failed");
+        emit ExecutedOnBehalf(bytes32(taskId), msg.sender);
+        emit TaskCompleted(taskId, task.assignedAgent);
     }
 
     function disputeTask(uint256 taskId) external {
