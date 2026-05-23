@@ -25,6 +25,8 @@ contract TokenBridge is ReentrancyGuard {
     mapping(address => bool) public isValidator;
     mapping(bytes32 => Transfer) public transfers;
     mapping(bytes32 => bool) public processedHashes;
+    mapping(address => address) public tokenMapping;
+    mapping(address => bool) public supportedTokens;
 
     event TokensLocked(bytes32 indexed transferId, address token, address sender, address recipient, uint256 amount);
     event TokensClaimed(bytes32 indexed transferId, address token, address recipient, uint256 amount);
@@ -104,6 +106,12 @@ contract TokenBridge is ReentrancyGuard {
 
         IERC20(token).safeTransfer(recipient, amount);
         emit TokensClaimed(messageHash, token, recipient, amount);
+    }
+
+    function addTokenMapping(address localToken, address remoteToken) external onlyAdmin {
+        require(localToken != address(0) && remoteToken != address(0), "Bridge: zero address");
+        tokenMapping[localToken] = remoteToken;
+        supportedTokens[localToken] = true;
     }
 
     function addValidator(address validator) external onlyAdmin {
