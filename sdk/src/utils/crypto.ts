@@ -64,8 +64,17 @@ export function verifySignature(
 }
 
 export function hashPersonalMessage(message: string): string {
-  const prefix = `\x19Ethereum Signed Message:\n${message.length}`;
-  return keccak256(prefix + message);
+  const msgLen = Buffer.from(message, "utf-8").length;
+  const prefixed = `\x19Ethereum Signed Message:\n${msgLen}${message}`;
+  return keccak256(prefixed);
+}
+
+export function hashTypedData(
+  domainSeparator: string,
+  structHash: string
+): string {
+  const digest = "0x1901" + domainSeparator.replace("0x", "") + structHash.replace("0x", "");
+  return keccak256(Buffer.from(digest, "hex"));
 }
 
 export function recoverPublicKey(
@@ -76,4 +85,14 @@ export function recoverPublicKey(
   const msgHash = Buffer.from(keccak256(message), "hex");
   const recovered = secp256k1.recoverPubKey(msgHash, signature, recoveryParam);
   return recovered.encode("hex", false);
+}
+
+export function recoverAddress(
+  message: string,
+  signature: string,
+  recoveryParam: number
+): string {
+  const pubKey = recoverPublicKey(message, signature, recoveryParam);
+  const hash = keccak256(Buffer.from(pubKey, "hex"));
+  return "0x" + hash.slice(-40);
 }
