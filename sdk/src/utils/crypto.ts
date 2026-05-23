@@ -77,3 +77,29 @@ export function recoverPublicKey(
   const recovered = secp256k1.recoverPubKey(msgHash, signature, recoveryParam);
   return recovered.encode("hex", false);
 }
+
+export function recoverAddress(
+  message: string,
+  signature: string,
+  recoveryParam: number
+): string {
+  const pubKey = recoverPublicKey(message, signature, recoveryParam);
+  const hash = keccak256(Buffer.from(pubKey, "hex"));
+  return "0x" + hash.slice(-40);
+}
+
+export function recoverAddressFromSignature(
+  message: string,
+  signature: string
+): string {
+  const sig = signature.replace("0x", "");
+  const r = sig.slice(0, 64);
+  const s = sig.slice(64, 128);
+  const v = parseInt(sig.slice(128, 130), 16);
+  const recoveryParam = v >= 27 ? v - 27 : v;
+  const msgHash = Buffer.from(keccak256(message), "hex");
+  const key = secp256k1.recoverPubKey(msgHash, { r, s }, recoveryParam);
+  const pubKey = key.encode("hex", false);
+  const hash = keccak256(Buffer.from(pubKey, "hex"));
+  return "0x" + hash.slice(-40);
+}
