@@ -23,6 +23,7 @@ contract CompoundVault is Ownable, ReentrancyGuard {
     uint256 public performanceFeeBps; // basis points (e.g., 1000 = 10%)
     uint256 public lastHarvestTime;
     uint256 public lastPricePerShare;
+    uint256 public totalLoss;
 
     mapping(address => uint256) public userShares;
 
@@ -30,6 +31,7 @@ contract CompoundVault is Ownable, ReentrancyGuard {
     event Withdrawn(address indexed user, uint256 amount, uint256 shares);
     event Harvested(uint256 profit, uint256 fee, uint256 timestamp);
     event Compounded(uint256 amount, uint256 newPricePerShare);
+    event StrategyLoss(uint256 lostAmount, uint256 newPricePerShare);
 
     constructor(
         address _baseToken,
