@@ -74,36 +74,69 @@ export class SessionManager {
   }
 
   async getToken(): Promise<string> {
-    // BUG: No expiry check — returns the cached token even if it has expired,
-    // causing 401 errors on subsequent API calls
-    if (this.currentToken) {
+    if (this.currentToken && Date.now() / 1000 < this.currentToken.expiresAt) {
       return this.currentToken.token;
+    }
+    if (this.currentToken && this.autoRefresh) {
+      return (await this.refresh()).token;
     }
     const session = await this.authenticate();
     return session.token;
   }
 
   async refresh(): Promise<SessionToken> {
-    // BUG: Race condition — multiple concurrent callers can trigger parallel
-    // refresh requests, and only the last one's token survives
-    if (!this.currentToken?.refreshToken) {
-      return this.authenticate();
+    if (this.refreshPromise) {
+      return this.refreshPromise;
     }
 
-    const res = await fetch(`${this.apiBaseUrl}/auth/refresh`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refreshToken: this.currentToken.refreshToken }),
+    if (!this.currentToken?.refreshToken) {
+      this.refreshPromise = this.authenticate();
+      const token = await this.refreshPromise;
+      this.refreshPromise = null;
+      return token;
+    }
+
+    this.refreshPromise = (async () => {
+      const res = await fetch(`${this.apiBaseUrl}/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken: this.currentToken!.refreshToken }),
+      });
+
+      if (!res.ok) {
+        this.currentToken = null;
+        return this.authenticate();
+      }
+
+      const token: SessionToken = await res.json();
+      this.persistSession(token);
+      return token;
+    })();
+
+    try {
+      return await this.refreshPromise;
+    } finally {
+      this.refreshPromise = null;
+    }
+  }
+
+  async authenticatedFetch(url: string, options: RequestInit = {}): Promise<Response> {
+    const token = await this.getToken();
+    const res = await fetch(url, {
+      ...options,
+      headers: { ...options.headers, Authorization: `Bearer ${token}` },
     });
 
-    if (!res.ok) {
-      this.currentToken = null;
-      return this.authenticate();
+    if (res.status === 401 && this.autoRefresh) {
+      await this.refresh();
+      const newToken = await this.getToken();
+      return fetch(url, {
+        ...options,
+        headers: { ...options.headers, Authorization: `Bearer ${newToken}` },
+      });
     }
 
-    const token: SessionToken = await res.json();
-    this.persistSession(token);
-    return token;
+    return res;
   }
 
   logout(): void {
