@@ -3,12 +3,14 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from ..models.database import get_db, Payment, Task
 from ..middleware.auth import get_current_user
 
 router = APIRouter(prefix="/payments", tags=["payments"])
+
+ESCROW_EXPIRY_DAYS = 30
 
 
 class EscrowDeposit(BaseModel):
@@ -48,6 +50,22 @@ async def deposit_escrow(
     db.commit()
     db.refresh(payment)
     return {"payment_id": payment.id, "status": "escrowed", "amount": payment.amount}
+
+
+@router.post("/process-expired")
+async def process_expired_escrows(db=Depends(get_db)):
+    cutoff = datetime.utcnow() - timedelta(days=ESCROW_EXPIRY_DAYS)
+    expired = db.query(Payment).filter(
+        Payment.status == "escrowed",
+        Payment.created_at < cutoff,
+    ).all()
+    refunded = 0
+    for payment in expired:
+        payment.status = "refunded"
+        payment.to_address = payment.from_address
+        refunded += 1
+    db.commit()
+    return {"refunded_escrows": refunded}
 
 
 @router.get("/escrow/{task_id}")
