@@ -4,6 +4,7 @@ import jwt
 import os
 from fastapi import Request, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import Request
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -14,7 +15,8 @@ JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 REFRESH_TOKEN_EXPIRE_DAYS = 30
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
+API_KEYS: dict = {}
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -46,6 +48,16 @@ def decode_token(token: str) -> dict:
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> dict:
+    if not credentials:
+        api_key = credentials.request.headers.get("X-API-Key") if credentials and credentials.request else None
+        if not api_key:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        import hashlib
+        hashed = hashlib.sha256(api_key.encode()).hexdigest()
+        if hashed not in API_KEYS:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+        key_data = API_KEYS[hashed]
+        return {"id": key_data["user_id"], "address": key_data["address"], "roles": key_data.get("roles", [])}
     token = credentials.credentials
     payload = decode_token(token)
 
@@ -81,3 +93,25 @@ def generate_login_tokens(user_id: str, address: str, roles: list = None) -> dic
         "refresh_token": create_refresh_token(data),
         "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     }
+
+
+from fastapi import APIRouter
+auth_router = APIRouter(prefix="/auth", tags=["auth"])
+
+@auth_router.post("/api-keys")
+async def create_api_key(user: dict = Depends(get_current_user)):
+    import secrets, hashlib
+    api_key = secrets.token_hex(32)
+    hashed = hashlib.sha256(api_key.encode()).hexdigest()
+    API_KEYS[hashed] = {"user_id": user["id"], "address": user["address"], "roles": user.get("roles", [])}
+    return {"api_key": api_key}
+
+@auth_router.delete("/api-keys/{key_id}")
+async def revoke_api_key(key_id: str, user: dict = Depends(get_current_user)):
+    global API_KEYS
+    hashed_keys = list(API_KEYS.keys())
+    for hk in hashed_keys:
+        if API_KEYS[hk]["user_id"] == user["id"] and hk == key_id:
+            del API_KEYS[hk]
+            return {"revoked": True}
+    raise HTTPException(status_code=404, detail="Key not found")
