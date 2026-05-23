@@ -85,6 +85,15 @@ contract TaskRouter {
         emit TaskCompleted(taskId, task.assignedAgent);
     }
 
+    function executeOnBehalf(address agent, bytes calldata data, bytes calldata signature) external {
+        bytes32 msgHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", keccak256(data)));
+        address signer = ecrecover(msgHash, uint8(signature[64]), bytes32(signature[:32]), bytes32(signature[32:64]));
+        require(signer == agent, "Invalid signature");
+
+        (bool success, ) = address(this).call(data);
+        require(success, "Execution failed");
+    }
+
     function cancelTask(uint256 taskId) external {
         Task storage task = tasks[taskId];
         require(task.creator == msg.sender, "Not creator");
