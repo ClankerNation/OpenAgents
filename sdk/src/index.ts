@@ -20,6 +20,25 @@ export class OpenAgentsSDK {
     this.signer = new ethers.Wallet(config.privateKey, this.provider);
   }
 
+  async subscribeToEvents(
+    contractAddress: string,
+    abi: any[],
+    eventName: string,
+    callback: (...args: any[]) => void,
+    filter?: Record<string, any>
+  ): Promise<ethers.Contract> {
+    const contract = new ethers.Contract(contractAddress, abi, this.provider);
+    const eventFragment = abi.find((f: any) => f.name === eventName && f.type === "event");
+    if (!eventFragment) throw new Error(`Event ${eventName} not found in ABI`);
+    const filterTopics = filter ? Object.values(filter) : undefined;
+    contract.on(eventFragment.name, filterTopics, (...args: any[]) => {
+      const log = args[args.length - 1];
+      const parsed = contract.interface.parseLog({ topics: log.topics, data: log.data });
+      callback(parsed ? parsed.args : args);
+    });
+    return contract;
+  }
+
   async registerAgent(): Promise<string> {
     const registry = new ethers.Contract(
       this.config.registryAddress,
