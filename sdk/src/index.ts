@@ -88,4 +88,11 @@ export class OpenAgentsSDK {
 
     return openTasks;
   }
+
+  subscribeToEvents(contractAddress: string, abi: any[], eventName: string, callback: (...args: any[]) => void, filter?: Record<string, any>): ethers.Contract {
+    const contract = new ethers.Contract(contractAddress, abi, this.provider);
+    const eventFilter = filter ? contract.filters[eventName](...Object.values(filter)) : contract.filters[eventName]();
+    contract.on(eventFilter, (...args) => callback(...args));
+    return contract;
+  }
 }
