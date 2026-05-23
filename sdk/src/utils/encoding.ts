@@ -2,26 +2,29 @@
  * ABI encoding/decoding utilities for EVM-compatible contract interactions.
  */
 
-export type AbiType = "uint256" | "address" | "bytes32" | "string" | "bool";
+export type AbiType = "uint256" | "address" | "bytes32" | "string" | "bool" | "bytes" | "tuple";
 
 export interface AbiParam {
   type: AbiType;
-  value: string | number | bigint | boolean;
+  value: string | number | bigint | boolean | AbiParam[] | Uint8Array;
+  components?: AbiParam[];
 }
 
 export function encodeUint256(value: bigint | number): string {
   const n = BigInt(value);
-  // BUG: No overflow check — values > 2^256-1 silently wrap/truncate
+  if (n >= 1n << 256n) throw new Error("uint256 overflow");
   return n.toString(16).padStart(64, "0");
 }
 
 export function encodeAddress(address: string): string {
   const cleaned = address.startsWith("0x") ? address.slice(2) : address;
+  if (cleaned.length !== 40) throw new Error("Invalid address length");
   return cleaned.toLowerCase().padStart(64, "0");
 }
 
 export function encodeBytes32(data: string): string {
   const cleaned = data.startsWith("0x") ? data.slice(2) : data;
+  if (cleaned.length > 64) throw new Error("bytes32 too long");
   return cleaned.padEnd(64, "0");
 }
 
@@ -29,51 +32,152 @@ export function encodeBool(value: boolean): string {
   return value ? "1".padStart(64, "0") : "0".padStart(64, "0");
 }
 
+function encodeDynamic(data: string): string {
+  const len = data.length / 2;
+  const paddedLen = len.toString(16).padStart(64, "0");
+  const paddedData = data.padEnd(Math.ceil(len / 32) * 64, "0");
+  return paddedLen + paddedData;
+}
+
 export function encodeParams(params: AbiParam[]): string {
-  let encoded = "0x";
+  let staticPart = "";
+  const dynamicPart: string[] = [];
+  let dynamicOffset = params.length * 32;
+
   for (const param of params) {
     switch (param.type) {
       case "uint256":
-        encoded += encodeUint256(BigInt(param.value as number));
-        break;
       case "address":
-        encoded += encodeAddress(param.value as string);
-        break;
       case "bytes32":
-        encoded += encodeBytes32(param.value as string);
-        break;
       case "bool":
-        encoded += encodeBool(param.value as boolean);
+        staticPart += encodeParam(param);
         break;
-      case "string":
-        const hexStr = Buffer.from(param.value as string).toString("hex");
-        encoded += hexStr.padEnd(64, "0");
+      case "string": {
+        const hex = Buffer.from(param.value as string, "utf8").toString("hex");
+        staticPart += encodeUint256(dynamicOffset);
+        dynamicPart.push(encodeDynamic(hex));
+        dynamicOffset += 32 + Math.ceil(hex.length / 64) * 64;
         break;
+      }
+      case "bytes": {
+        const hex = typeof param.value === "string" && (param.value as string).startsWith("0x")
+          ? (param.value as string).slice(2) : Buffer.from(param.value as Uint8Array).toString("hex");
+        staticPart += encodeUint256(dynamicOffset);
+        dynamicPart.push(encodeDynamic(hex));
+        dynamicOffset += 32 + Math.ceil(hex.length / 64) * 64;
+        break;
+      }
+      case "tuple": {
+        const tupleEncoded = encodeParams(param.components || []);
+        staticPart += encodeUint256(dynamicOffset);
+        dynamicPart.push(tupleEncoded.slice(2));
+        dynamicOffset += 32 + Math.ceil((tupleEncoded.length - 2) / 64) * 32;
+        break;
+      }
     }
   }
-  return encoded;
+
+  return "0x" + staticPart + dynamicPart.join("");
+}
+
+function encodeParam(param: AbiParam): string {
+  switch (param.type) {
+    case "uint256": return encodeUint256(BigInt(param.value as number));
+    case "address": return encodeAddress(param.value as string);
+    case "bytes32": return encodeBytes32(param.value as string);
+    case "bool": return encodeBool(param.value as boolean);
+    default: throw new Error("Unsupported static type: " + param.type);
+  }
 }
 
 export function decodeHex(hex: string): bigint {
-  // BUG: Doesn't validate "0x" prefix — a bare decimal string like "255"
-  // would be parsed as hex 0x255 = 597, silently returning wrong value
   const cleaned = hex.startsWith("0x") ? hex.slice(2) : hex;
+  if (!/^[0-9a-fA-F]*$/.test(cleaned)) throw new Error("Invalid hex string");
+  if (cleaned.length === 0) return 0n;
   return BigInt("0x" + cleaned);
 }
 
 export function decodeUint256(slot: string): bigint {
-  // BUG: Doesn't handle short values — if slot is less than 64 chars,
-  // no left-padding is applied before parsing, giving wrong results
-  return BigInt("0x" + slot);
+  const cleaned = slot.startsWith("0x") ? slot.slice(2) : slot;
+  const padded = cleaned.padStart(64, "0").slice(0, 64);
+  return BigInt("0x" + padded);
 }
 
 export function decodeAddress(slot: string): string {
-  const raw = slot.slice(-40);
+  const hex = slot.startsWith("0x") ? slot.slice(2) : slot;
+  const raw = hex.slice(-40);
   return "0x" + raw.toLowerCase();
 }
 
 export function decodeBool(slot: string): boolean {
-  return BigInt("0x" + slot) !== 0n;
+  const hex = slot.startsWith("0x") ? slot.slice(2) : slot;
+  return BigInt("0x" + hex.padStart(64, "0")) !== 0n;
+}
+
+export function decodeString(data: string, offset: number): string {
+  const hex = data.startsWith("0x") ? data.slice(2) : data;
+  const dataOffset = parseInt(hex.substring(offset * 64, offset * 64 + 64), 16);
+  const strLen = parseInt(hex.substring((offset + dataOffset / 32) * 64, (offset + dataOffset / 32) * 64 + 64), 16);
+  const strHex = hex.substring((offset + dataOffset / 32 + 1) * 64, (offset + dataOffset / 32 + 1) * 64 + strLen * 2);
+  return Buffer.from(strHex, "hex").toString("utf8");
+}
+
+export function decodeBytes(data: string, offset: number): Uint8Array {
+  const hex = data.startsWith("0x") ? data.slice(2) : data;
+  const dataOffset = parseInt(hex.substring(offset * 64, offset * 64 + 64), 16);
+  const byteLen = parseInt(hex.substring((offset + dataOffset / 32) * 64, (offset + dataOffset / 32) * 64 + 64), 16);
+  const byteHex = hex.substring((offset + dataOffset / 32 + 1) * 64, (offset + dataOffset / 32 + 1) * 64 + byteLen * 2);
+  return Buffer.from(byteHex, "hex");
+}
+
+export function decodeArray(data: string, offset: number, elemType: AbiType): any[] {
+  const hex = data.startsWith("0x") ? data.slice(2) : data;
+  const dataOffset = parseInt(hex.substring(offset * 64, offset * 64 + 64), 16);
+  const arrLen = parseInt(hex.substring((offset + dataOffset / 32) * 64, (offset + dataOffset / 32) * 64 + 64), 16);
+  const result = [];
+  for (let i = 0; i < arrLen; i++) {
+    const slot = hex.substring((offset + dataOffset / 32 + 1 + i) * 64, (offset + dataOffset / 32 + 1 + i) * 64 + 64);
+    result.push(decodeSlot(slot, elemType));
+  }
+  return result;
+}
+
+export function decodeSlot(slot: string, type: AbiType): any {
+  switch (type) {
+    case "uint256": return decodeUint256(slot);
+    case "address": return decodeAddress(slot);
+    case "bool": return decodeBool(slot);
+    default: return decodeUint256(slot);
+  }
+}
+
+export function decodeParameter(data: string, type: AbiType): any {
+  if (type === "string") return decodeString(data, 0);
+  if (type === "bytes") return decodeBytes(data, 0);
+  const hex = data.startsWith("0x") ? data.slice(2) : data;
+  return decodeSlot(hex.substring(0, 64), type);
+}
+
+export function decodeParameters(data: string, types: AbiType[]): any[] {
+  const hex = data.startsWith("0x") ? data.slice(2) : data;
+  const result: any[] = [];
+  const dynamicValues: { idx: number; type: AbiType; dataOffset: number }[] = [];
+  for (let i = 0; i < types.length; i++) {
+    const type = types[i];
+    const slot = hex.substring(i * 64, i * 64 + 64);
+    if (type === "string" || type === "bytes") {
+      dynamicValues.push({ idx: i, type, dataOffset: parseInt(slot, 16) });
+      result.push(null);
+    } else {
+      result.push(decodeSlot(slot, type));
+    }
+  }
+  for (const dv of dynamicValues) {
+    const startSlot = dv.dataOffset / 32;
+    if (dv.type === "string") result[dv.idx] = decodeString(data, startSlot);
+    else if (dv.type === "bytes") result[dv.idx] = decodeBytes(data, startSlot);
+  }
+  return result;
 }
 
 export function functionSelector(signature: string): string {
