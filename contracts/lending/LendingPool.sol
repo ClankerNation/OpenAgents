@@ -1,6 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+interface IPermit2 {
+    function permitTransferFrom(
+        bytes calldata permit,
+        bytes calldata transfer,
+        address sender,
+        address recipient
+    ) external;
+}
+
+
 interface IPriceFeed {
     function getPrice(address token) external view returns (uint256);
 }
