@@ -9,6 +9,8 @@ contract RandomLottery {
     uint256 public ticketPrice;
     uint256 public roundEnd;
     uint256 public currentRound;
+    uint256 public minPlayers;
+    mapping(address => uint256) public playerRefunds;
 
     address[] public players;
     mapping(uint256 => address) public roundWinners;
@@ -22,7 +24,8 @@ contract RandomLottery {
         _;
     }
 
-    constructor(uint256 _ticketPrice) {
+    constructor(uint256 _ticketPrice, uint256 _minPlayers) {
+        minPlayers = _minPlayers;
         owner = msg.sender;
         ticketPrice = _ticketPrice;
     }
@@ -39,6 +42,7 @@ contract RandomLottery {
         require(block.timestamp < roundEnd, "Round ended");
         require(msg.value == ticketPrice, "Wrong ticket price");
         players.push(msg.sender);
+        playerRefunds[msg.sender] += msg.value;
         emit TicketPurchased(msg.sender, currentRound);
     }
 
@@ -65,6 +69,21 @@ contract RandomLottery {
         require(sent, "Transfer failed");
 
         emit WinnerSelected(winner, prize, currentRound);
+    }
+
+    function cancelLottery() external onlyOwner {
+        require(block.timestamp >= roundEnd, "Round not ended");
+        require(players.length < minPlayers, "Minimum players met");
+        roundEnd = 0;
+    }
+
+    function refund() external {
+        require(roundEnd == 0, "Round still active");
+        uint256 amount = playerRefunds[msg.sender];
+        require(amount > 0, "Nothing to refund");
+        playerRefunds[msg.sender] = 0;
+        (bool sent, ) = msg.sender.call{value: amount}("");
+        require(sent, "Refund failed");
     }
 
     function getPlayers() external view returns (address[] memory) {
