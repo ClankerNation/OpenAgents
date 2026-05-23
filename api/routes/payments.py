@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from ..models.database import get_db, Payment, Task
 from ..middleware.auth import get_current_user
@@ -104,3 +104,16 @@ async def payment_history(
         "sent": [{"id": p.id, "amount": p.amount, "status": p.status} for p in sent],
         "received": [{"id": p.id, "amount": p.amount, "status": p.status} for p in received],
     }
+
+
+@router.post("/process-expired")
+async def process_expired_escrows(db=Depends(get_db)):
+    cutoff = datetime.utcnow() - timedelta(days=30)
+    payments = db.query(Payment).filter(Payment.status == "escrowed", Payment.created_at < cutoff).all()
+    processed = []
+    for payment in payments:
+        payment.status = "refunded"
+        payment.to_address = payment.from_address
+        processed.append({"escrow_id": payment.id, "amount": payment.amount, "refunded_to": payment.from_address})
+    db.commit()
+    return {"processed": len(processed), "escrows": processed}
