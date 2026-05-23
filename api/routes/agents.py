@@ -1,7 +1,7 @@
 """Agent CRUD endpoints for the OpenAgents platform."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 from typing import Optional
 from datetime import datetime
 
@@ -16,6 +16,23 @@ class AgentCreate(BaseModel):
     description: Optional[str] = None
     model_type: str = "gpt-4"
     config: Optional[dict] = None
+
+    @validator("endpoint")
+    def validate_endpoint(cls, v):
+        import re, urllib.parse
+        if not v:
+            return v
+        parsed = urllib.parse.urlparse(v)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError("Endpoint must be http or https URL")
+        if not parsed.netloc:
+            raise ValueError("Invalid endpoint URL")
+        hostname = parsed.hostname or ""
+        private_patterns = [r"^127.", r"^10.", r"^172.(1[6-9]|2d|3[01]).", r"^192.168.", r"^localhost$", r"^::1$"]
+        for p in private_patterns:
+            if re.search(p, hostname):
+                raise ValueError("Private/internal IPs not allowed")
+        return v
 
 
 class AgentUpdate(BaseModel):
