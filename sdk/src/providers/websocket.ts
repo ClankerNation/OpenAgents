@@ -136,7 +136,7 @@ export class WebSocketProvider extends EventEmitter {
     return new Promise((resolve, reject) => {
       this.ws = new WebSocket(this.url);
 
-      this.ws.onopen = async () => {
+      this.ws.onopen = () => {
         this.isConnected = true;
         this.reconnectCount = 0;
         
@@ -146,8 +146,10 @@ export class WebSocketProvider extends EventEmitter {
         // Flush any queued messages
         this.flushQueue();
 
-        // Auto-resubscribe active subscriptions
-        await this.resubscribeAll();
+        // Auto-resubscribe active subscriptions in background
+        this.resubscribeAll().catch((err) => {
+          this.emit("error", err);
+        });
 
         this.emit("connected");
         resolve();
@@ -157,14 +159,24 @@ export class WebSocketProvider extends EventEmitter {
         // Reset heartbeat timeout when we receive a message
         this.resetHeartbeatTimeout();
 
-        const data = JSON.parse(event.data as string);
-
-        // Filter out heartbeat pong messages if any
-        if (data.method === "pong") {
+        let data: any;
+        try {
+          data = JSON.parse(event.data as string);
+        } catch (e) {
+          // If the message is a plain string pong, ignore it
+          if (event.data === "pong" || event.data === "pong\n") {
+            return;
+          }
+          this.emit("error", new Error("Invalid JSON received: " + event.data));
           return;
         }
 
-        if (data.id && this.pendingRequests.has(data.id)) {
+        // Filter out heartbeat pong messages
+        if (data.method === "pong" || data.result === "pong") {
+          return;
+        }
+
+        if (data.id !== undefined && data.id !== null && this.pendingRequests.has(data.id)) {
           const pending = this.pendingRequests.get(data.id)!;
           this.pendingRequests.delete(data.id);
           if (data.error) {
@@ -172,9 +184,9 @@ export class WebSocketProvider extends EventEmitter {
           } else {
             pending.resolve(data.result);
           }
-        } else if (data.method && data.params) {
-          const subscriptionId = data.params.subscription;
-          const callback = this.subscriptions.get(subscriptionId);
+        } else if (data.method === "eth_subscription") {
+          const subId = data.params?.subscription;
+          const callback = this.subscriptions.get(subId);
           if (callback) {
             callback(data.params.result);
           }
@@ -297,7 +309,17 @@ export class WebSocketProvider extends EventEmitter {
 
     if (!this.ws || !this.isConnected) {
       if (this.queue.length >= this.maxQueueSize) {
-        this.queue.shift(); // Drop oldest message to respect bounds
+        const droppedMsg = this.queue.shift(); // Drop oldest message to respect bounds
+        if (droppedMsg) {
+          try {
+            const parsed = JSON.parse(droppedMsg);
+            if (parsed.id !== undefined && parsed.id !== null && this.pendingRequests.has(parsed.id)) {
+              const pending = this.pendingRequests.get(parsed.id)!;
+              this.pendingRequests.delete(parsed.id);
+              pending.reject(new Error("Message dropped due to queue size limit"));
+            }
+          } catch (e) {}
+        }
       }
       this.queue.push(msg);
       
@@ -339,6 +361,11 @@ export class WebSocketProvider extends EventEmitter {
     this.ws?.close();
     this.ws = null;
     this.isConnected = false;
+    
+    // Reject all pending requests
+    for (const [id, pending] of this.pendingRequests.entries()) {
+      pending.reject(new Error("WebSocket disconnected"));
+    }
     this.pendingRequests.clear();
     this.queue = [];
     this.activeSubscriptions.clear();
