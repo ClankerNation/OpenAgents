@@ -1,6 +1,6 @@
 """Task management endpoints for bounty assignments."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -9,6 +9,9 @@ from ..models.database import get_db, Task
 from ..middleware.auth import get_current_user
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
+
+active_task_connections: dict = {}
+
 
 VALID_STATUSES = {"open", "assigned", "in_progress", "review", "completed", "cancelled"}
 
@@ -90,6 +93,22 @@ async def update_task_status(
     db.commit()
     return {"id": task.id, "status": task.status}
 
+
+
+
+@router.websocket("/ws")
+async def task_websocket(websocket: WebSocket, task_id: str = None):
+    await websocket.accept()
+    if task_id:
+        if task_id not in active_task_connections:
+            active_task_connections[task_id] = set()
+        active_task_connections[task_id].add(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        if task_id and task_id in active_task_connections:
+            active_task_connections[task_id].discard(websocket)
 
 @router.delete("/{task_id}")
 async def cancel_task(task_id: int, user=Depends(get_current_user), db=Depends(get_db)):
