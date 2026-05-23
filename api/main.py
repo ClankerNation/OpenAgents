@@ -3,6 +3,16 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+import uuid
+from starlette.middleware.base import BaseHTTPMiddleware
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
