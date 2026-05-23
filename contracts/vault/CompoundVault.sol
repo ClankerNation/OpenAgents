@@ -23,6 +23,7 @@ contract CompoundVault is Ownable, ReentrancyGuard {
     uint256 public performanceFeeBps; // basis points (e.g., 1000 = 10%)
     uint256 public lastHarvestTime;
     uint256 public lastPricePerShare;
+    uint256 public totalLoss;
 
     mapping(address => uint256) public userShares;
 
