@@ -30,6 +30,7 @@ contract GovernorAlpha is ReentrancyGuard {
     uint256 public constant VOTING_DELAY = 1; // blocks
     uint256 public constant VOTING_PERIOD = 17280; // ~3 days at 15s blocks
     uint256 public constant PROPOSAL_THRESHOLD = 100_000e18;
+    uint256 public constant QUORUM_VOTES = 40_000e18;
 
     mapping(uint256 => Proposal) public proposals;
 
@@ -98,6 +99,7 @@ contract GovernorAlpha is ReentrancyGuard {
         // BUG: No quorum check — a proposal with a single "for" vote and zero "against"
         // votes can pass, allowing governance takeover with dust amounts.
         require(p.forVotes > p.againstVotes, "Governor: proposal defeated");
+        require(p.forVotes >= QUORUM_VOTES, "Governor: quorum not met");
 
         // BUG: No timelock delay on execution — proposals execute instantly after voting
         // ends, giving no time for users to exit if a malicious proposal passes.
