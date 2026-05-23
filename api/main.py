@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+import uuid
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
