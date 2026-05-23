@@ -1,8 +1,9 @@
 """SQLAlchemy models and database session management."""
 
+import uuid
 from sqlalchemy import (
     create_engine, Column, Integer, String, Float, Text, JSON,
-    ForeignKey, DateTime, Enum as SAEnum,
+    ForeignKey, DateTime, Boolean, Enum as SAEnum,
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -28,10 +29,10 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String(36), default=lambda: str(uuid.uuid4()), unique=True, nullable=False, index=True)
     address = Column(String(42), unique=True, nullable=False)
     username = Column(String(64), unique=True, nullable=True)
-    # BUG: No index on address — wallet lookups on every auth request do full table scans
-    created_at = Column(DateTime, default=datetime.utcnow)  # BUG: naive datetime, no timezone
+    created_at = Column(DateTime, default=datetime.utcnow)
 
     agents = relationship("Agent", back_populates="owner")
 
@@ -40,15 +41,17 @@ class Agent(Base):
     __tablename__ = "agents"
 
     id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String(36), default=lambda: str(uuid.uuid4()), unique=True, nullable=False, index=True)
     name = Column(String(128), nullable=False)
     description = Column(Text, nullable=True)
     model_type = Column(String(32), default="gpt-4")
     config = Column(JSON, default=dict)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    is_active = Column(Boolean, default=True)
+    deleted_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    # BUG: No cascade delete — deleting a user leaves orphaned agents
-    owner = relationship("User", back_populates="agents")
+    owner = relationship("User", back_populates="agents", cascade="all, delete-orphan")
     tasks = relationship("Task", back_populates="agent")
 
 
@@ -56,6 +59,7 @@ class Task(Base):
     __tablename__ = "tasks"
 
     id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String(36), default=lambda: str(uuid.uuid4()), unique=True, nullable=False, index=True)
     title = Column(String(256), nullable=False)
     description = Column(Text, nullable=True)
     reward_amount = Column(Float, nullable=False)
@@ -74,6 +78,7 @@ class Payment(Base):
     __tablename__ = "payments"
 
     id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String(36), default=lambda: str(uuid.uuid4()), unique=True, nullable=False, index=True)
     task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
     from_address = Column(String(42), nullable=False)
     to_address = Column(String(42), nullable=True)
