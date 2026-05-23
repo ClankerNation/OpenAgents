@@ -13,6 +13,8 @@ export interface Transaction {
   data: string;
   gasLimit: bigint;
   gasPrice?: bigint;
+  maxPriorityFeePerGas?: bigint;
+  maxFeePerGas?: bigint;
   nonce?: number;
   chainId?: number;
 }
@@ -54,15 +56,29 @@ export class Wallet {
     // BUG: No chain ID validation — transaction could be replayed on a different
     // chain if chainId is missing or mismatched with the provider
     const nonce = tx.nonce ?? await this.getNonce();
-    const gasPrice = tx.gasPrice ?? BigInt(await this.provider.call("eth_gasPrice") as string);
+    const chainId = tx.chainId ?? this.provider.getChainId();
 
-    const txData = encodeParams([
-      { type: "uint256", value: nonce } as AbiParam,
-      { type: "uint256", value: gasPrice } as AbiParam,
-      { type: "uint256", value: tx.gasLimit } as AbiParam,
-      { type: "address", value: tx.to } as AbiParam,
-      { type: "uint256", value: tx.value } as AbiParam,
-    ]);
+    let txData: string;
+    if (tx.maxPriorityFeePerGas !== undefined && tx.maxFeePerGas !== undefined) {
+      txData = encodeParams([
+        { type: "uint256", value: chainId } as AbiParam,
+        { type: "uint256", value: nonce } as AbiParam,
+        { type: "uint256", value: tx.maxPriorityFeePerGas } as AbiParam,
+        { type: "uint256", value: tx.maxFeePerGas } as AbiParam,
+        { type: "uint256", value: tx.gasLimit } as AbiParam,
+        { type: "address", value: tx.to } as AbiParam,
+        { type: "uint256", value: tx.value } as AbiParam,
+      ]);
+    } else {
+      const gasPrice = tx.gasPrice ?? BigInt(await this.provider.call("eth_gasPrice") as string);
+      txData = encodeParams([
+        { type: "uint256", value: nonce } as AbiParam,
+        { type: "uint256", value: gasPrice } as AbiParam,
+        { type: "uint256", value: tx.gasLimit } as AbiParam,
+        { type: "address", value: tx.to } as AbiParam,
+        { type: "uint256", value: tx.value } as AbiParam,
+      ]);
+    }
 
     const txHash = keccak256(txData);
     const signature = signMessage(this.privateKey, txHash);
