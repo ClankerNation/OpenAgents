@@ -14,6 +14,8 @@ export interface SessionToken {
   walletAddress: string;
 }
 
+export { AuthenticationError }
+
 export class SessionManager {
   private wallet: Wallet;
   private apiBaseUrl: string;
