@@ -19,11 +19,9 @@ contract LendingPool {
     IERC20 public collateralToken;
     IERC20 public borrowToken;
 
-    // BUG: Liquidation threshold hardcoded to 150% (1.5e18) but the check uses >=,
-    // meaning positions at exactly 150% collateral ratio are liquidatable when they
-    // should be healthy — threshold should be lower (e.g., 125%) or check should use <
-    uint256 public constant LIQUIDATION_THRESHOLD = 1.5e18; // 150%
+    uint256 public constant LIQUIDATION_THRESHOLD = 1.5e18;
     uint256 public constant PRECISION = 1e18;
+    uint256 public constant FLASH_LOAN_FEE_BPS = 9; // 0.09%
 
     struct Position {
         uint256 collateralAmount;
@@ -38,6 +36,7 @@ contract LendingPool {
     event Borrowed(address indexed user, uint256 amount);
     event Repaid(address indexed user, uint256 amount);
     event Liquidated(address indexed user, address indexed liquidator, uint256 debtRepaid);
+    event FlashLiquidated(address indexed user, address indexed liquidator, uint256 debtRepaid, uint256 fee);
 
     constructor(address _oracle, address _collateralToken, address _borrowToken) {
         oracle = IPriceFeed(_oracle);
@@ -106,6 +105,37 @@ contract LendingPool {
         uint256 borrowValue = (pos.borrowedAmount * borrowPrice) / PRECISION;
 
         return collateralValue >= (borrowValue * LIQUIDATION_THRESHOLD) / PRECISION;
+    }
+
+    function flashLiquidate(address user, uint256 borrowAmount) external {
+        require(!_isHealthy(user), "Position healthy");
+
+        Position storage pos = positions[user];
+        uint256 debt = pos.borrowedAmount;
+        require(borrowAmount >= debt, "Insufficient borrow");
+
+        // Flash loan: borrow from pool
+        uint256 fee = borrowAmount * FLASH_LOAN_FEE_BPS / 10000;
+        require(borrowToken.transfer(msg.sender, borrowAmount), "Transfer failed");
+
+        // Liquidate: repay debt and receive collateral
+        require(borrowToken.transferFrom(msg.sender, address(this), debt), "Repay failed");
+
+        uint256 collateral = pos.collateralAmount;
+        pos.borrowedAmount = 0;
+        pos.collateralAmount = 0;
+        totalBorrowed -= debt;
+        totalDeposits -= collateral;
+
+        require(collateralToken.transfer(msg.sender, collateral), "Collateral transfer failed");
+
+        // Repay flash loan + fee
+        uint256 repayAmount = borrowAmount + fee;
+        require(borrowToken.transferFrom(msg.sender, address(this), repayAmount - debt), "Flash repay failed");
+        totalBorrowed -= borrowAmount - debt;
+
+        emit Liquidated(user, msg.sender, debt);
+        emit FlashLiquidated(user, msg.sender, debt, fee);
     }
 
     function getPosition(address user) external view returns (uint256 collateral, uint256 debt) {
