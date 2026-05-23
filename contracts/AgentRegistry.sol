@@ -14,29 +14,29 @@ contract AgentRegistry is Ownable {
         bool active;
     }
 
-    mapping(bytes32 => Agent) public agents;
-    mapping(address => bytes32[]) public ownerAgents;
-    bytes32[] public agentIds;
+    mapping(uint256 => Agent) public agents;
+    mapping(address => uint256[]) public ownerAgents;
+    uint256[] public agentIds;
 
     uint256 public registrationFee;
     uint256 public minReputation;
+    uint256 public nextAgentId;
 
-    event AgentRegistered(bytes32 indexed agentId, address indexed owner, string name);
-    event AgentDeactivated(bytes32 indexed agentId);
-    event ReputationUpdated(bytes32 indexed agentId, uint256 newReputation);
+    event AgentRegistered(uint256 indexed agentId, address indexed owner, string name);
+    event AgentDeactivated(uint256 indexed agentId);
+    event ReputationUpdated(uint256 indexed agentId, uint256 newReputation);
 
     constructor(uint256 _registrationFee) Ownable(msg.sender) {
         registrationFee = _registrationFee;
         minReputation = 0;
+        nextAgentId = 1;
     }
 
-    function registerAgent(string calldata name, string calldata endpoint) external payable returns (bytes32) {
+    function registerAgent(string calldata name, string calldata endpoint) external payable returns (uint256) {
         require(msg.value >= registrationFee, "Insufficient fee");
         require(bytes(name).length > 0 && bytes(name).length <= 64, "Invalid name");
 
-        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp));
-
-        require(agents[agentId].registeredAt == 0, "Agent exists");
+        uint256 agentId = nextAgentId++;
 
         agents[agentId] = Agent({
             owner: msg.sender,
@@ -55,13 +55,13 @@ contract AgentRegistry is Ownable {
         return agentId;
     }
 
-    function deactivateAgent(bytes32 agentId) external {
+    function deactivateAgent(uint256 agentId) external {
         require(agents[agentId].owner == msg.sender, "Not agent owner");
         agents[agentId].active = false;
         emit AgentDeactivated(agentId);
     }
 
-    function updateReputation(bytes32 agentId, int256 delta) external onlyOwner {
+    function updateReputation(uint256 agentId, int256 delta) external onlyOwner {
         Agent storage agent = agents[agentId];
         require(agent.registeredAt > 0, "Agent not found");
 
@@ -75,7 +75,7 @@ contract AgentRegistry is Ownable {
         emit ReputationUpdated(agentId, agent.reputation);
     }
 
-    function getAgent(bytes32 agentId) external view returns (Agent memory) {
+    function getAgent(uint256 agentId) external view returns (Agent memory) {
         return agents[agentId];
     }
 
