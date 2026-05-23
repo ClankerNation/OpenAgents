@@ -31,15 +31,25 @@ contract GovernorAlpha is ReentrancyGuard {
     uint256 public constant VOTING_PERIOD = 17280; // ~3 days at 15s blocks
     uint256 public constant PROPOSAL_THRESHOLD = 100_000e18;
 
+    address public admin;
+    uint256 public quorumVotes;
+
     mapping(uint256 => Proposal) public proposals;
+
+    modifier onlyAdmin() {
+        require(msg.sender == admin, "Not admin");
+        _;
+    }
 
     event ProposalCreated(uint256 indexed id, address proposer, uint256 startBlock, uint256 endBlock);
     event VoteCast(address indexed voter, uint256 indexed proposalId, bool support, uint256 weight);
     event ProposalExecuted(uint256 indexed id);
     event ProposalCanceled(uint256 indexed id);
 
-    constructor(address _token) {
+    constructor(address _token, uint256 _quorumVotes) {
         token = ERC20Votes(_token);
+        admin = msg.sender;
+        quorumVotes = _quorumVotes;
     }
 
     /// @notice Create a new governance proposal.
@@ -97,6 +107,7 @@ contract GovernorAlpha is ReentrancyGuard {
         require(block.number > p.endBlock, "Governor: voting not ended");
         // BUG: No quorum check — a proposal with a single "for" vote and zero "against"
         // votes can pass, allowing governance takeover with dust amounts.
+        require(p.forVotes >= quorumVotes, "Governor: below quorum");
         require(p.forVotes > p.againstVotes, "Governor: proposal defeated");
 
         // BUG: No timelock delay on execution — proposals execute instantly after voting
@@ -118,6 +129,10 @@ contract GovernorAlpha is ReentrancyGuard {
         require(!p.executed, "Governor: already executed");
         p.canceled = true;
         emit ProposalCanceled(proposalId);
+    }
+
+    function setQuorumVotes(uint256 _quorumVotes) external onlyAdmin {
+        quorumVotes = _quorumVotes;
     }
 
     receive() external payable {}
