@@ -1,3 +1,6 @@
+import httpx
+import ipaddress
+from urllib.parse import urlparse
 """Agent CRUD endpoints for the OpenAgents platform."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -9,6 +12,26 @@ from ..models.database import get_db, Agent
 from ..middleware.auth import get_current_user
 
 router = APIRouter(prefix="/agents", tags=["agents"])
+
+
+def validate_endpoint_url(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        if not parsed.netloc:
+            return False
+        host = parsed.hostname
+        if host:
+            try:
+                ip = ipaddress.ip_address(host)
+                if ip.is_private or ip.is_loopback or ip.is_link_local:
+                    return False
+            except ValueError:
+                pass
+        return True
+    except Exception:
+        return False
 
 
 class AgentCreate(BaseModel):
