@@ -8,6 +8,10 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 /// @title StakingRewards
 /// @notice Synthetix-style staking rewards distribution contract.
 /// @dev Users stake an ERC20 token and earn rewards over a fixed duration.
+interface IPermit2 {
+    function permitTransferFrom(address from, address to, uint160 amount, uint48 deadline, bytes calldata sig) external;
+}
+
 contract StakingRewards is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
