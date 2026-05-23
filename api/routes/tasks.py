@@ -1,3 +1,4 @@
+from fastapi import WebSocket, WebSocketDisconnect
 """Task management endpoints for bounty assignments."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
