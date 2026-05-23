@@ -23,7 +23,10 @@ contract AMMPool {
 
     event LiquidityAdded(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
     event LiquidityRemoved(address indexed provider, uint256 amountA, uint256 amountB);
-    event Swap(address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut);
+    event Swap(address indexed user, address indexed tokenIn, uint256 amountIn, uint256 amountOut);
+    event Sync(uint256 reserveA, uint256 reserveB);
+    event Mint(address indexed provider, uint256 amountA, uint256 amountB);
+    event Burn(address indexed provider, uint256 amountA, uint256 amountB);
 
     constructor(address _tokenA, address _tokenB) {
         tokenA = IERC20(_tokenA);
