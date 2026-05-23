@@ -25,6 +25,7 @@ contract TokenBridge is ReentrancyGuard {
     mapping(address => bool) public isValidator;
     mapping(bytes32 => Transfer) public transfers;
     mapping(bytes32 => bool) public processedHashes;
+    mapping(address => address) public tokenMapping;
 
     event TokensLocked(bytes32 indexed transferId, address token, address sender, address recipient, uint256 amount);
     event TokensClaimed(bytes32 indexed transferId, address token, address recipient, uint256 amount);
@@ -47,6 +48,7 @@ contract TokenBridge is ReentrancyGuard {
     /// @param amount Amount of tokens to bridge.
     function lock(address token, address recipient, uint256 amount) external nonReentrant {
         require(amount > 0, "Bridge: zero amount");
+        require(tokenMapping[token] != address(0), "Bridge: token not mapped");
 
         // BUG: No chainId in the hash — the same transferId can be replayed on other
         // chains where this bridge is deployed, allowing double-claiming of tokens.
@@ -79,6 +81,7 @@ contract TokenBridge is ReentrancyGuard {
         uint256 amount,
         bytes[] calldata signatures
     ) external nonReentrant {
+        require(tokenMapping[token] != address(0), "Bridge: token not mapped");
         bytes32 messageHash = keccak256(abi.encodePacked(token, recipient, amount));
         bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
 
@@ -104,6 +107,12 @@ contract TokenBridge is ReentrancyGuard {
 
         IERC20(token).safeTransfer(recipient, amount);
         emit TokensClaimed(messageHash, token, recipient, amount);
+    }
+
+    function addTokenMapping(address localToken, address remoteToken) external onlyAdmin {
+        require(localToken != address(0), "Bridge: zero local");
+        require(remoteToken != address(0), "Bridge: zero remote");
+        tokenMapping[localToken] = remoteToken;
     }
 
     function addValidator(address validator) external onlyAdmin {
