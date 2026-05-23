@@ -63,6 +63,18 @@ export function verifySignature(
   }
 }
 
+export function recoverPublicKeyCompressed(message: string, signature: string, recoveryBit: number): string {
+  const msgHash = Buffer.from(keccak256(message), "hex");
+  const recovered = secp256k1.recoverPubKey(msgHash, signature, recoveryBit);
+  return recovered.encode("hex", true);
+}
+
+export function recoverAddressFromSignature(message: string, signature: string, recoveryBit: number): string {
+  const pubKey = recoverPublicKey(message, signature, recoveryBit);
+  const hash = keccak256(Buffer.from(pubKey, "hex"));
+  return "0x" + hash.slice(-40);
+}
+
 export function hashPersonalMessage(message: string): string {
   const prefix = `\x19Ethereum Signed Message:\n${message.length}`;
   return keccak256(prefix + message);
