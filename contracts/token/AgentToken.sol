@@ -9,13 +9,12 @@ import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 /// @dev Used as the native token for the OpenAgents platform.
 contract AgentToken is ERC20, ERC20Burnable {
     address public owner;
-    // BUG: No max supply cap — tokens can be minted infinitely, leading to
-    // unbounded inflation and devaluation of existing holders' tokens.
 
     bytes32 public constant PERMIT_TYPEHASH = keccak256(
         "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
     );
-    bytes32 public immutable DOMAIN_SEPARATOR;
+    bytes32 public cachedDomainSeparator;
+    uint256 public cachedChainId;
     mapping(address => uint256) public nonces;
 
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
@@ -27,7 +26,19 @@ contract AgentToken is ERC20, ERC20Burnable {
     ) ERC20(name_, symbol_) {
         owner = msg.sender;
         _mint(msg.sender, initialSupply);
-        DOMAIN_SEPARATOR = keccak256(abi.encode(
+        cachedChainId = block.chainid;
+        cachedDomainSeparator = _buildDomainSeparator(name_);
+    }
+
+    function DOMAIN_SEPARATOR() public view returns (bytes32) {
+        if (block.chainid == cachedChainId) {
+            return cachedDomainSeparator;
+        }
+        return _buildDomainSeparator(name());
+    }
+
+    function _buildDomainSeparator(string memory name_) internal view returns (bytes32) {
+        return keccak256(abi.encode(
             keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
             keccak256(bytes(name_)),
             keccak256(bytes("1")),
@@ -82,7 +93,7 @@ contract AgentToken is ERC20, ERC20Burnable {
             deadline
         ));
 
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR(), structHash));
         address recoveredAddress = ecrecover(digest, v, r, s);
         require(recoveredAddress != address(0) && recoveredAddress == _owner, "AgentToken: invalid signature");
 
