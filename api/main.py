@@ -3,6 +3,21 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+from fastapi.openapi.utils import get_openapi
+
+security_schemes = {
+    "JWTBearer": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"},
+    "APIKeyHeader": {"type": "apiKey", "in": "header", "name": "X-API-Key"},
+}
+
+
+def custom_openapi():
+    if app.openapi_schema: return app.openapi_schema
+    s = get_openapi(title=app.title, version=app.version, description=app.description, routes=app.routes)
+    s["components"]["securitySchemes"] = security_schemes
+    app.openapi_schema = s
+    return app.openapi_schema
+
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
