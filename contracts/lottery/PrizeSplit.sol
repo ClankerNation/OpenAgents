@@ -66,15 +66,13 @@ contract PrizeSplit {
         require(round.finalized, "Not finalized");
         require(round.shares[msg.sender] > 0, "No share");
         require(!round.claimed[msg.sender], "Already claimed");
-
         uint256 amount = round.shares[msg.sender];
-
-        (bool sent, ) = msg.sender.call{value: amount}("");
-        require(sent, "Transfer failed");
-
-        // State updated after external call — reentrancy window
         round.claimed[msg.sender] = true;
-
+        (bool sent, ) = msg.sender.call{value: amount}("");
+        if (!sent) {
+            round.claimed[msg.sender] = false;
+            revert("Transfer failed");
+        }
         emit PrizeClaimed(msg.sender, amount, _roundId);
     }
 
