@@ -18,12 +18,17 @@ contract LendingPool {
     IPriceFeed public oracle;
     IERC20 public collateralToken;
     IERC20 public borrowToken;
+    address public owner;
 
     // BUG: Liquidation threshold hardcoded to 150% (1.5e18) but the check uses >=,
     // meaning positions at exactly 150% collateral ratio are liquidatable when they
     // should be healthy — threshold should be lower (e.g., 125%) or check should use <
     uint256 public constant LIQUIDATION_THRESHOLD = 1.5e18; // 150%
     uint256 public constant PRECISION = 1e18;
+    uint256 public constant MAX_UTILIZATION = 95; // 95%
+    uint256 public constant USER_CAP_DENOMINATOR = 4; // 25%
+
+    uint256 public maxBorrowPerAsset = type(uint256).max;
 
     struct Position {
         uint256 collateralAmount;
@@ -34,12 +39,18 @@ contract LendingPool {
     uint256 public totalDeposits;
     uint256 public totalBorrowed;
 
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Not owner");
+        _;
+    }
+
     event Deposited(address indexed user, uint256 amount);
     event Borrowed(address indexed user, uint256 amount);
     event Repaid(address indexed user, uint256 amount);
     event Liquidated(address indexed user, address indexed liquidator, uint256 debtRepaid);
 
     constructor(address _oracle, address _collateralToken, address _borrowToken) {
+        owner = msg.sender;
         oracle = IPriceFeed(_oracle);
         collateralToken = IERC20(_collateralToken);
         borrowToken = IERC20(_borrowToken);
@@ -55,6 +66,10 @@ contract LendingPool {
 
     function borrow(uint256 amount) external {
         require(amount > 0, "Zero amount");
+        require(amount <= maxBorrowPerAsset, "Exceeds asset cap");
+        require(positions[msg.sender].borrowedAmount + amount <= totalDeposits / USER_CAP_DENOMINATOR, "Exceeds user cap");
+        require((totalBorrowed + amount) * 100 <= totalDeposits * MAX_UTILIZATION, "Utilization too high");
+
         positions[msg.sender].borrowedAmount += amount;
         totalBorrowed += amount;
 
@@ -106,6 +121,10 @@ contract LendingPool {
         uint256 borrowValue = (pos.borrowedAmount * borrowPrice) / PRECISION;
 
         return collateralValue >= (borrowValue * LIQUIDATION_THRESHOLD) / PRECISION;
+    }
+
+    function setMaxBorrowPerAsset(uint256 _max) external onlyOwner {
+        maxBorrowPerAsset = _max;
     }
 
     function getPosition(address user) external view returns (uint256 collateral, uint256 debt) {
