@@ -17,6 +17,7 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
     struct Strategy {
         address target;
         uint256 allocated;
+        uint256 maxAllocationBps;
         bool active;
     }
 
@@ -31,6 +32,7 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
     event Withdraw(address indexed user, uint256 assets, uint256 sharesBurned);
     event StrategyAdded(uint256 indexed strategyId, address target);
     event StrategyAllocated(uint256 indexed strategyId, uint256 amount);
+    event Rebalanced(uint256[] allocations);
 
     constructor(address _asset) Ownable(msg.sender) {
         asset = IERC20(_asset);
@@ -83,32 +85,70 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
     /// @param target Address of the strategy contract.
     // BUG: Strategy target can be zero address — allocating funds to address(0)
     // would burn them permanently via the external call.
-    function addStrategy(address target) external onlyOwner {
+    function addStrategy(address target, uint256 maxAllocationBps) external onlyOwner {
+        require(target != address(0), "Vault: zero target");
+        require(maxAllocationBps <= 10000, "Vault: bps too high");
         strategies.push(Strategy({
             target: target,
             allocated: 0,
+            maxAllocationBps: maxAllocationBps,
             active: true
         }));
         emit StrategyAdded(strategies.length - 1, target);
     }
 
-    /// @notice Allocate vault funds to a strategy.
-    /// @param strategyId Index of the strategy.
-    /// @param amount Amount to allocate.
+    function setMaxAllocation(uint256 strategyId, uint256 maxAllocationBps) external onlyOwner {
+        require(maxAllocationBps <= 10000, "Vault: bps too high");
+        strategies[strategyId].maxAllocationBps = maxAllocationBps;
+    }
+
     function allocate(uint256 strategyId, uint256 amount) external onlyOwner {
         Strategy storage s = strategies[strategyId];
         require(s.active, "Vault: strategy inactive");
         require(asset.balanceOf(address(this)) >= amount, "Vault: insufficient balance");
 
-        s.allocated += amount;
+        uint256 newAllocation = s.allocated + amount;
+        uint256 totalAllocated = _totalAllocated() + amount;
+        require(newAllocation * 10000 <= totalAllocated * s.maxAllocationBps / 100, "Vault: exceeds max allocation");
+
+        s.allocated = newAllocation;
         asset.safeTransfer(s.target, amount);
         emit StrategyAllocated(strategyId, amount);
     }
 
-    /// @notice Deactivate a strategy.
-    /// @param strategyId Index of the strategy.
     function deactivateStrategy(uint256 strategyId) external onlyOwner {
         strategies[strategyId].active = false;
+    }
+
+    function rebalance() external onlyOwner {
+        uint256 balance = asset.balanceOf(address(this));
+        uint256 totalToAllocate = balance;
+        uint256[] memory allocs = new uint256[](strategies.length);
+        uint256 totalBps = 0;
+        for (uint256 i = 0; i < strategies.length; i++) {
+            if (strategies[i].active) {
+                totalBps += strategies[i].maxAllocationBps;
+            }
+        }
+        for (uint256 i = 0; i < strategies.length; i++) {
+            if (strategies[i].active && totalBps > 0) {
+                uint256 amount = totalToAllocate * strategies[i].maxAllocationBps / totalBps;
+                if (amount > 0) {
+                    strategies[i].allocated += amount;
+                    asset.safeTransfer(strategies[i].target, amount);
+                }
+                allocs[i] = strategies[i].allocated;
+            }
+        }
+        emit Rebalanced(allocs);
+    }
+
+    function _totalAllocated() internal view returns (uint256) {
+        uint256 total = 0;
+        for (uint256 i = 0; i < strategies.length; i++) {
+            total += strategies[i].allocated;
+        }
+        return total;
     }
 
     /// @notice Total assets under management (vault balance + allocated to strategies).
