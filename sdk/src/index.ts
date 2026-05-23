@@ -1,4 +1,5 @@
 import { ethers } from "ethers";
+import { EventEmitter } from "events";
 
 export interface AgentConfig {
   name: string;
@@ -60,7 +61,7 @@ export class OpenAgentsSDK {
     await tx.wait();
   }
 
-  async getOpenTasks(): Promise<any[]> {
+  async getOpenTasks(offset: number = 0, limit: number = 50): Promise<any[]> {
     const router = new ethers.Contract(
       this.config.routerAddress,
       [
@@ -71,21 +72,74 @@ export class OpenAgentsSDK {
     );
 
     const count = await router.taskCount();
-    const openTasks = [];
+    const openTasks: any[] = [];
+    const end = Math.min(offset + limit, Number(count));
+    const batchSize = 10;
 
-    for (let i = 0; i < count; i++) {
-      const task = await router.tasks(i);
-      if (task[5] === 0) {
-        openTasks.push({
-          id: i,
-          creator: task[0],
-          description: task[2],
-          reward: task[3],
-          deadline: task[4],
-        });
+    for (let start = offset; start < end; start += batchSize) {
+      const batchEnd = Math.min(start + batchSize, end);
+      const batch = [];
+      for (let i = start; i < batchEnd; i++) {
+        batch.push(router.tasks(i));
+      }
+      const results = await Promise.all(batch);
+      for (let j = 0; j < results.length; j++) {
+        const task = results[j];
+        if (task[5] === 0) {
+          openTasks.push({
+            id: start + j,
+            creator: task[0],
+            description: task[2],
+            reward: task[3],
+            deadline: task[4],
+          });
+        }
       }
     }
 
     return openTasks;
+  }
+
+  async subscribeToEvents(
+    contractAddress: string,
+    abi: string[],
+    eventName: string,
+    callback: (...args: unknown[]) => void
+  ): Promise<ethers.Contract> {
+    const contract = new ethers.Contract(contractAddress, abi, this.provider);
+    contract.on(eventName, callback);
+    return contract;
+  }
+
+  async decodeEventLog(
+    abi: string[],
+    data: string,
+    topics: string[]
+  ): Promise<ethers.LogDescription | null> {
+    try {
+      const iface = new ethers.Interface(abi);
+      return iface.parseLog({ data, topics });
+    } catch {
+      return null;
+    }
+  }
+
+  async getContractEvents(
+    contractAddress: string,
+    abi: string[],
+    eventName: string,
+    fromBlock: number,
+    toBlock: number = fromBlock
+  ): Promise<ethers.LogDescription[]> {
+    const contract = new ethers.Contract(contractAddress, abi, this.provider);
+    const filter = contract.filters[eventName]();
+    const logs = await this.provider.getLogs({
+      address: contractAddress,
+      topic: filter?.topic,
+      fromBlock,
+      toBlock,
+    });
+    const iface = new ethers.Interface(abi);
+    return logs.map((log) => iface.parseLog(log)).filter((l): l is ethers.LogDescription => l !== null);
   }
 }
