@@ -1,9 +1,11 @@
 """Agent CRUD endpoints for the OpenAgents platform."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional
 from datetime import datetime
+from urllib.parse import urlparse
+import socket
 
 from ..models.database import get_db, Agent
 from ..middleware.auth import get_current_user
@@ -12,10 +14,32 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 
 
 class AgentCreate(BaseModel):
-    name: str  # BUG: No validation — name can contain SQL injection, XSS, or be empty
+    name: str
+    endpoint: Optional[str] = None
     description: Optional[str] = None
     model_type: str = "gpt-4"
     config: Optional[dict] = None
+
+    @field_validator("endpoint")
+    @classmethod
+    def validate_endpoint(cls, v):
+        if v is None:
+            return v
+        parsed = urlparse(v)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError("Endpoint must be http or https URL")
+        try:
+            host = parsed.hostname
+            if not host:
+                raise ValueError("Invalid endpoint URL")
+            addr = socket.getaddrinfo(host, 80)[0][4][0]
+            if addr.startswith("10.") or addr.startswith("192.168.") or addr.startswith("127.") or addr == "::1":
+                raise ValueError("Private/internal IPs not allowed")
+        except ValueError:
+            raise
+        except Exception:
+            raise ValueError("Endpoint URL is not reachable")
+        return v
 
 
 class AgentUpdate(BaseModel):
