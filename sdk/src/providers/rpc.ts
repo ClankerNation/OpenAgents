@@ -82,9 +82,13 @@ export class RpcProvider {
     });
 
     const responses: JsonRpcResponse[] = await res.json();
-    return responses
-      .sort((a, b) => a.id - b.id)
-      .map((r) => r.result);
+    const byId = new Map(responses.map((r) => [r.id, r]));
+    return requests.map((req) => {
+      const resp = byId.get(req.id);
+      if (!resp) throw new Error(`No response for request ${req.id}`);
+      if (resp.error) throw new Error(`RPC error ${resp.error.code}: ${resp.error.message}`);
+      return resp.result;
+    });
   }
 
   async getBlockNumber(): Promise<number> {
