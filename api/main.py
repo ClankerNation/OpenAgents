@@ -102,6 +102,37 @@ async def leaderboard(limit: int = Query(20, le=50)):
     return entries[:limit]
 
 
+
+
+class AuditLogEntry(BaseModel):
+    id: int
+    action: str
+    actor: str
+    target: str
+    before_value: Optional[str] = None
+    after_value: Optional[str] = None
+    timestamp: datetime
+    ip: str
+
+
+audit_logs: list = []
+
+
+@app.get("/audit-log")
+async def get_audit_logs(
+    action: Optional[str] = Query(None),
+    actor: Optional[str] = Query(None),
+    limit: int = Query(50, le=200),
+    offset: int = Query(0),
+):
+    results = audit_logs
+    if action:
+        results = [r for r in results if r["action"] == action]
+    if actor:
+        results = [r for r in results if r["actor"] == actor]
+    return results[offset : offset + limit]
+
+
 @app.get("/health")
 async def health():
     return {
