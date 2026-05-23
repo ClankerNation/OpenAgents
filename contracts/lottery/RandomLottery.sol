@@ -9,6 +9,9 @@ contract RandomLottery {
     uint256 public ticketPrice;
     uint256 public roundEnd;
     uint256 public currentRound;
+    uint256 public minParticipants = 1;
+    mapping(uint256 => bool) public roundCancelled;
+    mapping(address => bool) public hasRefunded;
 
     address[] public players;
     mapping(uint256 => address) public roundWinners;
@@ -16,6 +19,8 @@ contract RandomLottery {
     event TicketPurchased(address indexed player, uint256 round);
     event RoundStarted(uint256 indexed round, uint256 endTime);
     event WinnerSelected(address indexed winner, uint256 prize, uint256 round);
+    event LotteryCancelled(uint256 indexed round);
+    event Refunded(address indexed player, uint256 amount, uint256 round);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "Not owner");
@@ -40,6 +45,22 @@ contract RandomLottery {
         require(msg.value == ticketPrice, "Wrong ticket price");
         players.push(msg.sender);
         emit TicketPurchased(msg.sender, currentRound);
+    }
+
+    function cancelLottery() external onlyOwner {
+        require(block.timestamp >= roundEnd, "Round not ended");
+        require(players.length < minParticipants, "Minimum participants met");
+        roundCancelled[currentRound] = true;
+        emit LotteryCancelled(currentRound);
+    }
+
+    function refund() external {
+        require(roundCancelled[currentRound], "Lottery not cancelled");
+        require(!hasRefunded[msg.sender], "Already refunded");
+        hasRefunded[msg.sender] = true;
+        (bool sent, ) = msg.sender.call{value: ticketPrice}("");
+        require(sent, "Refund failed");
+        emit Refunded(msg.sender, ticketPrice, currentRound);
     }
 
     function drawWinner() external onlyOwner {
