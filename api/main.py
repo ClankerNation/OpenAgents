@@ -1,4 +1,6 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -110,3 +112,26 @@ async def health():
         "tasks_indexed": len(tasks_cache),
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+class ErrorResponse(BaseModel):
+    code: str
+    message: str
+    details: dict = {}
+
+ERROR_CODES = {
+    "VALIDATION_ERROR": "VALIDATION_ERROR",
+    "NOT_FOUND": "NOT_FOUND",
+    "AUTH_FAILED": "AUTH_FAILED",
+    "RATE_LIMITED": "RATE_LIMITED",
+    "INTERNAL_ERROR": "INTERNAL_ERROR",
+}
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(status_code=422, content={"code": ERROR_CODES["VALIDATION_ERROR"], "message": "Validation failed", "details": {"errors": exc.errors()}, "request_id": getattr(request.state, "request_id", "")})
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    code_map = {404: ERROR_CODES["NOT_FOUND"], 401: ERROR_CODES["AUTH_FAILED"], 403: ERROR_CODES["AUTH_FAILED"], 429: ERROR_CODES["RATE_LIMITED"]}
+    return JSONResponse(status_code=exc.status_code, content={"code": code_map.get(exc.status_code, ERROR_CODES["INTERNAL_ERROR"]), "message": exc.detail, "details": {}, "request_id": getattr(request.state, "request_id", "")})
+
