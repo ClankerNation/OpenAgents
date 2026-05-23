@@ -16,6 +16,7 @@ contract AgentRegistry is Ownable {
 
     mapping(bytes32 => Agent) public agents;
     mapping(address => bytes32[]) public ownerAgents;
+    uint256 public agentCounter;
     bytes32[] public agentIds;
 
     uint256 public registrationFee;
@@ -34,7 +35,8 @@ contract AgentRegistry is Ownable {
         require(msg.value >= registrationFee, "Insufficient fee");
         require(bytes(name).length > 0 && bytes(name).length <= 64, "Invalid name");
 
-        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp));
+        agentCounter++;
+        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp, agentCounter));
 
         require(agents[agentId].registeredAt == 0, "Agent exists");
 
