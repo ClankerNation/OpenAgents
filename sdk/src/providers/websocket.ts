@@ -167,7 +167,11 @@ export class WebSocketProvider extends EventEmitter {
         if (data.id && this.pendingRequests.has(data.id)) {
           const pending = this.pendingRequests.get(data.id)!;
           this.pendingRequests.delete(data.id);
-          pending.resolve(data.result);
+          if (data.error) {
+            pending.reject(new Error(data.error.message));
+          } else {
+            pending.resolve(data.result);
+          }
         } else if (data.method && data.params) {
           const subscriptionId = data.params.subscription;
           const callback = this.subscriptions.get(subscriptionId);
