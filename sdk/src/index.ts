@@ -7,6 +7,11 @@ export interface AgentConfig {
   rpcUrl: string;
   registryAddress: string;
   routerAddress: string;
+  subscribeToEvents(contract: ethers.Contract, eventName: string, callback: (...args: any[]) => void, filter?: Record<string, any>): ethers.Contract {
+    const eventFilter = filter ? contract.filters[eventName](...Object.values(filter)) : contract.filters[eventName]();
+    contract.on(eventFilter, (...args) => callback(...args));
+    return contract;
+  }
 }
 
 export class OpenAgentsSDK {
