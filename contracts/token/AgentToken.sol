@@ -15,7 +15,7 @@ contract AgentToken is ERC20, ERC20Burnable {
     bytes32 public constant PERMIT_TYPEHASH = keccak256(
         "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
     );
-    bytes32 public immutable DOMAIN_SEPARATOR;
+    bytes32 public DOMAIN_SEPARATOR;
     mapping(address => uint256) public nonces;
 
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
