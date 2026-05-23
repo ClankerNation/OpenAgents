@@ -15,6 +15,12 @@ interface IERC20 {
 /// @notice Collateralized lending pool supporting deposit, borrow, repay, and liquidation
 /// @dev Uses an external price feed oracle for collateral valuation
 contract LendingPool {
+    address public owner;
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Not owner");
+        _;
+    }
     IPriceFeed public oracle;
     IERC20 public collateralToken;
     IERC20 public borrowToken;
@@ -24,6 +30,10 @@ contract LendingPool {
     // should be healthy — threshold should be lower (e.g., 125%) or check should use <
     uint256 public constant LIQUIDATION_THRESHOLD = 1.5e18; // 150%
     uint256 public constant PRECISION = 1e18;
+    uint256 public constant MAX_USER_SHARE = 2500; // 25% in basis points
+    uint256 public constant MAX_UTILIZATION = 9500; // 95% in basis points
+
+    uint256 public maxBorrowPerAsset;
 
     struct Position {
         uint256 collateralAmount;
@@ -40,9 +50,11 @@ contract LendingPool {
     event Liquidated(address indexed user, address indexed liquidator, uint256 debtRepaid);
 
     constructor(address _oracle, address _collateralToken, address _borrowToken) {
+        owner = msg.sender;
         oracle = IPriceFeed(_oracle);
         collateralToken = IERC20(_collateralToken);
         borrowToken = IERC20(_borrowToken);
+        maxBorrowPerAsset = 1_000_000e18;
     }
 
     function deposit(uint256 amount) external {
@@ -55,7 +67,16 @@ contract LendingPool {
 
     function borrow(uint256 amount) external {
         require(amount > 0, "Zero amount");
-        positions[msg.sender].borrowedAmount += amount;
+        require(amount <= maxBorrowPerAsset, "Exceeds asset cap");
+        require(totalDeposits > 0, "No deposits");
+
+        uint256 userNewBorrow = positions[msg.sender].borrowedAmount + amount;
+        require(userNewBorrow <= (totalBorrowed + amount) * MAX_USER_SHARE / 10000, "Exceeds user cap");
+
+        uint256 newUtilization = (totalBorrowed + amount) * PRECISION / totalDeposits;
+        require(newUtilization <= MAX_UTILIZATION * PRECISION / 10000, "Utilization too high");
+
+        positions[msg.sender].borrowedAmount = userNewBorrow;
         totalBorrowed += amount;
 
         require(_isHealthy(msg.sender), "Undercollateralized");
@@ -106,6 +127,15 @@ contract LendingPool {
         uint256 borrowValue = (pos.borrowedAmount * borrowPrice) / PRECISION;
 
         return collateralValue >= (borrowValue * LIQUIDATION_THRESHOLD) / PRECISION;
+    }
+
+    function setMaxBorrowPerAsset(uint256 _cap) external onlyOwner {
+        maxBorrowPerAsset = _cap;
+    }
+
+    function transferOwnership(address newOwner) external onlyOwner {
+        require(newOwner != address(0), "Zero address");
+        owner = newOwner;
     }
 
     function getPosition(address user) external view returns (uint256 collateral, uint256 debt) {
