@@ -7,6 +7,12 @@ export interface AgentConfig {
   rpcUrl: string;
   registryAddress: string;
   routerAddress: string;
+  async deployContract(abi: any[], bytecode: string, args: any[] = [], confirmations: number = 1): Promise<{ address: string; txHash: string; gasUsed: bigint }> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const contract = await factory.deploy(...args);
+    const receipt = await contract.deploymentTransaction().wait(confirmations);
+    return { address: await contract.getAddress(), txHash: receipt.hash, gasUsed: receipt.gasUsed };
+  }
 }
 
 export class OpenAgentsSDK {
