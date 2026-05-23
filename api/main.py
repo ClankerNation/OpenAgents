@@ -1,13 +1,61 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Any
 from datetime import datetime
+
+ERROR_CODES = {
+    400: "VALIDATION_ERROR",
+    401: "AUTH_FAILED",
+    403: "FORBIDDEN",
+    404: "NOT_FOUND",
+    429: "RATE_LIMITED",
+    500: "INTERNAL_ERROR",
+}
+
+
+class ErrorResponse(BaseModel):
+    code: str
+    message: str
+    details: Optional[Any] = None
+    request_id: Optional[str] = None
+
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    request_id = request.headers.get("X-Request-ID", "unknown")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=ErrorResponse(
+            code=ERROR_CODES.get(exc.status_code, "UNKNOWN"),
+            message=exc.detail,
+            request_id=request_id,
+        ).model_dump(),
+    )
+
+
+@app.middleware("http")
+async def error_middleware(request: Request, call_next):
+    try:
+        response = await call_next(request)
+        return response
+    except Exception as e:
+        request_id = request.headers.get("X-Request-ID", "unknown")
+        return JSONResponse(
+            status_code=500,
+            content=ErrorResponse(
+                code="INTERNAL_ERROR",
+                message=str(e),
+                request_id=request_id,
+            ).model_dump(),
+        )
 
 
 class AgentResponse(BaseModel):
