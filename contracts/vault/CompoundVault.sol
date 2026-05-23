@@ -11,6 +11,12 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 /// @dev Deposits into an underlying strategy, harvests rewards, sells for the base
 ///      asset, and re-deposits to compound returns. Charges a performance fee.
 contract CompoundVault is Ownable, ReentrancyGuard {
+    address public pendingOwner;
+    uint256 public ownershipTransferTimestamp;
+    uint256 public constant OWNERSHIP_DELAY = 2 days;
+    event OwnershipTransferStarted(address indexed currentOwner, address indexed pendingOwner);
+    event OwnershipTransferCanceled(address indexed currentOwner);
+
     using SafeERC20 for IERC20;
 
     IERC20 public immutable baseToken;
@@ -146,5 +152,23 @@ contract CompoundVault is Ownable, ReentrancyGuard {
     function pricePerShare() external view returns (uint256) {
         if (totalShares == 0) return 1e18;
         return (totalDeposited * 1e18) / totalShares;
+    }
+    function transferOwnership(address newOwner) public override onlyOwner {
+        require(newOwner != address(0), "Ownable: new owner is zero address");
+        pendingOwner = newOwner;
+        ownershipTransferTimestamp = block.timestamp + OWNERSHIP_DELAY;
+        emit OwnershipTransferStarted(owner(), newOwner);
+    }
+    function acceptOwnership() external {
+        require(msg.sender == pendingOwner, "Ownable: caller is not pending owner");
+        require(block.timestamp >= ownershipTransferTimestamp, "Ownable: delay not passed");
+        _transferOwnership(pendingOwner);
+        pendingOwner = address(0);
+        ownershipTransferTimestamp = 0;
+    }
+    function cancelOwnershipTransfer() external onlyOwner {
+        pendingOwner = address(0);
+        ownershipTransferTimestamp = 0;
+        emit OwnershipTransferCanceled(owner());
     }
 }

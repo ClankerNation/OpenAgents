@@ -11,6 +11,12 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 ///         each earning a share of a global reward token emission.
 /// @dev Each pool has an allocation weight. Rewards are distributed proportionally.
 contract MultiTokenStaking is Ownable, ReentrancyGuard {
+    address public pendingOwner;
+    uint256 public ownershipTransferTimestamp;
+    uint256 public constant OWNERSHIP_DELAY = 2 days;
+    event OwnershipTransferStarted(address indexed currentOwner, address indexed pendingOwner);
+    event OwnershipTransferCanceled(address indexed currentOwner);
+
     using SafeERC20 for IERC20;
 
     struct PoolInfo {
@@ -143,5 +149,23 @@ contract MultiTokenStaking is Ownable, ReentrancyGuard {
             accRewardPerShare += reward * 1e12 / pool.totalStaked;
         }
         return user.amount * accRewardPerShare / 1e12 - user.rewardDebt;
+    }
+    function transferOwnership(address newOwner) public override onlyOwner {
+        require(newOwner != address(0), "Ownable: new owner is zero address");
+        pendingOwner = newOwner;
+        ownershipTransferTimestamp = block.timestamp + OWNERSHIP_DELAY;
+        emit OwnershipTransferStarted(owner(), newOwner);
+    }
+    function acceptOwnership() external {
+        require(msg.sender == pendingOwner, "Ownable: caller is not pending owner");
+        require(block.timestamp >= ownershipTransferTimestamp, "Ownable: delay not passed");
+        _transferOwnership(pendingOwner);
+        pendingOwner = address(0);
+        ownershipTransferTimestamp = 0;
+    }
+    function cancelOwnershipTransfer() external onlyOwner {
+        pendingOwner = address(0);
+        ownershipTransferTimestamp = 0;
+        emit OwnershipTransferCanceled(owner());
     }
 }

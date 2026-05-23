@@ -12,6 +12,12 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 /// @dev Implements a simplified vault pattern. Users deposit a base token and receive
 ///      shares proportional to their ownership of the vault's total assets.
 contract YieldAggregator is Ownable, ReentrancyGuard {
+    address public pendingOwner;
+    uint256 public ownershipTransferTimestamp;
+    uint256 public constant OWNERSHIP_DELAY = 2 days;
+    event OwnershipTransferStarted(address indexed currentOwner, address indexed pendingOwner);
+    event OwnershipTransferCanceled(address indexed currentOwner);
+
     using SafeERC20 for IERC20;
 
     struct Strategy {
@@ -126,5 +132,23 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
     function previewDeposit(uint256 amount) external view returns (uint256) {
         if (totalShares == 0) return amount;
         return (amount * totalShares) / totalAssets();
+    }
+    function transferOwnership(address newOwner) public override onlyOwner {
+        require(newOwner != address(0), "Ownable: new owner is zero address");
+        pendingOwner = newOwner;
+        ownershipTransferTimestamp = block.timestamp + OWNERSHIP_DELAY;
+        emit OwnershipTransferStarted(owner(), newOwner);
+    }
+    function acceptOwnership() external {
+        require(msg.sender == pendingOwner, "Ownable: caller is not pending owner");
+        require(block.timestamp >= ownershipTransferTimestamp, "Ownable: delay not passed");
+        _transferOwnership(pendingOwner);
+        pendingOwner = address(0);
+        ownershipTransferTimestamp = 0;
+    }
+    function cancelOwnershipTransfer() external onlyOwner {
+        pendingOwner = address(0);
+        ownershipTransferTimestamp = 0;
+        emit OwnershipTransferCanceled(owner());
     }
 }

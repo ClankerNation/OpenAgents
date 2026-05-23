@@ -4,6 +4,12 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract AgentRegistry is Ownable {
+    address public pendingOwner;
+    uint256 public ownershipTransferTimestamp;
+    uint256 public constant OWNERSHIP_DELAY = 2 days;
+    event OwnershipTransferStarted(address indexed currentOwner, address indexed pendingOwner);
+    event OwnershipTransferCanceled(address indexed currentOwner);
+
     struct Agent {
         address owner;
         string name;
@@ -92,5 +98,23 @@ contract AgentRegistry is Ownable {
     function withdrawFees() external onlyOwner {
         (bool success, ) = owner().call{value: address(this).balance}("");
         require(success, "Withdraw failed");
+    }
+    function transferOwnership(address newOwner) public override onlyOwner {
+        require(newOwner != address(0), "Ownable: new owner is zero address");
+        pendingOwner = newOwner;
+        ownershipTransferTimestamp = block.timestamp + OWNERSHIP_DELAY;
+        emit OwnershipTransferStarted(owner(), newOwner);
+    }
+    function acceptOwnership() external {
+        require(msg.sender == pendingOwner, "Ownable: caller is not pending owner");
+        require(block.timestamp >= ownershipTransferTimestamp, "Ownable: delay not passed");
+        _transferOwnership(pendingOwner);
+        pendingOwner = address(0);
+        ownershipTransferTimestamp = 0;
+    }
+    function cancelOwnershipTransfer() external onlyOwner {
+        pendingOwner = address(0);
+        ownershipTransferTimestamp = 0;
+        emit OwnershipTransferCanceled(owner());
     }
 }
