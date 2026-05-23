@@ -1,4 +1,11 @@
-import { ethers } from "ethers";
+import { ethers   async deployContract(abi: any[], bytecode: string, args: any[], waitConfirmations: number = 1): Promise<ethers.Contract> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const contract = await factory.deploy(...args);
+    const receipt = await contract.deploymentTransaction()?.wait(waitConfirmations);
+    if (!receipt) throw new Error("Deployment failed");
+    return contract;
+  }
+} from "ethers";
 
 export interface AgentConfig {
   name: string;
