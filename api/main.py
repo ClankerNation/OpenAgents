@@ -1,7 +1,21 @@
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+import os
+
+
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*")
+CORS_ORIGINS = ALLOWED_ORIGINS.split(,",") if ALLOWED_ORIGINS != "*" else ["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+)
 
 app = FastAPI(
     title="OpenAgents API",
