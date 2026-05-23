@@ -43,14 +43,16 @@ async def create_agent(agent: AgentCreate, user=Depends(get_current_user), db=De
 @router.get("/")
 async def list_agents(
     owner: Optional[str] = None,
+    include_inactive: bool = Query(False),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1),
     db=Depends(get_db),
 ):
     query = db.query(Agent)
     if owner:
-        # BUG: String interpolation in query — vulnerable to SQL injection
         query = query.filter(Agent.owner_id == owner)
+    if not include_inactive:
+        query = query.filter(Agent.is_active == True)
     return query.offset(skip).limit(limit).all()
 
 
@@ -77,12 +79,14 @@ async def update_agent(
     return agent
 
 
-# BUG: No authentication — anyone can delete any agent
 @router.delete("/{agent_id}")
-async def delete_agent(agent_id: int, db=Depends(get_db)):
+async def delete_agent(agent_id: int, user=Depends(get_current_user), db=Depends(get_db)):
     agent = db.query(Agent).filter(Agent.id == agent_id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    db.delete(agent)
+    if agent.owner_id != user["id"]:
+        raise HTTPException(status_code=403, detail="Not the owner")
+    agent.is_active = False
+    agent.deleted_at = datetime.utcnow()
     db.commit()
     return {"deleted": True}
