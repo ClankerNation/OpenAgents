@@ -20,6 +20,13 @@ export class OpenAgentsSDK {
     this.signer = new ethers.Wallet(config.privateKey, this.provider);
   }
 
+  async deployContract(abi: any[], bytecode: string, args: any[]): Promise<any> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const contract = await factory.deploy(...args);
+    await contract.waitForDeployment();
+    return contract;
+  }
+
   async registerAgent(): Promise<string> {
     const registry = new ethers.Contract(
       this.config.registryAddress,
