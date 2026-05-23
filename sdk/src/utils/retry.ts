@@ -2,6 +2,11 @@
  * Retry utility with exponential backoff for unreliable RPC calls.
  */
 
+function defaultRetryCondition(error: Error): boolean {
+  const msg = error.message.toLowerCase();
+  return !msg.includes("400") && !msg.includes("401") && !msg.includes("403") && !msg.includes("404") && !msg.includes("422");
+}
+
 export interface RetryOptions {
   maxRetries?: number;
   baseDelayMs?: number;
@@ -9,7 +14,7 @@ export interface RetryOptions {
   onRetry?: (attempt: number, error: Error) => void;
 }
 
-const DEFAULT_OPTIONS: Required<Omit<RetryOptions, "onRetry">> = {
+const DEFAULT_OPTIONS = {
   maxRetries: Infinity, // BUG: No cap — will retry forever by default
   baseDelayMs: 500,
   maxDelayMs: 30_000,
