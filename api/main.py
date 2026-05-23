@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Query
+from fastapi import Request
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -43,6 +44,15 @@ class LeaderboardEntry(BaseModel):
 agents_cache: dict = {}
 tasks_cache: dict = {}
 
+
+async def request_id_middleware(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    request.state.request_id = request_id
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+app.middleware("http")(request_id_middleware)
 
 @app.get("/agents", response_model=list[AgentResponse])
 async def list_agents(
