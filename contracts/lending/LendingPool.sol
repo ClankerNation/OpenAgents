@@ -11,6 +11,16 @@ interface IERC20 {
     function balanceOf(address account) external view returns (uint256);
 }
 
+interface IFlashLoanReceiver {
+    function executeOperation(
+        address token,
+        uint256 amount,
+        uint256 fee,
+        address initiator,
+        bytes calldata params
+    ) external returns (bool);
+}
+
 /// @title LendingPool
 /// @notice Collateralized lending pool supporting deposit, borrow, repay, and liquidation
 /// @dev Uses an external price feed oracle for collateral valuation
@@ -75,6 +85,36 @@ contract LendingPool {
     // BUG: No bad debt handling — if collateral value drops below debt value,
     // liquidator repays debt but received collateral is worth less, creating a
     // protocol loss that is never socialized or covered by a reserve
+    uint256 public constant FLASH_LOAN_FEE_BPS = 9;
+
+    function flashLiquidate(address user, bytes calldata params) external {
+        require(!_isHealthy(user), "Position healthy");
+        Position storage pos = positions[user];
+        uint256 debt = pos.borrowedAmount;
+        uint256 collateral = pos.collateralAmount;
+        uint256 fee = debt * FLASH_LOAN_FEE_BPS / 10000;
+
+        require(borrowToken.transfer(msg.sender, debt), "Flash loan transfer failed");
+
+        require(
+            IFlashLoanReceiver(msg.sender).executeOperation(
+                address(borrowToken), debt, fee, address(this), params
+            ),
+            "Flash loan callback failed"
+        );
+
+        uint256 repayment = debt + fee;
+        require(borrowToken.transferFrom(msg.sender, address(this), repayment), "Repayment failed");
+
+        pos.borrowedAmount = 0;
+        pos.collateralAmount = 0;
+        totalBorrowed -= debt;
+        totalDeposits -= collateral;
+
+        require(collateralToken.transfer(msg.sender, collateral), "Collateral transfer failed");
+        emit Liquidated(user, msg.sender, debt);
+    }
+
     function liquidate(address user) external {
         require(!_isHealthy(user), "Position healthy");
 
