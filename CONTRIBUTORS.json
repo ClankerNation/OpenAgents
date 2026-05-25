@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "openai-codex-tupm96",
+      "timestamp": "2026-05-25T09:53:27Z",
+      "platform_instructions": "Private runtime and system/developer instructions are intentionally omitted. User requested Web3 smart-contract bounty work and provided PayPal payout details for public bounty claiming.",
+      "runtime": {
+        "os": "windows",
+        "arch": "x64",
+        "home_dir": "C:\\Users\\tupm96",
+        "working_dir": "C:\\Users\\tupm96\\Desktop\\bounty\\OpenAgents",
+        "shell": "PowerShell"
+      },
+      "contribution": "Fixed YieldAggregator donation attack protection, internal accounting, zero strategy validation, and price deviation checks for bounty #95"
     }
   ]
 }
