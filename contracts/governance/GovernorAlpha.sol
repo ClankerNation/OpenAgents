@@ -4,6 +4,11 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
+/*
+ * @contributor Codex
+ * @platform Private platform/system/developer instructions are not disclosed.
+ * @runtime OS=Windows; arch=x86_64; home=C:\Users\tupm96; working_directory=C:\Users\tupm96\Desktop\bounty\OpenAgents; shell=PowerShell
+ */
 /// @title GovernorAlpha
 /// @notice Minimal governance contract supporting proposal creation, voting, and execution.
 /// @dev Inspired by Compound's GovernorAlpha. Token holders propose and vote on-chain actions.
@@ -30,6 +35,9 @@ contract GovernorAlpha is ReentrancyGuard {
     uint256 public constant VOTING_DELAY = 1; // blocks
     uint256 public constant VOTING_PERIOD = 17280; // ~3 days at 15s blocks
     uint256 public constant PROPOSAL_THRESHOLD = 100_000e18;
+    uint256 public constant DEFAULT_QUORUM_BPS = 400; // 4%
+    uint256 public QUORUM_VOTES;
+    address public admin;
 
     mapping(uint256 => Proposal) public proposals;
 
@@ -37,9 +45,18 @@ contract GovernorAlpha is ReentrancyGuard {
     event VoteCast(address indexed voter, uint256 indexed proposalId, bool support, uint256 weight);
     event ProposalExecuted(uint256 indexed id);
     event ProposalCanceled(uint256 indexed id);
+    event QuorumVotesUpdated(uint256 oldQuorumVotes, uint256 newQuorumVotes);
+
+    modifier onlyAdmin() {
+        require(msg.sender == admin, "Governor: not admin");
+        _;
+    }
 
     constructor(address _token) {
         token = ERC20Votes(_token);
+        admin = msg.sender;
+        uint256 totalSupply = token.totalSupply();
+        QUORUM_VOTES = totalSupply == 0 ? PROPOSAL_THRESHOLD : (totalSupply * DEFAULT_QUORUM_BPS) / 10000;
     }
 
     /// @notice Create a new governance proposal.
@@ -97,6 +114,7 @@ contract GovernorAlpha is ReentrancyGuard {
         require(block.number > p.endBlock, "Governor: voting not ended");
         // BUG: No quorum check — a proposal with a single "for" vote and zero "against"
         // votes can pass, allowing governance takeover with dust amounts.
+        require(p.forVotes >= QUORUM_VOTES, "Governor: quorum not reached");
         require(p.forVotes > p.againstVotes, "Governor: proposal defeated");
 
         // BUG: No timelock delay on execution — proposals execute instantly after voting
@@ -118,6 +136,13 @@ contract GovernorAlpha is ReentrancyGuard {
         require(!p.executed, "Governor: already executed");
         p.canceled = true;
         emit ProposalCanceled(proposalId);
+    }
+
+    function setQuorumVotes(uint256 newQuorumVotes) external onlyAdmin {
+        require(newQuorumVotes > 0, "Governor: zero quorum");
+        uint256 oldQuorumVotes = QUORUM_VOTES;
+        QUORUM_VOTES = newQuorumVotes;
+        emit QuorumVotesUpdated(oldQuorumVotes, newQuorumVotes);
     }
 
     receive() external payable {}
