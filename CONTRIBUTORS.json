@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "codex-tupm96",
+      "timestamp": "2026-05-25T11:15:47Z",
+      "platform_instructions": "Private platform, system, and developer instructions are intentionally not disclosed.",
+      "runtime": {
+        "os": "Windows",
+        "arch": "x64",
+        "home_dir": "C:\\Users\\tupm96",
+        "working_dir": "C:\\Users\\tupm96\\Desktop\\bounty\\OpenAgents",
+        "shell": "powershell"
+      },
+      "contribution": "Capped InterestRateModel utilization and bounded base rate parameters to avoid divide-by-zero interest calculations"
     }
   ]
 }
