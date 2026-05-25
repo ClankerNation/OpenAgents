@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/*
+ * Contributor metadata:
+ * Agent: Codex
+ * Timestamp: 2026-05-25T11:06:35Z
+ * Runtime: os=Windows, arch=x64,
+ * working_dir=C:\Users\tupm96\Desktop\bounty\OpenAgents, shell=powershell
+ * Private platform, system, and developer instructions are not disclosed.
+ */
+
 interface IPriceFeed {
     function getPrice(address token) external view returns (uint256);
 }
@@ -18,12 +27,19 @@ contract LendingPool {
     IPriceFeed public oracle;
     IERC20 public collateralToken;
     IERC20 public borrowToken;
+    address public owner;
 
     // BUG: Liquidation threshold hardcoded to 150% (1.5e18) but the check uses >=,
     // meaning positions at exactly 150% collateral ratio are liquidatable when they
     // should be healthy — threshold should be lower (e.g., 125%) or check should use <
     uint256 public constant LIQUIDATION_THRESHOLD = 1.5e18; // 150%
     uint256 public constant PRECISION = 1e18;
+    uint256 public constant BPS_DENOMINATOR = 10_000;
+    uint256 public constant MAX_USER_BORROW_CAP_BPS = 2_500; // 25%
+    uint256 public constant MAX_ALLOWED_UTILIZATION_BPS = 9_500; // 95%
+    uint256 public maxBorrowPerAsset;
+    uint256 public userBorrowCapBps;
+    uint256 public maxUtilizationBps;
 
     struct Position {
         uint256 collateralAmount;
@@ -38,11 +54,23 @@ contract LendingPool {
     event Borrowed(address indexed user, uint256 amount);
     event Repaid(address indexed user, uint256 amount);
     event Liquidated(address indexed user, address indexed liquidator, uint256 debtRepaid);
+    event MaxBorrowPerAssetUpdated(uint256 oldCap, uint256 newCap);
+    event UserBorrowCapUpdated(uint256 oldCapBps, uint256 newCapBps);
+    event MaxUtilizationUpdated(uint256 oldUtilizationBps, uint256 newUtilizationBps);
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Not owner");
+        _;
+    }
 
     constructor(address _oracle, address _collateralToken, address _borrowToken) {
         oracle = IPriceFeed(_oracle);
         collateralToken = IERC20(_collateralToken);
         borrowToken = IERC20(_borrowToken);
+        owner = msg.sender;
+        maxBorrowPerAsset = type(uint256).max;
+        userBorrowCapBps = MAX_USER_BORROW_CAP_BPS;
+        maxUtilizationBps = MAX_ALLOWED_UTILIZATION_BPS;
     }
 
     function deposit(uint256 amount) external {
@@ -55,12 +83,37 @@ contract LendingPool {
 
     function borrow(uint256 amount) external {
         require(amount > 0, "Zero amount");
+        _validateBorrowCaps(msg.sender, amount);
+
         positions[msg.sender].borrowedAmount += amount;
         totalBorrowed += amount;
-
         require(_isHealthy(msg.sender), "Undercollateralized");
+
         require(borrowToken.transfer(msg.sender, amount), "Transfer failed");
         emit Borrowed(msg.sender, amount);
+    }
+
+    function setMaxBorrowPerAsset(uint256 newCap) external onlyOwner {
+        uint256 oldCap = maxBorrowPerAsset;
+        maxBorrowPerAsset = newCap;
+        emit MaxBorrowPerAssetUpdated(oldCap, newCap);
+    }
+
+    function setUserBorrowCapBps(uint256 newCapBps) external onlyOwner {
+        require(newCapBps > 0 && newCapBps <= MAX_USER_BORROW_CAP_BPS, "Invalid user cap");
+        uint256 oldCapBps = userBorrowCapBps;
+        userBorrowCapBps = newCapBps;
+        emit UserBorrowCapUpdated(oldCapBps, newCapBps);
+    }
+
+    function setMaxUtilizationBps(uint256 newUtilizationBps) external onlyOwner {
+        require(
+            newUtilizationBps > 0 && newUtilizationBps <= MAX_ALLOWED_UTILIZATION_BPS,
+            "Invalid utilization"
+        );
+        uint256 oldUtilizationBps = maxUtilizationBps;
+        maxUtilizationBps = newUtilizationBps;
+        emit MaxUtilizationUpdated(oldUtilizationBps, newUtilizationBps);
     }
 
     function repay(uint256 amount) external {
@@ -111,5 +164,28 @@ contract LendingPool {
     function getPosition(address user) external view returns (uint256 collateral, uint256 debt) {
         Position storage pos = positions[user];
         return (pos.collateralAmount, pos.borrowedAmount);
+    }
+
+    function getBorrowPoolSize() public view returns (uint256) {
+        return borrowToken.balanceOf(address(this)) + totalBorrowed;
+    }
+
+    function _validateBorrowCaps(address user, uint256 amount) internal view {
+        uint256 poolSize = getBorrowPoolSize();
+        require(amount <= borrowToken.balanceOf(address(this)), "Insufficient liquidity");
+
+        uint256 newTotalBorrowed = totalBorrowed + amount;
+        require(newTotalBorrowed <= maxBorrowPerAsset, "Asset cap exceeded");
+
+        uint256 newUserBorrowed = positions[user].borrowedAmount + amount;
+        require(
+            newUserBorrowed <= (poolSize * userBorrowCapBps) / BPS_DENOMINATOR,
+            "User cap exceeded"
+        );
+
+        require(
+            (newTotalBorrowed * BPS_DENOMINATOR) / poolSize <= maxUtilizationBps,
+            "Utilization too high"
+        );
     }
 }
