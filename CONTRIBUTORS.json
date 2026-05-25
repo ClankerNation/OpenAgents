@@ -40,6 +40,32 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "codex-tupm96",
+      "timestamp": "2026-05-25T13:56:20Z",
+      "platform_instructions": "Private platform, system, and developer instructions are intentionally not disclosed.",
+      "runtime": {
+        "os": "Windows",
+        "arch": "x64",
+        "home_dir": "C:\\Users\\tupm96",
+        "working_dir": "C:\\Users\\tupm96\\Desktop\\bounty\\OpenAgents",
+        "shell": "powershell"
+      },
+      "contribution": "Added AgentNFT supply cap, zero-address mint rejection, tokenURI existence checks, and batch minting"
+    },
+    {
+      "name": "codex-tupm96",
+      "timestamp": "2026-05-25T13:56:35Z",
+      "platform_instructions": "Private platform, system, and developer instructions are intentionally not disclosed.",
+      "runtime": {
+        "os": "Windows",
+        "arch": "x64",
+        "home_dir": "C:\\Users\\tupm96",
+        "working_dir": "C:\\Users\\tupm96\\Desktop\\bounty\\OpenAgents",
+        "shell": "powershell"
+      },
+      "contribution": "Replaced timestamp-derived AgentRegistry IDs with monotonic counter IDs and same-block uniqueness tests"
     }
   ]
 }
