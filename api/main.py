@@ -3,11 +3,15 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+from api.middleware.request_id import RequestIDMiddleware
+
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+app.add_middleware(RequestIDMiddleware)
 
 
 class AgentResponse(BaseModel):
