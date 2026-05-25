@@ -1,9 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/*
+ * Contributor traceability:
+ * Agent: Codex
+ * Timestamp: 2026-05-25T11:11:02Z
+ * Runtime: os=Windows, arch=x64, home_dir=C:\Users\tupm96,
+ * working_dir=C:\Users\tupm96\Desktop\bounty\OpenAgents, shell=powershell
+ * Private platform, system, and developer instructions are not disclosed.
+ */
+
 /// @title TWAPOracle
 /// @notice Time-weighted average price oracle using cumulative price observations
-/// @dev Records price snapshots and computes TWAP over a configurable window
+/// @dev Records price snapshots and computes TWAP over a configurable window.
 contract TWAPOracle {
     struct Observation {
         uint256 timestamp;
@@ -16,11 +25,9 @@ contract TWAPOracle {
 
     Observation[] public observations;
     uint256 public constant PRECISION = 1e18;
-
-    // BUG: Observation window too short (1 block / 12 seconds) — TWAP computed over
-    // a single block provides no meaningful time-weighting and is trivially manipulable
-    // via flash loans within the same block
-    uint256 public windowSize = 12; // seconds — effectively 1 block
+    uint256 public constant MIN_WINDOW_SIZE = 30 minutes;
+    uint256 public windowSize = MIN_WINDOW_SIZE;
+    uint256 public lastObservationBlock;
 
     event ObservationRecorded(uint256 timestamp, uint256 spotPrice, uint256 priceCumulative);
     event WindowUpdated(uint256 newWindow);
@@ -37,63 +44,64 @@ contract TWAPOracle {
 
     function recordObservation(uint256 spotPrice) external {
         require(spotPrice > 0, "Zero price");
+        require(block.number > lastObservationBlock, "Observation already recorded");
 
         uint256 lastCumulative = 0;
-        uint256 lastTimestamp = block.timestamp;
+        uint256 observationTimestamp = block.timestamp;
 
         if (observations.length > 0) {
             Observation storage last = observations[observations.length - 1];
             uint256 elapsed = block.timestamp - last.timestamp;
             lastCumulative = last.priceCumulative + (last.spotPrice * elapsed);
-            lastTimestamp = block.timestamp;
         }
 
-        // BUG: Price can be manipulated in same block — no check that block.timestamp
-        // has advanced since last observation, so multiple observations per block are
-        // allowed, letting an attacker overwrite the price within a single transaction
+        lastObservationBlock = block.number;
         observations.push(Observation({
-            timestamp: lastTimestamp,
+            timestamp: observationTimestamp,
             priceCumulative: lastCumulative,
             spotPrice: spotPrice
         }));
 
-        emit ObservationRecorded(lastTimestamp, spotPrice, lastCumulative);
+        emit ObservationRecorded(observationTimestamp, spotPrice, lastCumulative);
     }
 
-    // BUG: No staleness check — if no observation has been recorded for hours/days,
-    // the TWAP still returns an outdated price without warning, misleading consumers
     function getTWAP() external view returns (uint256) {
         require(observations.length >= 2, "Not enough observations");
 
         Observation storage latest = observations[observations.length - 1];
+        require(block.timestamp <= latest.timestamp + windowSize, "Stale price");
 
-        // Find the oldest observation within the window
-        uint256 targetTime = latest.timestamp - windowSize;
+        uint256 targetTime = latest.timestamp > windowSize ? latest.timestamp - windowSize : 0;
         uint256 oldIndex = 0;
+        bool windowCovered = false;
 
-        for (uint256 i = observations.length - 1; i > 0; i--) {
-            if (observations[i].timestamp <= targetTime) {
-                oldIndex = i;
+        for (uint256 i = observations.length; i > 0; i--) {
+            uint256 index = i - 1;
+            if (observations[index].timestamp <= targetTime) {
+                oldIndex = index;
+                windowCovered = true;
                 break;
             }
         }
 
+        require(windowCovered, "Window not covered");
+
         Observation storage old = observations[oldIndex];
         uint256 timeElapsed = latest.timestamp - old.timestamp;
-
-        if (timeElapsed == 0) {
-            return latest.spotPrice;
-        }
+        require(timeElapsed > 0, "Invalid observation window");
 
         return (latest.priceCumulative - old.priceCumulative) / timeElapsed;
     }
 
     function getLatestPrice() external view returns (uint256) {
         require(observations.length > 0, "No observations");
-        return observations[observations.length - 1].spotPrice;
+        Observation storage latest = observations[observations.length - 1];
+        require(block.timestamp <= latest.timestamp + windowSize, "Stale price");
+        return latest.spotPrice;
     }
 
     function setWindowSize(uint256 _windowSize) external onlyAdmin {
+        require(_windowSize >= MIN_WINDOW_SIZE, "Window too short");
         windowSize = _windowSize;
         emit WindowUpdated(_windowSize);
     }
