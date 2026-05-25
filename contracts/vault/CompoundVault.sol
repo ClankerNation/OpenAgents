@@ -10,6 +10,7 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 /// @notice Auto-compounding vault that periodically harvests yield and reinvests.
 /// @dev Deposits into an underlying strategy, harvests rewards, sells for the base
 ///      asset, and re-deposits to compound returns. Charges a performance fee.
+/// @custom:contributor Bounty #22 - harvest authorization, fresh pricing, fee floor, and threshold hardening.
 contract CompoundVault is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -17,12 +18,14 @@ contract CompoundVault is Ownable, ReentrancyGuard {
     IERC20 public immutable rewardToken;
     address public strategy;
     address public feeRecipient;
+    address public keeper;
 
     uint256 public totalShares;
     uint256 public totalDeposited;
     uint256 public performanceFeeBps; // basis points (e.g., 1000 = 10%)
     uint256 public lastHarvestTime;
     uint256 public lastPricePerShare;
+    uint256 public harvestThreshold;
 
     mapping(address => uint256) public userShares;
 
@@ -30,6 +33,13 @@ contract CompoundVault is Ownable, ReentrancyGuard {
     event Withdrawn(address indexed user, uint256 amount, uint256 shares);
     event Harvested(uint256 profit, uint256 fee, uint256 timestamp);
     event Compounded(uint256 amount, uint256 newPricePerShare);
+    event KeeperUpdated(address indexed oldKeeper, address indexed newKeeper);
+    event HarvestThresholdUpdated(uint256 oldThreshold, uint256 newThreshold);
+
+    modifier onlyHarvester() {
+        require(msg.sender == owner() || msg.sender == keeper, "Vault: not harvester");
+        _;
+    }
 
     constructor(
         address _baseToken,
@@ -38,13 +48,18 @@ contract CompoundVault is Ownable, ReentrancyGuard {
         address _feeRecipient,
         uint256 _feeBps
     ) Ownable(msg.sender) {
+        require(_baseToken != address(0), "Vault: zero base token");
+        require(_rewardToken != address(0), "Vault: zero reward token");
+        require(_feeRecipient != address(0), "Vault: zero fee recipient");
         require(_feeBps <= 3000, "Vault: fee too high");
         baseToken = IERC20(_baseToken);
         rewardToken = IERC20(_rewardToken);
         strategy = _strategy;
         feeRecipient = _feeRecipient;
+        keeper = msg.sender;
         performanceFeeBps = _feeBps;
         lastPricePerShare = 1e18;
+        harvestThreshold = 1;
     }
 
     /// @notice Deposit base tokens and receive vault shares.
@@ -84,30 +99,29 @@ contract CompoundVault is Ownable, ReentrancyGuard {
 
     /// @notice Harvest rewards from the strategy and calculate profit.
     /// @return profit The net profit after fees.
-    // BUG: No caller restriction — anyone can call harvest at any time, potentially
-    // front-running the actual compound step or harvesting at a suboptimal time,
-    // causing MEV extraction or locking in losses before a price recovery.
-    function harvest() external returns (uint256 profit) {
+    function harvest() external nonReentrant onlyHarvester returns (uint256 profit) {
         uint256 rewardBalance = rewardToken.balanceOf(address(this));
         require(rewardBalance > 0, "Vault: nothing to harvest");
 
-        // BUG: Uses lastPricePerShare which is only updated during compound(), not
-        // during harvest. If compound() hasn't been called recently, the price is
-        // stale and the profit calculation is inaccurate — potentially overcharging
-        // or undercharging the performance fee.
-        uint256 estimatedValue = (rewardBalance * lastPricePerShare) / 1e18;
+        uint256 currentPricePerShare = _pricePerShare();
+        uint256 estimatedValue = (rewardBalance * currentPricePerShare) / 1e18;
+        require(estimatedValue >= harvestThreshold, "Vault: below threshold");
 
-        // BUG: Fee calculation truncates to zero for small profit amounts.
-        // E.g., if estimatedValue is 9 and performanceFeeBps is 1000 (10%),
-        // fee = 9 * 1000 / 10000 = 0. Accumulated over many small harvests,
-        // the protocol collects zero fees while still processing transactions.
-        uint256 fee = (estimatedValue * performanceFeeBps) / 10000;
+        uint256 fee;
+        if (performanceFeeBps > 0) {
+            fee = (estimatedValue * performanceFeeBps) / 10000;
+            if (fee == 0) {
+                fee = 1;
+            }
+        }
+        require(fee <= estimatedValue, "Vault: fee exceeds harvest");
         profit = estimatedValue - fee;
 
         if (fee > 0) {
             rewardToken.safeTransfer(feeRecipient, fee);
         }
 
+        lastPricePerShare = currentPricePerShare;
         lastHarvestTime = block.timestamp;
         emit Harvested(profit, fee, block.timestamp);
     }
@@ -142,8 +156,27 @@ contract CompoundVault is Ownable, ReentrancyGuard {
         feeRecipient = _feeRecipient;
     }
 
+    /// @notice Update the keeper authorized to harvest alongside the owner.
+    /// @dev Set to address(0) to disable keeper harvesting.
+    function setKeeper(address _keeper) external onlyOwner {
+        address oldKeeper = keeper;
+        keeper = _keeper;
+        emit KeeperUpdated(oldKeeper, _keeper);
+    }
+
+    /// @notice Update the minimum estimated reward value required before harvest.
+    function setHarvestThreshold(uint256 _harvestThreshold) external onlyOwner {
+        uint256 oldThreshold = harvestThreshold;
+        harvestThreshold = _harvestThreshold;
+        emit HarvestThresholdUpdated(oldThreshold, _harvestThreshold);
+    }
+
     /// @notice Get the current price per share.
     function pricePerShare() external view returns (uint256) {
+        return _pricePerShare();
+    }
+
+    function _pricePerShare() internal view returns (uint256) {
         if (totalShares == 0) return 1e18;
         return (totalDeposited * 1e18) / totalShares;
     }
