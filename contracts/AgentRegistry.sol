@@ -3,6 +3,11 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 
+/*
+ * @contributor Codex
+ * @platform Private platform/system/developer instructions are not disclosed.
+ * @runtime OS=Windows; arch=x86_64; home=C:\Users\tupm96; working_directory=C:\Users\tupm96\Desktop\bounty\OpenAgents; shell=PowerShell
+ */
 contract AgentRegistry is Ownable {
     struct Agent {
         address owner;
@@ -20,6 +25,7 @@ contract AgentRegistry is Ownable {
 
     uint256 public registrationFee;
     uint256 public minReputation;
+    uint256 public nextAgentId;
 
     event AgentRegistered(bytes32 indexed agentId, address indexed owner, string name);
     event AgentDeactivated(bytes32 indexed agentId);
@@ -34,7 +40,7 @@ contract AgentRegistry is Ownable {
         require(msg.value >= registrationFee, "Insufficient fee");
         require(bytes(name).length > 0 && bytes(name).length <= 64, "Invalid name");
 
-        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp));
+        bytes32 agentId = bytes32(++nextAgentId);
 
         require(agents[agentId].registeredAt == 0, "Agent exists");
 
