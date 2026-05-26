@@ -5,6 +5,8 @@ pragma solidity ^0.8.20;
 /// @notice Time-delayed execution controller for governance actions.
 /// @dev Queued transactions must wait a minimum delay before execution.
 ///      Intended to be the executor behind a GovernorAlpha.
+uint256 public constant GRACE_PERIOD = 14 days;
+
 contract Timelock {
     uint256 public constant GRACE_PERIOD = 14 days;
     uint256 public constant MAXIMUM_DELAY = 30 days;
