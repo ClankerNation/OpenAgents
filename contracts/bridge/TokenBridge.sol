@@ -25,6 +25,7 @@ contract TokenBridge is ReentrancyGuard {
     mapping(address => bool) public isValidator;
     mapping(bytes32 => Transfer) public transfers;
     mapping(bytes32 => bool) public processedHashes;
+    mapping(address => uint256) public nonces;
 
     event TokensLocked(bytes32 indexed transferId, address token, address sender, address recipient, uint256 amount);
     event TokensClaimed(bytes32 indexed transferId, address token, address recipient, uint256 amount);
@@ -53,7 +54,8 @@ contract TokenBridge is ReentrancyGuard {
         // BUG: No nonce or unique identifier — if the same user bridges the same token
         // and amount to the same recipient twice, the transferId collides, overwriting
         // the first transfer and potentially losing funds.
-        bytes32 transferId = keccak256(abi.encodePacked(token, msg.sender, recipient, amount));
+        uint256 nonce = nonces[msg.sender]++;
+        bytes32 transferId = keccak256(abi.encodePacked(token, msg.sender, recipient, amount, block.chainid, address(this), nonce));
 
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
 
@@ -79,7 +81,7 @@ contract TokenBridge is ReentrancyGuard {
         uint256 amount,
         bytes[] calldata signatures
     ) external nonReentrant {
-        bytes32 messageHash = keccak256(abi.encodePacked(token, recipient, amount));
+        bytes32 messageHash = keccak256(abi.encodePacked(token, recipient, amount, block.chainid, address(this)));
         bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
 
         require(!processedHashes[messageHash], "Bridge: already processed");
