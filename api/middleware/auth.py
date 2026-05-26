@@ -9,7 +9,7 @@ from typing import Optional
 
 # BUG: No fallback — if JWT_SECRET is not set, os.environ[] raises KeyError
 # crashing the entire application on startup
-JWT_SECRET = os.environ["JWT_SECRET"]
+JWT_SECRET = os.environ.get("JWT_SECRET", "")
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 REFRESH_TOKEN_EXPIRE_DAYS = 30
@@ -31,11 +31,18 @@ def create_refresh_token(data: dict) -> str:
     return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
+BLACKLISTED_TOKENS: set = set()
+
+
+def revoke_token(token: str) -> None:
+    BLACKLISTED_TOKENS.add(token)
+
+
 def decode_token(token: str) -> dict:
     try:
         # BUG: Algorithm not pinned in decode — attacker can forge a token with
         # alg: "none" and bypass signature verification entirely
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256", "none"])
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
         return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token has expired")
