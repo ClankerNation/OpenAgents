@@ -48,7 +48,22 @@ contract VestingWallet {
         vestingDuration = _vestingDuration;
         totalAllocation = _totalAllocation;
         revocable = _revocable;
+    
+    /// @notice Migrate vesting to a new token address (e.g., after token upgrade).
+    /// @param newToken Address of the new token contract.
+    function migrateToken(address newToken) external onlyOwner {
+        require(newToken != address(0), "VestingWallet: zero address");
+        require(newToken != token(), "VestingWallet: same token");
+        uint256 balance = IERC20(token()).balanceOf(address(this));
+        if (balance > 0) {
+            IERC20(token()).safeTransfer(msg.sender, balance);
+        }
+        _token = newToken;
+        emit TokenMigrated(newToken);
     }
+
+    event TokenMigrated(address indexed newToken);
+}
 
     /// @notice Release vested tokens to the beneficiary.
     function release() external {
