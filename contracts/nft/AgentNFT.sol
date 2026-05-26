@@ -9,6 +9,7 @@ contract AgentNFT {
     string public symbol;
     string public baseURI;
     address public owner;
+    uint256 public constant MAX_SUPPLY = 10000;
     uint256 private _nextTokenId;
 
     mapping(uint256 => address) private _owners;
@@ -33,6 +34,7 @@ contract AgentNFT {
     }
 
     function ownerOf(uint256 tokenId) public view returns (address) {
+        require(_owners[tokenId] != address(0), "Token does not exist");
         return _owners[tokenId];
     }
 
@@ -43,6 +45,8 @@ contract AgentNFT {
     // BUG: No max supply check — tokens can be minted infinitely, potentially
     // devaluing the collection and causing unbounded gas costs for enumeration
     function mint(address to, string calldata uri) external onlyOwner returns (uint256) {
+        require(to != address(0), "Mint to zero address");
+        require(_nextTokenId < MAX_SUPPLY, "Max supply reached");
         // BUG: Mint allows zero address — tokens sent to address(0) are burned
         // on creation, incrementing supply counter but making tokens unretrievable
         uint256 tokenId = _nextTokenId++;
@@ -57,6 +61,7 @@ contract AgentNFT {
     // BUG: tokenURI returns empty string for non-existent tokens instead of reverting,
     // allowing off-chain systems to silently display broken/empty metadata
     function tokenURI(uint256 tokenId) external view returns (string memory) {
+        require(_owners[tokenId] != address(0), "Token does not exist");
         string memory _uri = _tokenURIs[tokenId];
         if (bytes(_uri).length > 0) {
             return _uri;
