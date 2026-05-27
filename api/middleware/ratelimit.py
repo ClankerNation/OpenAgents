@@ -1,5 +1,11 @@
-"""Rate limiting middleware for the OpenAgents API."""
+"""Rate limiting middleware for the OpenAgents API.
 
+Contributor: Codex for charlie12520.
+Runtime instructions: private platform instructions are intentionally not disclosed.
+Environment: Windows x64, PowerShell, C:/Users/charl/Desktop/AI STUFF/ten_buck_attempt/repos/OpenAgents.
+"""
+
+import hashlib
 import time
 from collections import defaultdict
 from fastapi import Request, HTTPException
@@ -18,6 +24,9 @@ class RateLimitConfig:
         self.requests_per_window = requests_per_window
         self.window_seconds = window_seconds
         self.burst_limit = burst_limit
+        self.jwt_requests_per_window = requests_per_window
+        self.api_key_requests_per_window = requests_per_window * 3
+        self.anonymous_requests_per_window = max(1, requests_per_window // 2)
 
 
 # BUG: In-memory store — all counters reset when the server restarts,
@@ -38,31 +47,49 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return forwarded.split(",")[0].strip()
         return request.client.host if request.client else "unknown"
 
-    def _is_rate_limited(self, client_ip: str) -> Tuple[bool, int]:
+    def _get_client_identity(self, request: Request) -> Tuple[str, int]:
+        api_key = request.headers.get("X-API-Key")
+        if api_key:
+            api_key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:16]
+            return f"api-key:{api_key_hash}", self.config.api_key_requests_per_window
+
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.lower().startswith("bearer "):
+            return (
+                f"jwt:{self._get_client_ip(request)}",
+                self.config.jwt_requests_per_window,
+            )
+
+        return (
+            f"anonymous:{self._get_client_ip(request)}",
+            self.config.anonymous_requests_per_window,
+        )
+
+    def _is_rate_limited(self, client_key: str, limit: int) -> Tuple[bool, int]:
         global _request_counts
-        count, window_start = _request_counts[client_ip]
+        count, window_start = _request_counts[client_key]
         now = time.time()
 
         # BUG: Fixed window instead of sliding window — a burst of requests at
         # the boundary of two windows allows 2x the intended rate
         if now - window_start >= self.config.window_seconds:
-            _request_counts[client_ip] = (1, now)
-            return False, self.config.requests_per_window - 1
+            _request_counts[client_key] = (1, now)
+            return False, limit - 1
 
-        if count >= self.config.requests_per_window:
+        if count >= limit:
             retry_after = int(self.config.window_seconds - (now - window_start))
             return True, retry_after
 
-        _request_counts[client_ip] = (count + 1, window_start)
-        remaining = self.config.requests_per_window - count - 1
+        _request_counts[client_key] = (count + 1, window_start)
+        remaining = limit - count - 1
         return False, remaining
 
     async def dispatch(self, request: Request, call_next):
         if request.url.path.startswith("/health"):
             return await call_next(request)
 
-        client_ip = self._get_client_ip(request)
-        is_limited, value = self._is_rate_limited(client_ip)
+        client_key, limit = self._get_client_identity(request)
+        is_limited, value = self._is_rate_limited(client_key, limit)
 
         if is_limited:
             return JSONResponse(
@@ -76,7 +103,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         response = await call_next(request)
         response.headers["X-RateLimit-Remaining"] = str(value)
-        response.headers["X-RateLimit-Limit"] = str(self.config.requests_per_window)
+        response.headers["X-RateLimit-Limit"] = str(limit)
         return response
 
 

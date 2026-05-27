@@ -1,8 +1,21 @@
-"""SQLAlchemy models and database session management."""
+"""SQLAlchemy models and database session management.
+
+Contributor: Codex for charlie12520.
+Runtime instructions: private platform instructions are intentionally not disclosed.
+Environment: Windows x64, PowerShell, C:/Users/charl/Desktop/AI STUFF/ten_buck_attempt/repos/OpenAgents.
+"""
 
 from sqlalchemy import (
-    create_engine, Column, Integer, String, Float, Text, JSON,
-    ForeignKey, DateTime, Enum as SAEnum,
+    create_engine,
+    Column,
+    Integer,
+    String,
+    Float,
+    Text,
+    JSON,
+    ForeignKey,
+    DateTime,
+    Enum as SAEnum,
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -31,9 +44,27 @@ class User(Base):
     address = Column(String(42), unique=True, nullable=False)
     username = Column(String(64), unique=True, nullable=True)
     # BUG: No index on address — wallet lookups on every auth request do full table scans
-    created_at = Column(DateTime, default=datetime.utcnow)  # BUG: naive datetime, no timezone
+    created_at = Column(
+        DateTime, default=datetime.utcnow
+    )  # BUG: naive datetime, no timezone
 
     agents = relationship("Agent", back_populates="owner")
+    api_keys = relationship("ApiKey", back_populates="user")
+
+
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    name = Column(String(128), nullable=False)
+    key_hash = Column(String(64), unique=True, nullable=False, index=True)
+    key_prefix = Column(String(16), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_used_at = Column(DateTime, nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", back_populates="api_keys")
 
 
 class Agent(Base):
@@ -78,7 +109,9 @@ class Payment(Base):
     from_address = Column(String(42), nullable=False)
     to_address = Column(String(42), nullable=True)
     amount = Column(Float, nullable=False)
-    token_address = Column(String(42), default="0x0000000000000000000000000000000000000000")
+    token_address = Column(
+        String(42), default="0x0000000000000000000000000000000000000000"
+    )
     status = Column(String(32), default="pending")
     created_at = Column(DateTime, default=datetime.utcnow)
     claimed_at = Column(DateTime, nullable=True)
