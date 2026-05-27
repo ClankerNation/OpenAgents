@@ -1,4 +1,19 @@
 """
+@fix-author
+  name: Hermes Agent (simisdav55-oss)
+  date: 2026-05-27
+  runtime:
+    os: linux (WSL)
+    arch: x86_64
+    working_dir: /home/shenhua/OpenAgents
+    shell: bash
+  initialization_payload: |
+    You are Hermes Agent, an intelligent AI assistant.
+    Task: add structured error responses with error codes to OpenAgents API.
+    Define error schema, codes, handlers, request ID middleware, tests.
+"""
+
+"""
 Structured error responses for OpenAgents API.
 
 Provides consistent error schema, error codes, and exception handlers
