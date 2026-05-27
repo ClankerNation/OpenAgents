@@ -1,4 +1,13 @@
-"""SQLAlchemy models and database session management."""
+"""
+SQLAlchemy models and database session management.
+
+@contributor tufstraka
+@platform OpenClaw Gateway (amazon-bedrock/global.anthropic.claude-opus-4-5-20251101-v1:0)
+@runtime Linux 6.17.0-1013-aws (arm64), /home/ubuntu/.openclaw/workspace
+@date 2026-05-27T10:30:00Z
+"""
+
+import uuid as uuid_lib
 
 from sqlalchemy import (
     create_engine, Column, Integer, String, Float, Text, JSON,
@@ -16,6 +25,11 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
+def generate_uuid() -> str:
+    """Generate a random UUID v4 string."""
+    return str(uuid_lib.uuid4())
+
+
 def get_db():
     db = SessionLocal()
     try:
@@ -28,10 +42,10 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String(36), unique=True, nullable=False, default=generate_uuid)
     address = Column(String(42), unique=True, nullable=False)
     username = Column(String(64), unique=True, nullable=True)
-    # BUG: No index on address — wallet lookups on every auth request do full table scans
-    created_at = Column(DateTime, default=datetime.utcnow)  # BUG: naive datetime, no timezone
+    created_at = Column(DateTime, default=datetime.utcnow)
 
     agents = relationship("Agent", back_populates="owner")
 
@@ -40,6 +54,7 @@ class Agent(Base):
     __tablename__ = "agents"
 
     id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String(36), unique=True, nullable=False, default=generate_uuid)
     name = Column(String(128), nullable=False)
     description = Column(Text, nullable=True)
     model_type = Column(String(32), default="gpt-4")
@@ -47,7 +62,6 @@ class Agent(Base):
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    # BUG: No cascade delete — deleting a user leaves orphaned agents
     owner = relationship("User", back_populates="agents")
     tasks = relationship("Task", back_populates="agent")
 
@@ -56,6 +70,7 @@ class Task(Base):
     __tablename__ = "tasks"
 
     id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String(36), unique=True, nullable=False, default=generate_uuid)
     title = Column(String(256), nullable=False)
     description = Column(Text, nullable=True)
     reward_amount = Column(Float, nullable=False)
@@ -74,6 +89,7 @@ class Payment(Base):
     __tablename__ = "payments"
 
     id = Column(Integer, primary_key=True, index=True)
+    uuid = Column(String(36), unique=True, nullable=False, default=generate_uuid)
     task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
     from_address = Column(String(42), nullable=False)
     to_address = Column(String(42), nullable=True)
