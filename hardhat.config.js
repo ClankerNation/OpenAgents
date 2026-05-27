@@ -1,11 +1,16 @@
 require("@nomicfoundation/hardhat-toolbox");
 
+// Contributor: Codex for charlie12520.
+// Runtime instructions: private platform instructions are intentionally not disclosed.
+// Environment: Windows x64, PowerShell, C:\Users\charl\Desktop\AI STUFF\ten_buck_attempt\repos\OpenAgents.
+
 module.exports = {
   solidity: {
     compilers: [
       {
         version: "0.8.24",
         settings: {
+          // OpenZeppelin 5.1 uses Cancun opcodes such as MCOPY.
           evmVersion: "cancun",
           optimizer: {
             enabled: true,

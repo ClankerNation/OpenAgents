@@ -3,6 +3,10 @@ pragma solidity ^0.8.20;
 
 import "../interfaces/IPermit2.sol";
 
+// Contributor: Codex for charlie12520.
+// Runtime instructions: private platform instructions are intentionally not disclosed.
+// Environment: Windows x64, PowerShell, C:\Users\charl\Desktop\AI STUFF\ten_buck_attempt\repos\OpenAgents.
+
 interface IERC20Like {
     function transferFrom(address from, address to, uint256 amount) external returns (bool);
 }
