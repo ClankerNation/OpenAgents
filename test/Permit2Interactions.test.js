@@ -85,6 +85,32 @@ describe("Permit2 token interactions", function () {
     expect(await stakingToken.balanceOf(await stakingRewards.getAddress())).to.equal(amount);
   });
 
+  it("rejects Permit2 staking when the signed token or amount does not match", async function () {
+    const stakingToken = await deployToken("Stake Token", "STK");
+    const otherToken = await deployToken("Other Token", "OTK");
+    const rewardsToken = await deployToken("Reward Token", "RWD");
+    const stakingRewards = await deployContract("StakingRewards", [
+      await stakingToken.getAddress(),
+      await rewardsToken.getAddress(),
+    ]);
+
+    const amount = ethers.parseEther("10");
+    await stakingToken.mint(user.address, amount);
+    await stakingToken.connect(user).approve(PERMIT2_ADDRESS, amount);
+
+    await expect(
+      stakingRewards
+        .connect(user)
+        .stakeWithPermit2(amount, permitFor(await otherToken.getAddress(), amount), SIGNATURE)
+    ).to.be.revertedWith("Permit token mismatch");
+
+    await expect(
+      stakingRewards
+        .connect(user)
+        .stakeWithPermit2(amount, permitFor(await stakingToken.getAddress(), amount - 1n), SIGNATURE)
+    ).to.be.revertedWith("Permit amount too low");
+  });
+
   it("adds AMM liquidity and swaps with Permit2 while preserving transferFrom fallback", async function () {
     const tokenA = await deployToken("Token A", "A");
     const tokenB = await deployToken("Token B", "B");
@@ -120,6 +146,38 @@ describe("Permit2 token interactions", function () {
     expect(afterTokenB).to.be.gt(beforeTokenB);
     expect(reserveA).to.equal(ownerLiquidity + swapAmount);
     expect(reserveB).to.be.lt(ownerLiquidity);
+  });
+
+  it("rejects Permit2 swaps when the signature is for a different token", async function () {
+    const tokenA = await deployToken("Token A", "A");
+    const tokenB = await deployToken("Token B", "B");
+    const pool = await deployContract("AMMPool", [
+      await tokenA.getAddress(),
+      await tokenB.getAddress(),
+    ]);
+
+    const liquidity = ethers.parseEther("100");
+    await tokenA.mint(owner.address, liquidity);
+    await tokenB.mint(owner.address, liquidity);
+    await tokenA.approve(await pool.getAddress(), liquidity);
+    await tokenB.approve(await pool.getAddress(), liquidity);
+    await pool.addLiquidity(liquidity, liquidity);
+
+    const swapAmount = ethers.parseEther("1");
+    await tokenA.mint(user.address, swapAmount);
+    await tokenA.connect(user).approve(PERMIT2_ADDRESS, swapAmount);
+
+    await expect(
+      pool
+        .connect(user)
+        .swapWithPermit2(
+          await tokenA.getAddress(),
+          swapAmount,
+          1n,
+          permitFor(await tokenB.getAddress(), swapAmount),
+          SIGNATURE
+        )
+    ).to.be.revertedWith("Permit token mismatch");
   });
 
   it("adds AMM liquidity with Permit2", async function () {
