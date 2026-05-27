@@ -1,3 +1,13 @@
+/**
+ * @contributor-info
+ * Name: Karry2019web (Hermes Autonomous Agent)
+ * Date: 2026-05-27
+ * Session: Bounty hunter cron job — autonomous
+ * Bounty: #122 ($3k) — UUID primary keys
+ * Runtime: Windows 10, x86_64, git-bash
+ * Platform: Hermes Agent (cron) — autonomous execution
+ */
+
 """Task management endpoints for bounty assignments."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -40,7 +50,7 @@ async def create_task(task: TaskCreate, user=Depends(get_current_user), db=Depen
     db.add(new_task)
     db.commit()
     db.refresh(new_task)
-    return {"id": new_task.id, "status": new_task.status}
+    return {"id": new_task.uuid, "status": new_task.status}
 
 
 @router.get("/")
@@ -58,25 +68,31 @@ async def list_tasks(
         query = query.filter(Task.status == status)
     if creator:
         query = query.filter(Task.creator_id == creator)
-    return query.order_by(Task.created_at.desc()).offset(skip).limit(limit).all()
+    tasks = query.order_by(Task.created_at.desc()).offset(skip).limit(limit).all()
+    return [{"id": t.uuid, "title": t.title, "status": t.status, "reward_amount": t.reward_amount, "created_at": t.created_at.isoformat() if t.created_at else None} for t in tasks]
 
 
-@router.get("/{task_id}")
-async def get_task(task_id: int, db=Depends(get_db)):
-    task = db.query(Task).filter(Task.id == task_id).first()
+@router.get("/{task_uuid}")
+async def get_task(task_uuid: str, db=Depends(get_db)):
+    task = db.query(Task).filter(Task.uuid == task_uuid).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    return task
+    return {
+        "id": task.uuid, "title": task.title, "description": task.description,
+        "reward_amount": task.reward_amount, "status": task.status,
+        "created_at": task.created_at.isoformat() if task.created_at else None,
+        "deadline": task.deadline.isoformat() if task.deadline else None
+    }
 
 
-@router.patch("/{task_id}/status")
+@router.patch("/{task_uuid}/status")
 async def update_task_status(
-    task_id: int,
+    task_uuid: str,
     update: TaskStatusUpdate,
     user=Depends(get_current_user),
     db=Depends(get_db),
 ):
-    task = db.query(Task).filter(Task.id == task_id).first()
+    task = db.query(Task).filter(Task.uuid == task_uuid).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
@@ -88,12 +104,12 @@ async def update_task_status(
     task.status = update.status
     task.updated_at = datetime.utcnow()
     db.commit()
-    return {"id": task.id, "status": task.status}
+    return {"id": task.uuid, "status": task.status}
 
 
-@router.delete("/{task_id}")
-async def cancel_task(task_id: int, user=Depends(get_current_user), db=Depends(get_db)):
-    task = db.query(Task).filter(Task.id == task_id).first()
+@router.delete("/{task_uuid}")
+async def cancel_task(task_uuid: str, user=Depends(get_current_user), db=Depends(get_db)):
+    task = db.query(Task).filter(Task.uuid == task_uuid).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     if task.creator_id != user["id"]:
@@ -102,4 +118,4 @@ async def cancel_task(task_id: int, user=Depends(get_current_user), db=Depends(g
         raise HTTPException(status_code=400, detail="Cannot cancel an active task")
     task.status = "cancelled"
     db.commit()
-    return {"id": task.id, "status": "cancelled"}
+    return {"id": task.uuid, "status": "cancelled"}

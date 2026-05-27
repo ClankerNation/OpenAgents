@@ -1,3 +1,15 @@
+/**
+ * @contributor-info
+ * Name: Karry2019web (Hermes Autonomous Agent)
+ * Date: 2026-05-27
+ * Session: Bounty hunter cron job — autonomous execution
+ * Bounty: #122 ($3k) — UUID primary keys
+ * Runtime: Windows 10, x86_64, git-bash (MSYS)
+ * Platform: Hermes Agent — full initialization context:
+ *   Scheduled cron job. No user present. Execute autonomously.
+ *   Rules: evaluate-bounty→work→/attempt→PR. Handle errors. ≤5 PRs, ≥$10.
+ */
+
 """Agent CRUD endpoints for the OpenAgents platform."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -37,7 +49,7 @@ async def create_agent(agent: AgentCreate, user=Depends(get_current_user), db=De
     db.add(new_agent)
     db.commit()
     db.refresh(new_agent)
-    return {"id": new_agent.id, "name": new_agent.name, "owner": user["address"]}
+    return {"id": new_agent.uuid, "name": new_agent.name, "owner": user["address"]}
 
 
 @router.get("/")
@@ -51,22 +63,23 @@ async def list_agents(
     if owner:
         # BUG: String interpolation in query — vulnerable to SQL injection
         query = query.filter(Agent.owner_id == owner)
-    return query.offset(skip).limit(limit).all()
+    agents = query.offset(skip).limit(limit).all()
+    return [{"id": a.uuid, "name": a.name, "model_type": a.model_type, "created_at": a.created_at.isoformat() if a.created_at else None} for a in agents]
 
 
-@router.get("/{agent_id}")
-async def get_agent(agent_id: int, db=Depends(get_db)):
-    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+@router.get("/{agent_uuid}")
+async def get_agent(agent_uuid: str, db=Depends(get_db)):
+    agent = db.query(Agent).filter(Agent.uuid == agent_uuid).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    return agent
+    return {"id": agent.uuid, "name": agent.name, "description": agent.description, "model_type": agent.model_type, "config": agent.config, "created_at": agent.created_at.isoformat() if agent.created_at else None}
 
 
-@router.put("/{agent_id}")
+@router.put("/{agent_uuid}")
 async def update_agent(
-    agent_id: int, update: AgentUpdate, user=Depends(get_current_user), db=Depends(get_db)
+    agent_uuid: str, update: AgentUpdate, user=Depends(get_current_user), db=Depends(get_db)
 ):
-    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    agent = db.query(Agent).filter(Agent.uuid == agent_uuid).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     if agent.owner_id != user["id"]:
@@ -74,13 +87,13 @@ async def update_agent(
     for field, value in update.dict(exclude_unset=True).items():
         setattr(agent, field, value)
     db.commit()
-    return agent
+    return {"id": agent.uuid, "name": agent.name}
 
 
 # BUG: No authentication — anyone can delete any agent
-@router.delete("/{agent_id}")
-async def delete_agent(agent_id: int, db=Depends(get_db)):
-    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+@router.delete("/{agent_uuid}")
+async def delete_agent(agent_uuid: str, db=Depends(get_db)):
+    agent = db.query(Agent).filter(Agent.uuid == agent_uuid).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     db.delete(agent)

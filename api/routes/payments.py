@@ -1,3 +1,13 @@
+/**
+ * @contributor-info
+ * Name: Karry2019web (Hermes Autonomous Agent)
+ * Date: 2026-05-27
+ * Session: Bounty hunter cron job — autonomous
+ * Bounty: #122 ($3k) — UUID primary keys
+ * Runtime: Windows 10, x86_64, git-bash
+ * Platform: Hermes Agent (cron) — autonomous execution
+ */
+
 """Payment and escrow endpoints for bounty payouts."""
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -12,7 +22,7 @@ router = APIRouter(prefix="/payments", tags=["payments"])
 
 
 class EscrowDeposit(BaseModel):
-    task_id: int
+    task_uuid: str
     # BUG: Amount is not validated as positive — negative or zero deposits
     # could corrupt escrow balances or drain funds
     amount: float
@@ -20,7 +30,7 @@ class EscrowDeposit(BaseModel):
 
 
 class ClaimRequest(BaseModel):
-    task_id: int
+    task_uuid: str
     recipient_address: str
 
 
@@ -28,7 +38,7 @@ class ClaimRequest(BaseModel):
 async def deposit_escrow(
     deposit: EscrowDeposit, user=Depends(get_current_user), db=Depends(get_db)
 ):
-    task = db.query(Task).filter(Task.id == deposit.task_id).first()
+    task = db.query(Task).filter(Task.uuid == deposit.task_uuid).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     if task.creator_id != user["id"]:
@@ -37,7 +47,7 @@ async def deposit_escrow(
     # BUG: No idempotency key — retried requests create duplicate escrow entries,
     # locking more funds than intended
     payment = Payment(
-        task_id=deposit.task_id,
+        task_id=task.id,
         from_address=user["address"],
         amount=deposit.amount,
         token_address=deposit.token_address,
@@ -47,23 +57,26 @@ async def deposit_escrow(
     db.add(payment)
     db.commit()
     db.refresh(payment)
-    return {"payment_id": payment.id, "status": "escrowed", "amount": payment.amount}
+    return {"payment_id": payment.uuid, "status": "escrowed", "amount": payment.amount}
 
 
-@router.get("/escrow/{task_id}")
-async def get_escrow_balance(task_id: int, db=Depends(get_db)):
+@router.get("/escrow/{task_uuid}")
+async def get_escrow_balance(task_uuid: str, db=Depends(get_db)):
+    task = db.query(Task).filter(Task.uuid == task_uuid).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
     payments = db.query(Payment).filter(
-        Payment.task_id == task_id, Payment.status == "escrowed"
+        Payment.task_id == task.id, Payment.status == "escrowed"
     ).all()
     total = sum(p.amount for p in payments)
-    return {"task_id": task_id, "escrowed_total": total, "deposits": len(payments)}
+    return {"task_uuid": task_uuid, "escrowed_total": total, "deposits": len(payments)}
 
 
 @router.post("/claim")
 async def claim_payment(
     claim: ClaimRequest, user=Depends(get_current_user), db=Depends(get_db)
 ):
-    task = db.query(Task).filter(Task.id == claim.task_id).first()
+    task = db.query(Task).filter(Task.uuid == claim.task_uuid).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     if task.status != "completed":
@@ -72,7 +85,7 @@ async def claim_payment(
     # BUG: Race condition — two concurrent claims can both read status="escrowed"
     # before either updates it, causing a double-payout
     payments = db.query(Payment).filter(
-        Payment.task_id == claim.task_id, Payment.status == "escrowed"
+        Payment.task_id == task.id, Payment.status == "escrowed"
     ).all()
 
     if not payments:
@@ -87,7 +100,7 @@ async def claim_payment(
 
     db.commit()
     return {
-        "task_id": claim.task_id,
+        "task_uuid": claim.task_uuid,
         "claimed_amount": total_claimed,
         "recipient": claim.recipient_address,
     }
@@ -101,6 +114,6 @@ async def payment_history(
     sent = db.query(Payment).filter(Payment.from_address == user["address"]).all()
     received = db.query(Payment).filter(Payment.to_address == user["address"]).all()
     return {
-        "sent": [{"id": p.id, "amount": p.amount, "status": p.status} for p in sent],
-        "received": [{"id": p.id, "amount": p.amount, "status": p.status} for p in received],
+        "sent": [{"id": p.uuid, "amount": p.amount, "status": p.status} for p in sent],
+        "received": [{"id": p.uuid, "amount": p.amount, "status": p.status} for p in received],
     }
