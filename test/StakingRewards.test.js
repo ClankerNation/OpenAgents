@@ -125,4 +125,46 @@ describe("StakingRewards", function () {
     );
     expect(earned1 + earned2).to.be.closeTo(rewardAmount, ethers.parseEther("6"));
   });
+
+  it("pays the proportional split once and does not overpay after finish", async function () {
+    const stakeAmount = ethers.parseEther("100");
+    const rewardAmount = ethers.parseEther("604800");
+
+    await stakeAs(staker1, stakeAmount);
+    await stakingRewards.notifyRewardAmount(rewardAmount);
+
+    await time.increase(REWARD_DURATION / 2);
+    await stakeAs(staker2, stakeAmount);
+
+    await time.increase(REWARD_DURATION / 2);
+
+    await stakingRewards.connect(staker1).getReward();
+    await stakingRewards.connect(staker2).getReward();
+
+    const paid1 = await rewardToken.balanceOf(staker1.address);
+    const paid2 = await rewardToken.balanceOf(staker2.address);
+    const contractBalanceAfterClaims = await rewardToken.balanceOf(
+      await stakingRewards.getAddress()
+    );
+
+    expect(paid1).to.be.closeTo(
+      ethers.parseEther("453600"),
+      ethers.parseEther("3")
+    );
+    expect(paid2).to.be.closeTo(
+      ethers.parseEther("151200"),
+      ethers.parseEther("3")
+    );
+    expect(paid1 + paid2).to.be.closeTo(rewardAmount, ethers.parseEther("6"));
+
+    await time.increase(30 * 24 * 60 * 60);
+    await stakingRewards.connect(staker1).getReward();
+    await stakingRewards.connect(staker2).getReward();
+
+    expect(await rewardToken.balanceOf(staker1.address)).to.equal(paid1);
+    expect(await rewardToken.balanceOf(staker2.address)).to.equal(paid2);
+    expect(await rewardToken.balanceOf(await stakingRewards.getAddress())).to.equal(
+      contractBalanceAfterClaims
+    );
+  });
 });
