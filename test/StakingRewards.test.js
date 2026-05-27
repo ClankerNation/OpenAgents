@@ -90,6 +90,14 @@ describe("StakingRewards", function () {
       firstReward / 2n,
       ethers.parseEther("2")
     );
+
+    await time.increase(REWARD_DURATION);
+    const earnedAfterNewPeriod = await stakingRewards.earned(staker1.address);
+
+    expect(earnedAfterNewPeriod).to.be.closeTo(
+      firstReward + secondReward,
+      ethers.parseEther("4")
+    );
   });
 
   it("keeps proportional rewards correct when users stake at different times", async function () {
