@@ -27,7 +27,7 @@ async function deployToken(name, symbol) {
   return deployContract("MockERC20", [name, symbol]);
 }
 
-function permitFor(token, amount) {
+function permitFor(token, amount, overrides = {}) {
   return {
     permitted: {
       token,
@@ -35,6 +35,7 @@ function permitFor(token, amount) {
     },
     nonce: 1,
     deadline: Math.floor(Date.now() / 1000) + 3600,
+    ...overrides,
   };
 }
 
@@ -76,13 +77,21 @@ describe("Permit2 token interactions", function () {
     await stakingToken.mint(user.address, amount);
     await stakingToken.connect(user).approve(PERMIT2_ADDRESS, amount);
 
-    await stakingRewards
-      .connect(user)
-      .stakeWithPermit2(amount, permitFor(await stakingToken.getAddress(), amount), SIGNATURE);
+    const permit2 = await ethers.getContractAt("MockPermit2", PERMIT2_ADDRESS);
+    const stakingRewardsAddress = await stakingRewards.getAddress();
+    const stakingTokenAddress = await stakingToken.getAddress();
+
+    await expect(
+      stakingRewards
+        .connect(user)
+        .stakeWithPermit2(amount, permitFor(stakingTokenAddress, amount), SIGNATURE)
+    )
+      .to.emit(permit2, "PermitTransfer")
+      .withArgs(stakingTokenAddress, user.address, stakingRewardsAddress, amount);
 
     expect(await stakingRewards.PERMIT2()).to.equal(PERMIT2_ADDRESS);
     expect(await stakingRewards.balanceOf(user.address)).to.equal(amount);
-    expect(await stakingToken.balanceOf(await stakingRewards.getAddress())).to.equal(amount);
+    expect(await stakingToken.balanceOf(stakingRewardsAddress)).to.equal(amount);
   });
 
   it("rejects Permit2 staking when the signed token or amount does not match", async function () {
@@ -109,6 +118,35 @@ describe("Permit2 token interactions", function () {
         .connect(user)
         .stakeWithPermit2(amount, permitFor(await stakingToken.getAddress(), amount - 1n), SIGNATURE)
     ).to.be.revertedWith("Permit amount too low");
+  });
+
+  it("rejects expired or empty Permit2 staking signatures", async function () {
+    const stakingToken = await deployToken("Stake Token", "STK");
+    const rewardsToken = await deployToken("Reward Token", "RWD");
+    const stakingRewards = await deployContract("StakingRewards", [
+      await stakingToken.getAddress(),
+      await rewardsToken.getAddress(),
+    ]);
+
+    const amount = ethers.parseEther("10");
+    const stakingTokenAddress = await stakingToken.getAddress();
+    await stakingToken.mint(user.address, amount);
+    await stakingToken.connect(user).approve(PERMIT2_ADDRESS, amount);
+
+    await expect(
+      stakingRewards
+        .connect(user)
+        .stakeWithPermit2(amount, permitFor(stakingTokenAddress, amount, { deadline: 1 }), SIGNATURE)
+    ).to.be.revertedWith("Permit expired");
+
+    await expect(
+      stakingRewards
+        .connect(user)
+        .stakeWithPermit2(amount, permitFor(stakingTokenAddress, amount), "0x")
+    ).to.be.revertedWith("Invalid signature");
+
+    expect(await stakingRewards.balanceOf(user.address)).to.equal(0n);
+    expect(await stakingToken.balanceOf(await stakingRewards.getAddress())).to.equal(0n);
   });
 
   it("adds AMM liquidity and swaps with Permit2 while preserving transferFrom fallback", async function () {
