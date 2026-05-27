@@ -16,6 +16,11 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from api.middleware.auth import create_access_token, get_current_user
+from api.middleware.ratelimit import (
+    RateLimitConfig,
+    RateLimitMiddleware,
+    _request_counts,
+)
 from api.models.database import ApiKey, Base, User, get_db
 from api.routes.auth import router as auth_router
 
@@ -132,3 +137,37 @@ def test_api_key_cannot_manage_api_keys():
 
     assert response.status_code == 403
     assert response.json()["detail"] == "JWT authentication required"
+
+
+def test_rate_limit_buckets_differ_for_api_key_jwt_and_anonymous_traffic():
+    _request_counts.clear()
+
+    app = FastAPI()
+    app.add_middleware(
+        RateLimitMiddleware,
+        config=RateLimitConfig(requests_per_window=2, window_seconds=60),
+    )
+
+    @app.get("/limited")
+    async def limited():
+        return {"ok": True}
+
+    client = TestClient(app)
+
+    anonymous_headers = {"X-Forwarded-For": "198.51.100.10"}
+    jwt_headers = {
+        "Authorization": "Bearer placeholder",
+        "X-Forwarded-For": "198.51.100.20",
+    }
+    api_key_headers = {"X-API-Key": "oa_test_key"}
+
+    assert client.get("/limited", headers=anonymous_headers).status_code == 200
+    assert client.get("/limited", headers=anonymous_headers).status_code == 429
+
+    for _ in range(2):
+        assert client.get("/limited", headers=jwt_headers).status_code == 200
+    assert client.get("/limited", headers=jwt_headers).status_code == 429
+
+    for _ in range(6):
+        assert client.get("/limited", headers=api_key_headers).status_code == 200
+    assert client.get("/limited", headers=api_key_headers).status_code == 429
