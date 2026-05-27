@@ -4,6 +4,10 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
+// Contributor: Codex for charlie12520.
+// Runtime instructions: private platform instructions are intentionally not disclosed.
+// Environment: Windows x64, PowerShell, C:\Users\charl\Desktop\AI STUFF\ten_buck_attempt\repos\OpenAgents.
+
 /// @title GovernorAlpha
 /// @notice Minimal governance contract supporting proposal creation, voting, and execution.
 /// @dev Inspired by Compound's GovernorAlpha. Token holders propose and vote on-chain actions.
@@ -59,9 +63,13 @@ contract GovernorAlpha is ReentrancyGuard {
         Proposal storage p = proposals[proposalId];
         p.id = proposalId;
         p.proposer = msg.sender;
-        p.targets = targets;
-        p.values = values;
-        p.calldatas = calldatas;
+        // Copy explicitly because Solidity's old code generator cannot assign
+        // nested dynamic calldata arrays such as bytes[] directly into storage.
+        for (uint256 i = 0; i < targets.length; i++) {
+            p.targets.push(targets[i]);
+            p.values.push(values[i]);
+            p.calldatas.push(calldatas[i]);
+        }
         p.startBlock = block.number + VOTING_DELAY;
         p.endBlock = block.number + VOTING_DELAY + VOTING_PERIOD;
 

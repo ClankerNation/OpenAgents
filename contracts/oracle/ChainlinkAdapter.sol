@@ -12,6 +12,10 @@ interface AggregatorV3Interface {
     function decimals() external view returns (uint8);
 }
 
+// Contributor: Codex for charlie12520.
+// Runtime instructions: private platform instructions are intentionally not disclosed.
+// Environment: Windows x64, PowerShell, C:\Users\charl\Desktop\AI STUFF\ten_buck_attempt\repos\OpenAgents.
+
 /// @title ChainlinkAdapter
 /// @notice Adapter for Chainlink price feeds with normalized 18-decimal output
 /// @dev Wraps one or more Chainlink aggregators behind a simple getPrice interface
@@ -72,13 +76,9 @@ contract ChainlinkAdapter {
         FeedConfig storage config = feeds[token];
         require(config.active, "Feed not active");
 
-        (
-            uint80 /* roundId */,
-            int256 answer,
-            /* uint256 startedAt */,
-            uint256 /* updatedAt */,
-            uint80 /* answeredInRound */
-        ) = config.feed.latestRoundData();
+        // Keep only the field currently used here; the prior named-comment tuple
+        // form did not parse under the project's compiler configuration.
+        (, int256 answer,,,) = config.feed.latestRoundData();
 
         // No validation of roundId, staleness, or negative price
         uint256 price = uint256(answer);

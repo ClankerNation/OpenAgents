@@ -4,12 +4,20 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "../interfaces/IPermit2.sol";
+
+// Contributor: Codex for charlie12520.
+// Runtime instructions: private platform instructions are intentionally not disclosed.
+// Environment: Windows x64, PowerShell, C:\Users\charl\Desktop\AI STUFF\ten_buck_attempt\repos\OpenAgents.
 
 /// @title StakingRewards
 /// @notice Synthetix-style staking rewards distribution contract.
 /// @dev Users stake an ERC20 token and earn rewards over a fixed duration.
 contract StakingRewards is ReentrancyGuard {
     using SafeERC20 for IERC20;
+
+    // Uniswap Permit2 is deployed at this deterministic address on supported chains.
+    IPermit2 public constant PERMIT2 = IPermit2(0x000000000022D473030F116dDEE9F6B43aC78BA3);
 
     IERC20 public immutable stakingToken;
     IERC20 public immutable rewardsToken;
@@ -90,6 +98,18 @@ contract StakingRewards is ReentrancyGuard {
         emit Staked(msg.sender, amount);
     }
 
+    function stakeWithPermit2(
+        uint256 amount,
+        IPermit2.PermitTransferFrom calldata permit,
+        bytes calldata signature
+    ) external nonReentrant updateReward(msg.sender) {
+        require(amount > 0, "Cannot stake 0");
+        _pullWithPermit2(stakingToken, amount, permit, signature);
+        _totalSupply += amount;
+        _balances[msg.sender] += amount;
+        emit Staked(msg.sender, amount);
+    }
+
     /// @notice Withdraw staked tokens.
     /// @param amount Amount to withdraw.
     function withdraw(uint256 amount) external nonReentrant updateReward(msg.sender) {
@@ -129,5 +149,26 @@ contract StakingRewards is ReentrancyGuard {
         lastUpdateTime = block.timestamp;
         periodFinish = block.timestamp + rewardsDuration;
         emit RewardAdded(reward);
+    }
+
+    function _pullWithPermit2(
+        IERC20 token,
+        uint256 amount,
+        IPermit2.PermitTransferFrom calldata permit,
+        bytes calldata signature
+    ) internal {
+        // Bind the signed permission to the token and amount this function is about
+        // to pull so a signature for another token or smaller amount cannot be reused.
+        require(permit.permitted.token == address(token), "Permit token mismatch");
+        require(permit.permitted.amount >= amount, "Permit amount too low");
+        PERMIT2.permitTransferFrom(
+            permit,
+            IPermit2.SignatureTransferDetails({
+                to: address(this),
+                requestedAmount: amount
+            }),
+            msg.sender,
+            signature
+        );
     }
 }

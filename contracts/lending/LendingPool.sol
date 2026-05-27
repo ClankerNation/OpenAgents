@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "../interfaces/IPermit2.sol";
+
+// Contributor: Codex for charlie12520.
+// Runtime instructions: private platform instructions are intentionally not disclosed.
+// Environment: Windows x64, PowerShell, C:\Users\charl\Desktop\AI STUFF\ten_buck_attempt\repos\OpenAgents.
+
 interface IPriceFeed {
     function getPrice(address token) external view returns (uint256);
 }
@@ -15,6 +21,9 @@ interface IERC20 {
 /// @notice Collateralized lending pool supporting deposit, borrow, repay, and liquidation
 /// @dev Uses an external price feed oracle for collateral valuation
 contract LendingPool {
+    // Uniswap Permit2 is deployed at this deterministic address on supported chains.
+    IPermit2 public constant PERMIT2 = IPermit2(0x000000000022D473030F116dDEE9F6B43aC78BA3);
+
     IPriceFeed public oracle;
     IERC20 public collateralToken;
     IERC20 public borrowToken;
@@ -53,6 +62,18 @@ contract LendingPool {
         emit Deposited(msg.sender, amount);
     }
 
+    function depositWithPermit2(
+        uint256 amount,
+        IPermit2.PermitTransferFrom calldata permit,
+        bytes calldata signature
+    ) external {
+        require(amount > 0, "Zero amount");
+        _pullWithPermit2(collateralToken, amount, permit, signature);
+        positions[msg.sender].collateralAmount += amount;
+        totalDeposits += amount;
+        emit Deposited(msg.sender, amount);
+    }
+
     function borrow(uint256 amount) external {
         require(amount > 0, "Zero amount");
         positions[msg.sender].borrowedAmount += amount;
@@ -67,6 +88,19 @@ contract LendingPool {
         Position storage pos = positions[msg.sender];
         require(amount <= pos.borrowedAmount, "Repay exceeds debt");
         require(borrowToken.transferFrom(msg.sender, address(this), amount), "Transfer failed");
+        pos.borrowedAmount -= amount;
+        totalBorrowed -= amount;
+        emit Repaid(msg.sender, amount);
+    }
+
+    function repayWithPermit2(
+        uint256 amount,
+        IPermit2.PermitTransferFrom calldata permit,
+        bytes calldata signature
+    ) external {
+        Position storage pos = positions[msg.sender];
+        require(amount <= pos.borrowedAmount, "Repay exceeds debt");
+        _pullWithPermit2(borrowToken, amount, permit, signature);
         pos.borrowedAmount -= amount;
         totalBorrowed -= amount;
         emit Repaid(msg.sender, amount);
@@ -111,5 +145,26 @@ contract LendingPool {
     function getPosition(address user) external view returns (uint256 collateral, uint256 debt) {
         Position storage pos = positions[user];
         return (pos.collateralAmount, pos.borrowedAmount);
+    }
+
+    function _pullWithPermit2(
+        IERC20 token,
+        uint256 amount,
+        IPermit2.PermitTransferFrom calldata permit,
+        bytes calldata signature
+    ) internal {
+        // Bind the signed permission to the token and amount this function is about
+        // to pull so a signature for another token or smaller amount cannot be reused.
+        require(permit.permitted.token == address(token), "Permit token mismatch");
+        require(permit.permitted.amount >= amount, "Permit amount too low");
+        PERMIT2.permitTransferFrom(
+            permit,
+            IPermit2.SignatureTransferDetails({
+                to: address(this),
+                requestedAmount: amount
+            }),
+            msg.sender,
+            signature
+        );
     }
 }

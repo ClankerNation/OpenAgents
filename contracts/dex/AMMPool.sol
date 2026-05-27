@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "../interfaces/IPermit2.sol";
+
+// Contributor: Codex for charlie12520.
+// Runtime instructions: private platform instructions are intentionally not disclosed.
+// Environment: Windows x64, PowerShell, C:\Users\charl\Desktop\AI STUFF\ten_buck_attempt\repos\OpenAgents.
+
 interface IERC20 {
     function transferFrom(address from, address to, uint256 amount) external returns (bool);
     function transfer(address to, uint256 amount) external returns (bool);
@@ -11,6 +17,9 @@ interface IERC20 {
 /// @notice Constant product (x*y=k) automated market maker pool
 /// @dev Supports adding/removing liquidity and token swaps with a fee
 contract AMMPool {
+    // Uniswap Permit2 is deployed at this deterministic address on supported chains.
+    IPermit2 public constant PERMIT2 = IPermit2(0x000000000022D473030F116dDEE9F6B43aC78BA3);
+
     IERC20 public tokenA;
     IERC20 public tokenB;
 
@@ -34,25 +43,28 @@ contract AMMPool {
     // enabling a well-known inflation attack where attacker donates tokens to manipulate
     // share price and steal from the next depositor
     function addLiquidity(uint256 amountA, uint256 amountB) external returns (uint256 lpTokens) {
-        require(amountA > 0 && amountB > 0, "Zero amounts");
-
-        if (totalLiquidity == 0) {
-            lpTokens = _sqrt(amountA * amountB);
-        } else {
-            uint256 lpA = (amountA * totalLiquidity) / reserveA;
-            uint256 lpB = (amountB * totalLiquidity) / reserveB;
-            lpTokens = lpA < lpB ? lpA : lpB;
-        }
+        lpTokens = _calculateLiquidity(amountA, amountB);
 
         require(tokenA.transferFrom(msg.sender, address(this), amountA), "Transfer A failed");
         require(tokenB.transferFrom(msg.sender, address(this), amountB), "Transfer B failed");
 
-        reserveA += amountA;
-        reserveB += amountB;
-        liquidity[msg.sender] += lpTokens;
-        totalLiquidity += lpTokens;
+        _recordLiquidity(amountA, amountB, lpTokens);
+    }
 
-        emit LiquidityAdded(msg.sender, amountA, amountB, lpTokens);
+    function addLiquidityWithPermit2(
+        uint256 amountA,
+        uint256 amountB,
+        IPermit2.PermitTransferFrom calldata permitA,
+        bytes calldata signatureA,
+        IPermit2.PermitTransferFrom calldata permitB,
+        bytes calldata signatureB
+    ) external returns (uint256 lpTokens) {
+        lpTokens = _calculateLiquidity(amountA, amountB);
+
+        _pullWithPermit2(tokenA, amountA, permitA, signatureA);
+        _pullWithPermit2(tokenB, amountB, permitB, signatureB);
+
+        _recordLiquidity(amountA, amountB, lpTokens);
     }
 
     function removeLiquidity(uint256 lpTokens) external {
@@ -77,10 +89,61 @@ contract AMMPool {
     // BUG: Fee truncates to zero for small swaps — (amountIn * 30) / 10000 rounds to 0
     // when amountIn < 334, meaning tiny swaps pay no fee and can drain value over time
     function swap(address tokenIn, uint256 amountIn, uint256 minAmountOut) external returns (uint256 amountOut) {
+        (bool isA, IERC20 tIn, IERC20 tOut, uint256 quotedOut) = _quoteSwap(tokenIn, amountIn, minAmountOut);
+        amountOut = quotedOut;
+
+        require(tIn.transferFrom(msg.sender, address(this), amountIn), "Transfer in failed");
+        require(tOut.transfer(msg.sender, amountOut), "Transfer out failed");
+
+        _recordSwap(isA, tokenIn, amountIn, amountOut);
+    }
+
+    function swapWithPermit2(
+        address tokenIn,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        IPermit2.PermitTransferFrom calldata permit,
+        bytes calldata signature
+    ) external returns (uint256 amountOut) {
+        (bool isA, IERC20 tIn, IERC20 tOut, uint256 quotedOut) = _quoteSwap(tokenIn, amountIn, minAmountOut);
+        amountOut = quotedOut;
+
+        _pullWithPermit2(tIn, amountIn, permit, signature);
+        require(tOut.transfer(msg.sender, amountOut), "Transfer out failed");
+
+        _recordSwap(isA, tokenIn, amountIn, amountOut);
+    }
+
+    function _calculateLiquidity(uint256 amountA, uint256 amountB) internal view returns (uint256 lpTokens) {
+        require(amountA > 0 && amountB > 0, "Zero amounts");
+
+        if (totalLiquidity == 0) {
+            lpTokens = _sqrt(amountA * amountB);
+        } else {
+            uint256 lpA = (amountA * totalLiquidity) / reserveA;
+            uint256 lpB = (amountB * totalLiquidity) / reserveB;
+            lpTokens = lpA < lpB ? lpA : lpB;
+        }
+    }
+
+    function _recordLiquidity(uint256 amountA, uint256 amountB, uint256 lpTokens) internal {
+        reserveA += amountA;
+        reserveB += amountB;
+        liquidity[msg.sender] += lpTokens;
+        totalLiquidity += lpTokens;
+
+        emit LiquidityAdded(msg.sender, amountA, amountB, lpTokens);
+    }
+
+    function _quoteSwap(
+        address tokenIn,
+        uint256 amountIn,
+        uint256 minAmountOut
+    ) internal view returns (bool isA, IERC20 tIn, IERC20 tOut, uint256 amountOut) {
         require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
         require(amountIn > 0, "Zero input");
 
-        bool isA = tokenIn == address(tokenA);
+        isA = tokenIn == address(tokenA);
         (uint256 resIn, uint256 resOut) = isA ? (reserveA, reserveB) : (reserveB, reserveA);
 
         uint256 amountInWithFee = amountIn * (10000 - FEE_BPS);
@@ -88,12 +151,11 @@ contract AMMPool {
 
         require(amountOut >= minAmountOut, "Slippage exceeded");
 
-        IERC20 tIn = isA ? tokenA : tokenB;
-        IERC20 tOut = isA ? tokenB : tokenA;
+        tIn = isA ? tokenA : tokenB;
+        tOut = isA ? tokenB : tokenA;
+    }
 
-        require(tIn.transferFrom(msg.sender, address(this), amountIn), "Transfer in failed");
-        require(tOut.transfer(msg.sender, amountOut), "Transfer out failed");
-
+    function _recordSwap(bool isA, address tokenIn, uint256 amountIn, uint256 amountOut) internal {
         if (isA) {
             reserveA += amountIn;
             reserveB -= amountOut;
@@ -103,6 +165,27 @@ contract AMMPool {
         }
 
         emit Swap(msg.sender, tokenIn, amountIn, amountOut);
+    }
+
+    function _pullWithPermit2(
+        IERC20 token,
+        uint256 amount,
+        IPermit2.PermitTransferFrom calldata permit,
+        bytes calldata signature
+    ) internal {
+        // Bind the signed permission to the token and amount this function is about
+        // to pull so a signature for another token or smaller amount cannot be reused.
+        require(permit.permitted.token == address(token), "Permit token mismatch");
+        require(permit.permitted.amount >= amount, "Permit amount too low");
+        PERMIT2.permitTransferFrom(
+            permit,
+            IPermit2.SignatureTransferDetails({
+                to: address(this),
+                requestedAmount: amount
+            }),
+            msg.sender,
+            signature
+        );
     }
 
     function _sqrt(uint256 y) internal pure returns (uint256 z) {
