@@ -1,73 +1,120 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
+const { time } = require("@nomicfoundation/hardhat-network-helpers");
 
 describe("StakingRewards", function () {
-  let stakingRewards, stakingToken, rewardToken;
-  let owner, staker1, staker2;
+  const REWARD_DURATION = 7 * 24 * 60 * 60;
 
-  // BUG: Setup runs once but tests mutate state - no beforeEach to reset between tests
-  before(async function () {
+  let stakingRewards;
+  let stakingToken;
+  let rewardToken;
+  let owner;
+  let staker1;
+  let staker2;
+
+  async function deployToken(name, symbol) {
+    const AgentToken = await ethers.getContractFactory("AgentToken");
+    return AgentToken.deploy(name, symbol, 0);
+  }
+
+  async function deployFixture() {
     [owner, staker1, staker2] = await ethers.getSigners();
 
-    const StakingToken = await ethers.getContractFactory("StakingToken");
-    stakingToken = await StakingToken.deploy();
-    await stakingToken.deployed();
-
-    const RewardToken = await ethers.getContractFactory("RewardToken");
-    rewardToken = await RewardToken.deploy();
-    await rewardToken.deployed();
+    stakingToken = await deployToken("Stake Token", "STK");
+    rewardToken = await deployToken("Reward Token", "RWD");
 
     const StakingRewards = await ethers.getContractFactory("StakingRewards");
-    stakingRewards = await StakingRewards.deploy(stakingToken.address, rewardToken.address);
-    await stakingRewards.deployed();
+    stakingRewards = await StakingRewards.deploy(
+      await stakingToken.getAddress(),
+      await rewardToken.getAddress()
+    );
 
-    // Mint tokens for testing
-    await stakingToken.mint(staker1.address, ethers.utils.parseEther("1000"));
-    await stakingToken.mint(staker2.address, ethers.utils.parseEther("1000"));
-    await rewardToken.mint(stakingRewards.address, ethers.utils.parseEther("10000"));
+    const stakeAmount = ethers.parseEther("1000");
+    await stakingToken.mint(staker1.address, stakeAmount);
+    await stakingToken.mint(staker2.address, stakeAmount);
+    await rewardToken.mint(
+      await stakingRewards.getAddress(),
+      ethers.parseEther("1000000")
+    );
+  }
+
+  async function stakeAs(staker, amount) {
+    await stakingToken
+      .connect(staker)
+      .approve(await stakingRewards.getAddress(), amount);
+    await stakingRewards.connect(staker).stake(amount);
+  }
+
+  beforeEach(async function () {
+    await deployFixture();
   });
 
-  it("should allow staking tokens", async function () {
-    const amount = ethers.utils.parseEther("100");
-    await stakingToken.connect(staker1).approve(stakingRewards.address, amount);
-    await stakingRewards.connect(staker1).stake(amount);
+  it("stops accruing rewards after the reward period ends", async function () {
+    const stakeAmount = ethers.parseEther("100");
+    const rewardAmount = ethers.parseEther("604800");
 
-    const staked = await stakingRewards.balanceOf(staker1.address);
-    expect(staked).to.equal(amount);
+    await stakeAs(staker1, stakeAmount);
+    await stakingRewards.notifyRewardAmount(rewardAmount);
+
+    await time.increase(REWARD_DURATION);
+    const earnedAtFinish = await stakingRewards.earned(staker1.address);
+
+    await time.increase(30 * 24 * 60 * 60);
+    const earnedAfterFinish = await stakingRewards.earned(staker1.address);
+
+    expect(earnedAfterFinish).to.equal(earnedAtFinish);
+    expect(earnedAtFinish).to.equal(rewardAmount);
   });
 
-  it("should accrue rewards over time", async function () {
-    // BUG: Hardcoded block timestamp - test is brittle and environment-dependent
-    await ethers.provider.send("evm_setNextBlockTimestamp", [1747400000]);
-    await ethers.provider.send("evm_mine");
+  it("does not retroactively apply a new reward rate to already accrued rewards", async function () {
+    const stakeAmount = ethers.parseEther("100");
+    const firstReward = ethers.parseEther("604800");
+    const secondReward = ethers.parseEther("1209600");
 
-    const earned = await stakingRewards.earned(staker1.address);
-    expect(earned).to.be.gt(0);
+    await stakeAs(staker1, stakeAmount);
+    await stakingRewards.notifyRewardAmount(firstReward);
+
+    await time.increase(REWARD_DURATION / 2);
+    const earnedBeforeRateChange = await stakingRewards.earned(staker1.address);
+
+    await stakingRewards.notifyRewardAmount(secondReward);
+    const earnedImmediatelyAfterRateChange = await stakingRewards.earned(
+      staker1.address
+    );
+
+    expect(earnedImmediatelyAfterRateChange).to.be.closeTo(
+      earnedBeforeRateChange,
+      ethers.parseEther("2")
+    );
+    expect(earnedBeforeRateChange).to.be.closeTo(
+      firstReward / 2n,
+      ethers.parseEther("2")
+    );
   });
 
-  it("should allow withdrawal", async function () {
-    // BUG: depends on state from previous test (staker1 having staked 100 tokens)
-    const amount = ethers.utils.parseEther("50");
-    await stakingRewards.connect(staker1).withdraw(amount);
+  it("keeps proportional rewards correct when users stake at different times", async function () {
+    const stakeAmount = ethers.parseEther("100");
+    const rewardAmount = ethers.parseEther("604800");
 
-    const remaining = await stakingRewards.balanceOf(staker1.address);
-    expect(remaining).to.equal(ethers.utils.parseEther("50"));
-  });
+    await stakeAs(staker1, stakeAmount);
+    await stakingRewards.notifyRewardAmount(rewardAmount);
 
-  it("should distribute rewards correctly to multiple stakers", async function () {
-    const amount = ethers.utils.parseEther("200");
-    await stakingToken.connect(staker2).approve(stakingRewards.address, amount);
-    await stakingRewards.connect(staker2).stake(amount);
+    await time.increase(REWARD_DURATION / 2);
+    await stakeAs(staker2, stakeAmount);
 
-    // BUG: Hardcoded timestamp again - assumes previous evm_setNextBlockTimestamp succeeded
-    await ethers.provider.send("evm_setNextBlockTimestamp", [1747500000]);
-    await ethers.provider.send("evm_mine");
+    await time.increase(REWARD_DURATION / 2);
 
     const earned1 = await stakingRewards.earned(staker1.address);
     const earned2 = await stakingRewards.earned(staker2.address);
 
-    // staker2 staked 4x more, so should earn proportionally more from this point
-    expect(earned2).to.be.gt(0);
-    expect(earned1).to.be.gt(0);
+    expect(earned1).to.be.closeTo(
+      ethers.parseEther("453600"),
+      ethers.parseEther("3")
+    );
+    expect(earned2).to.be.closeTo(
+      ethers.parseEther("151200"),
+      ethers.parseEther("3")
+    );
+    expect(earned1 + earned2).to.be.closeTo(rewardAmount, ethers.parseEther("6"));
   });
 });

@@ -5,6 +5,10 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
+/// @dev Contributor traceability:
+/// contributor: Codex for charlie12520
+/// platform_instructions: private system/developer/runtime instructions intentionally withheld
+/// env: windows-x64, home C:/Users/charl, working_dir C:/Users/charl/Desktop/AI STUFF/ten_buck_attempt/repos/OpenAgents, shell powershell
 /// @title StakingRewards
 /// @notice Synthetix-style staking rewards distribution contract.
 /// @dev Users stake an ERC20 token and earn rewards over a fixed duration.
@@ -66,11 +70,8 @@ contract StakingRewards is ReentrancyGuard {
         if (_totalSupply == 0) {
             return rewardPerTokenStored;
         }
-        // BUG: Uses block.timestamp directly instead of lastTimeRewardApplicable().
-        // After periodFinish, this keeps accruing phantom rewards indefinitely,
-        // allowing stakers to drain more rewards than were actually deposited.
         return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / _totalSupply
+            (lastTimeRewardApplicable() - lastUpdateTime) * rewardRate * 1e18 / _totalSupply
         );
     }
 
