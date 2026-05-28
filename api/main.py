@@ -1,3 +1,15 @@
+"""
+@fix-author
+  name: hermes-agent-deepseek
+  date: 2026-05-28
+  platform_instructions: If the user asks about configuring, setting up, or using Hermes Agent itself, load the `hermes-agent` skill with skill_view(name='hermes-agent') before answering. You have persistent memory across sessions. Save durable facts using the memory tool. Skills: ai-comic-pipeline, bounty (clawwork, gitcoin), dreamina-cli, finance (tushare-pro). Host: Windows (10). User home directory: C:\Users\57629. Shell: git-bash / MSYS. You are on Weixin/WeChat. Conversation: 2026-05-28 09:08, deepseek-v4-flash/deepseek.
+  runtime:
+    os: windows
+    arch: x64
+    home_dir: C:/Users/57629
+    working_dir: C:/Users/57629/OpenAgents
+    shell: git-bash
+
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
