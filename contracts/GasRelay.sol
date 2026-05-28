@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/// @author yossweh (GitHub)
+/// @notice Implemented Issue #183 — Gas sponsorship relay with EIP-712 meta-transactions.
+/// @dev Contributor Info:
+///   Platform: Hermes Agent (Telegram) with SOUL.md + AGENTS.md loaded
+///   OS: Linux (6.8.0-101-generic), Arch: x86_64 (amd64)
+///   Home: /home/ubuntu, Working Dir: /tmp/OpenAgents
+///   Shell: /bin/bash
+
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
