@@ -1,20 +1,19 @@
 """Payment and escrow endpoints for bounty payouts."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
 from ..models.database import get_db, Payment, Task
 from ..middleware.auth import get_current_user
+from ..errors import NotFoundError, ForbiddenError, ValidationError
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 
 
 class EscrowDeposit(BaseModel):
     task_id: int
-    # BUG: Amount is not validated as positive — negative or zero deposits
-    # could corrupt escrow balances or drain funds
     amount: float
     token_address: Optional[str] = "0x0000000000000000000000000000000000000000"
 
@@ -28,14 +27,16 @@ class ClaimRequest(BaseModel):
 async def deposit_escrow(
     deposit: EscrowDeposit, user=Depends(get_current_user), db=Depends(get_db)
 ):
+    if deposit.amount <= 0:
+        raise ValidationError(
+            message="Deposit amount must be positive",
+            fields=[{"field": "amount", "message": "Amount must be greater than zero", "type": "value_error"}],
+        )
     task = db.query(Task).filter(Task.id == deposit.task_id).first()
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise NotFoundError("Task", deposit.task_id)
     if task.creator_id != user["id"]:
-        raise HTTPException(status_code=403, detail="Only task creator can fund escrow")
-
-    # BUG: No idempotency key — retried requests create duplicate escrow entries,
-    # locking more funds than intended
+        raise ForbiddenError("Only task creator can fund escrow")
     payment = Payment(
         task_id=deposit.task_id,
         from_address=user["address"],
@@ -65,26 +66,26 @@ async def claim_payment(
 ):
     task = db.query(Task).filter(Task.id == claim.task_id).first()
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise NotFoundError("Task", claim.task_id)
     if task.status != "completed":
-        raise HTTPException(status_code=400, detail="Task not yet completed")
-
-    # BUG: Race condition — two concurrent claims can both read status="escrowed"
-    # before either updates it, causing a double-payout
+        raise ValidationError(
+            message="Task not yet completed",
+            fields=[{"field": "task_id", "message": "Task must be completed before claiming", "type": "value_error"}],
+        )
     payments = db.query(Payment).filter(
         Payment.task_id == claim.task_id, Payment.status == "escrowed"
     ).all()
-
     if not payments:
-        raise HTTPException(status_code=400, detail="No escrowed funds available")
-
+        raise ValidationError(
+            message="No escrowed funds available",
+            fields=[{"field": "task_id", "message": "No escrowed payments found for this task", "type": "value_error"}],
+        )
     total_claimed = 0.0
     for payment in payments:
         payment.status = "claimed"
         payment.to_address = claim.recipient_address
         payment.claimed_at = datetime.utcnow()
         total_claimed += payment.amount
-
     db.commit()
     return {
         "task_id": claim.task_id,

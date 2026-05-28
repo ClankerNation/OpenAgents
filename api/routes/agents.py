@@ -1,18 +1,19 @@
 """Agent CRUD endpoints for the OpenAgents platform."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
 from ..models.database import get_db, Agent
 from ..middleware.auth import get_current_user
+from ..errors import NotFoundError, ForbiddenError, ValidationError
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
 
 class AgentCreate(BaseModel):
-    name: str  # BUG: No validation — name can contain SQL injection, XSS, or be empty
+    name: str
     description: Optional[str] = None
     model_type: str = "gpt-4"
     config: Optional[dict] = None
@@ -26,6 +27,11 @@ class AgentUpdate(BaseModel):
 
 @router.post("/")
 async def create_agent(agent: AgentCreate, user=Depends(get_current_user), db=Depends(get_db)):
+    if not agent.name or not agent.name.strip():
+        raise ValidationError(
+            message="Agent name is required",
+            fields=[{"field": "name", "message": "Name must not be empty", "type": "value_error"}],
+        )
     new_agent = Agent(
         name=agent.name,
         description=agent.description,
@@ -49,7 +55,6 @@ async def list_agents(
 ):
     query = db.query(Agent)
     if owner:
-        # BUG: String interpolation in query — vulnerable to SQL injection
         query = query.filter(Agent.owner_id == owner)
     return query.offset(skip).limit(limit).all()
 
@@ -58,7 +63,7 @@ async def list_agents(
 async def get_agent(agent_id: int, db=Depends(get_db)):
     agent = db.query(Agent).filter(Agent.id == agent_id).first()
     if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+        raise NotFoundError("Agent", agent_id)
     return agent
 
 
@@ -68,21 +73,22 @@ async def update_agent(
 ):
     agent = db.query(Agent).filter(Agent.id == agent_id).first()
     if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+        raise NotFoundError("Agent", agent_id)
     if agent.owner_id != user["id"]:
-        raise HTTPException(status_code=403, detail="Not the owner")
-    for field, value in update.dict(exclude_unset=True).items():
+        raise ForbiddenError("Not the owner of this agent")
+    for field, value in update.model_dump(exclude_unset=True).items():
         setattr(agent, field, value)
     db.commit()
     return agent
 
 
-# BUG: No authentication — anyone can delete any agent
 @router.delete("/{agent_id}")
-async def delete_agent(agent_id: int, db=Depends(get_db)):
+async def delete_agent(agent_id: int, user=Depends(get_current_user), db=Depends(get_db)):
     agent = db.query(Agent).filter(Agent.id == agent_id).first()
     if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+        raise NotFoundError("Agent", agent_id)
+    if agent.owner_id != user["id"]:
+        raise ForbiddenError("Not the owner of this agent")
     db.delete(agent)
     db.commit()
     return {"deleted": True}

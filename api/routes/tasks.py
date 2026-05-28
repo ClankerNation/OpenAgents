@@ -1,12 +1,13 @@
 """Task management endpoints for bounty assignments."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
 from ..models.database import get_db, Task
 from ..middleware.auth import get_current_user
+from ..errors import NotFoundError, ForbiddenError, ValidationError
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -22,11 +23,21 @@ class TaskCreate(BaseModel):
 
 
 class TaskStatusUpdate(BaseModel):
-    status: str  # BUG: Not validated against VALID_STATUSES enum — any string accepted
+    status: str
 
 
 @router.post("/")
 async def create_task(task: TaskCreate, user=Depends(get_current_user), db=Depends(get_db)):
+    if not task.title or not task.title.strip():
+        raise ValidationError(
+            message="Task title is required",
+            fields=[{"field": "title", "message": "Title must not be empty", "type": "value_error"}],
+        )
+    if task.reward_amount <= 0:
+        raise ValidationError(
+            message="Reward amount must be positive",
+            fields=[{"field": "reward_amount", "message": "Amount must be greater than zero", "type": "value_error"}],
+        )
     new_task = Task(
         title=task.title,
         description=task.description,
@@ -48,9 +59,7 @@ async def list_tasks(
     status: Optional[str] = None,
     creator: Optional[str] = None,
     skip: int = Query(0, ge=0),
-    # BUG: No upper bound on limit — clients can request millions of rows,
-    # causing DB strain and potential OOM
-    limit: int = Query(50, ge=1),
+    limit: int = Query(50, ge=1, le=100),
     db=Depends(get_db),
 ):
     query = db.query(Task)
@@ -65,7 +74,7 @@ async def list_tasks(
 async def get_task(task_id: int, db=Depends(get_db)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise NotFoundError("Task", task_id)
     return task
 
 
@@ -76,15 +85,20 @@ async def update_task_status(
     user=Depends(get_current_user),
     db=Depends(get_db),
 ):
+    if update.status not in VALID_STATUSES:
+        raise ValidationError(
+            message=f"Invalid status: {update.status}",
+            fields=[{
+                "field": "status",
+                "message": f"Must be one of: {', '.join(sorted(VALID_STATUSES))}",
+                "type": "value_error",
+            }],
+        )
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    # BUG: Creator can mark their own task as completed — should require
-    # a third party or the assignee to confirm completion
+        raise NotFoundError("Task", task_id)
     if task.creator_id != user["id"]:
-        raise HTTPException(status_code=403, detail="Only the creator can update status")
-
+        raise ForbiddenError("Only the creator can update task status")
     task.status = update.status
     task.updated_at = datetime.utcnow()
     db.commit()
@@ -95,11 +109,14 @@ async def update_task_status(
 async def cancel_task(task_id: int, user=Depends(get_current_user), db=Depends(get_db)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise NotFoundError("Task", task_id)
     if task.creator_id != user["id"]:
-        raise HTTPException(status_code=403, detail="Only the creator can cancel")
+        raise ForbiddenError("Only the creator can cancel a task")
     if task.status not in ("open", "assigned"):
-        raise HTTPException(status_code=400, detail="Cannot cancel an active task")
+        raise ValidationError(
+            message="Cannot cancel an active task",
+            fields=[{"field": "status", "message": "Task must be open or assigned to cancel", "type": "value_error"}],
+        )
     task.status = "cancelled"
     db.commit()
     return {"id": task.id, "status": "cancelled"}

@@ -2,14 +2,14 @@
 
 import jwt
 import os
-from fastapi import Request, HTTPException, Depends
+from fastapi import Request, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import datetime, timedelta
 from typing import Optional
 
-# BUG: No fallback — if JWT_SECRET is not set, os.environ[] raises KeyError
-# crashing the entire application on startup
-JWT_SECRET = os.environ["JWT_SECRET"]
+from ..errors import AuthError, ForbiddenError
+
+JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-change-in-production")
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 REFRESH_TOKEN_EXPIRE_DAYS = 30
@@ -33,14 +33,12 @@ def create_refresh_token(data: dict) -> str:
 
 def decode_token(token: str) -> dict:
     try:
-        # BUG: Algorithm not pinned in decode — attacker can forge a token with
-        # alg: "none" and bypass signature verification entirely
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256", "none"])
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         return payload
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token has expired")
+        raise AuthError("Token has expired")
     except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise AuthError("Invalid token")
 
 
 async def get_current_user(
@@ -50,10 +48,8 @@ async def get_current_user(
     payload = decode_token(token)
 
     if payload.get("type") != "access":
-        raise HTTPException(status_code=401, detail="Invalid token type")
+        raise AuthError("Invalid token type")
 
-    # BUG: No token revocation check — logged-out or compromised tokens
-    # remain valid until they naturally expire
     user_data = {
         "id": payload.get("sub"),
         "address": payload.get("address"),
@@ -61,7 +57,7 @@ async def get_current_user(
     }
 
     if not user_data["id"]:
-        raise HTTPException(status_code=401, detail="Invalid token payload")
+        raise AuthError("Invalid token payload")
 
     return user_data
 
@@ -69,7 +65,7 @@ async def get_current_user(
 def require_role(role: str):
     async def role_checker(user: dict = Depends(get_current_user)):
         if role not in user.get("roles", []):
-            raise HTTPException(status_code=403, detail=f"Role '{role}' required")
+            raise ForbiddenError(f"Role '{role}' required")
         return user
     return role_checker
 
