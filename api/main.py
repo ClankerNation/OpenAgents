@@ -1,13 +1,60 @@
-from fastapi import FastAPI, HTTPException, Query
+"""OpenAgents API — Off-chain indexer and agent discovery."""
+
+import logging
+import uuid
+
+from fastapi import FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(request_id)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger("openagents")
+
+
+class RequestIdFilter(logging.Filter):
+    def filter(self, record):
+        record.request_id = getattr(record, "request_id", "no-request-id")
+        return True
+
+
+logger.addFilter(RequestIdFilter())
+
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    request.state.request_id = request_id
+
+    logger.info(
+        "Started %s %s",
+        request.method,
+        request.url.path,
+        extra={"request_id": request_id},
+    )
+
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+
+    logger.info(
+        "Completed %s %s -> %s",
+        request.method,
+        request.url.path,
+        response.status_code,
+        extra={"request_id": request_id},
+    )
+
+    return response
 
 
 class AgentResponse(BaseModel):
@@ -110,3 +157,12 @@ async def health():
         "tasks_indexed": len(tasks_cache),
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+
+from .routes.agents import router as agents_router
+from .routes.tasks import router as tasks_router
+from .routes.payments import router as payments_router
+
+app.include_router(agents_router)
+app.include_router(tasks_router)
+app.include_router(payments_router)
