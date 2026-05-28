@@ -1,13 +1,130 @@
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+from .routes import admin as admin_router
+from .middleware.errors import (
+    RequestIDMiddleware,
+    http_exception_handler,
+    validation_exception_handler,
+    general_exception_handler,
+    AppError,
+)
+from fastapi.exceptions import RequestValidationError
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
 )
+
+# Register error handlers
+app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(Exception, general_exception_handler)
+
+# Add request ID middleware
+app.add_middleware(RequestIDMiddleware)
+
+
+def custom_openapi():
+    """Generate OpenAPI schema with security schemes and error responses."""
+    if app.openapi_schema:
+        return app.openapi_schema
+    
+    openapi_schema = get_openapi(
+        title="OpenAgents API",
+        version="0.1.0",
+        description="Off-chain indexer and agent discovery API for the OpenAgents protocol\n\n"
+        "## Authentication\n"
+        "- **JWT Bearer Token**: Required for authenticated endpoints. Obtain via login.\n"
+        "- **API Key**: Alternative auth for programmatic access via `X-API-Key` header.\n\n"
+        "## Error Responses\n"
+        "All errors follow the structured format: `{code, message, details, request_id}`\n"
+        "- `VALIDATION_ERROR` (400/422): Input validation failures\n"
+        "- `NOT_FOUND` (404): Resource not found\n"
+        "- `AUTH_FAILED` (401/403): Authentication/authorization failures\n"
+        "- `RATE_LIMITED` (429): Rate limit exceeded\n"
+        "- `INTERNAL_ERROR` (500): Unexpected server errors",
+        routes=app.routes,
+    )
+    
+    # Add security schemes
+    openapi_schema["components"]["securitySchemes"] = {
+        "JWTBearer": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+            "description": "Enter your JWT token. Obtain via /auth/login endpoint.",
+        },
+        "APIKeyHeader": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-API-Key",
+            "description": "Alternative API key authentication.",
+        },
+    }
+    
+    # Add global security requirement
+    openapi_schema["security"] = [{"JWTBearer": []}, {"APIKeyHeader": []}]
+    
+    # Add error response schema
+    openapi_schema["components"]["schemas"]["ErrorResponse"] = {
+        "type": "object",
+        "properties": {
+            "code": {"type": "string", "description": "Error code", "example": "NOT_FOUND"},
+            "message": {"type": "string", "description": "Human-readable error message", "example": "Agent not found"},
+            "details": {"type": "object", "description": "Additional error details", "example": {"field": "name"}},
+            "request_id": {"type": "string", "description": "Unique request identifier", "example": "abc12345"},
+        },
+    }
+    
+    # Add validation error schema
+    openapi_schema["components"]["schemas"]["ValidationError"] = {
+        "type": "object",
+        "properties": {
+            "code": {"type": "string", "example": "VALIDATION_ERROR"},
+            "message": {"type": "string", "example": "Request validation failed"},
+            "details": {
+                "type": "object",
+                "properties": {
+                    "fields": {
+                        "type": "object",
+                        "additionalProperties": {"type": "string"},
+                        "example": {"body.name": "field required"},
+                    }
+                },
+            },
+            "request_id": {"type": "string", "example": "abc12345"},
+        },
+    }
+    
+    # Add example models
+    openapi_schema["components"]["schemas"]["AgentResponse"] = {
+        "type": "object",
+        "properties": {
+            "agent_id": {"type": "string", "example": "agent_abc123"},
+            "name": {"type": "string", "example": "My Trading Agent"},
+            "owner": {"type": "string", "example": "0x1234567890abcdef1234567890abcdef12345678"},
+            "endpoint": {"type": "string", "example": "https://api.myagent.com/webhook"},
+            "reputation": {"type": "integer", "example": 85},
+            "tasks_completed": {"type": "integer", "example": 42},
+            "active": {"type": "boolean", "example": True},
+        },
+    }
+    
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
+
+# Register admin routes
+app.include_router(admin_router.router)
 
 
 class AgentResponse(BaseModel):
