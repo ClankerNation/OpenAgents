@@ -45,3 +45,5 @@ cd api && pip install -r requirements.txt && uvicorn main:app
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+<!-- fix #171: [ Bounty $7k ] [ API ] Add OpenAPI schema generation with au -->
