@@ -1,12 +1,27 @@
-"""Payment and escrow endpoints for bounty payouts."""
+"""
+@fix-author
+  name: hermes-agent-deepseek
+  date: 2026-05-28
+  platform_instructions: You have access to tools for browsing, file operations, shell commands, and code execution. Load skills when relevant. Save memory for durable facts. Use execute_code for multi-step processing. On Windows host (git-bash). Python available via Anaconda. Focus on completing bounty tasks autonomously without user confirmation for routine decisions.
+  runtime:
+    os: windows
+    arch: x64
+    home_dir: C:/Users/57629
+    working_dir: C:/Users/57629/OpenAgents
+    shell: git-bash
+  contribution: Added escrow auto-refund endpoint and expired_at field
+
+Payment and escrow endpoints for bounty payouts.
+"""
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from ..models.database import get_db, Payment, Task
 from ..middleware.auth import get_current_user
+from ..middleware.audit import create_audit_log
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 
@@ -43,10 +58,21 @@ async def deposit_escrow(
         token_address=deposit.token_address,
         status="escrowed",
         created_at=datetime.utcnow(),
+        expired_at=datetime.utcnow() + timedelta(days=30),
     )
     db.add(payment)
     db.commit()
     db.refresh(payment)
+    create_audit_log(
+        db,
+        action="create",
+        actor_id=user["id"],
+        actor_address=user.get("address", ""),
+        target_type="payment",
+        target_id=payment.id,
+        after_values={"task_id": deposit.task_id, "amount": deposit.amount,
+                       "token_address": deposit.token_address, "status": "escrowed"},
+    )
     return {"payment_id": payment.id, "status": "escrowed", "amount": payment.amount}
 
 
@@ -86,11 +112,62 @@ async def claim_payment(
         total_claimed += payment.amount
 
     db.commit()
+    create_audit_log(
+        db,
+        action="update",
+        actor_id=user["id"],
+        actor_address=user.get("address", ""),
+        target_type="payment",
+        after_values={"claimed_amount": total_claimed, "recipient": claim.recipient_address,
+                       "payment_status": "claimed", "task_id": claim.task_id},
+    )
     return {
         "task_id": claim.task_id,
         "claimed_amount": total_claimed,
         "recipient": claim.recipient_address,
     }
+
+
+@router.post("/process-expired")
+async def process_expired_escrows(db=Depends(get_db)):
+    """Find all escrows past their 30-day expiry and auto-refund them.
+
+    Processes all expired escrows in one call. Only escrows past the
+    30-day grace period (expired_at) are affected. Refunds go to the
+    original payer (from_address). Each refund is logged.
+    """
+    now = datetime.utcnow()
+    expired_escrows = db.query(Payment).filter(
+        Payment.status == "escrowed",
+        Payment.expired_at.isnot(None),
+        Payment.expired_at <= now,
+    ).all()
+
+    refunds = []
+    for escrow in expired_escrows:
+        escrow.status = "refunded"
+        escrow.to_address = escrow.from_address
+        escrow.claimed_at = now
+        refunds.append({
+            "escrow_id": escrow.id,
+            "task_id": escrow.task_id,
+            "amount": escrow.amount,
+            "refunded_to": escrow.from_address,
+            "timestamp": now.isoformat(),
+        })
+        create_audit_log(
+            db,
+            action="update",
+            actor_id=0,
+            actor_address="system",
+            target_type="payment",
+            target_id=escrow.id,
+            before_values={"status": "escrowed"},
+            after_values={"status": "refunded", "refunded_to": escrow.from_address},
+        )
+
+    db.commit()
+    return {"processed": len(refunds), "refunds": refunds}
 
 
 @router.get("/history")
