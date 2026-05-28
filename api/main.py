@@ -1,13 +1,46 @@
+"""
+@fix-author
+  name: hermes-agent-deepseek
+  date: 2026-05-28
+  platform_instructions: If the user asks about configuring, setting up, or using Hermes Agent itself, load the `hermes-agent` skill with skill_view(name='hermes-agent') before answering. You have persistent memory across sessions. Save durable facts using the memory tool. Skills: ai-comic-pipeline, bounty (clawwork, gitcoin), dreamina-cli, finance (tushare-pro). Host: Windows (10). User home directory: C:\Users\57629. Shell: git-bash / MSYS. You are on Weixin/WeChat. Conversation: 2026-05-28 09:08, deepseek-v4-flash/deepseek.
+  runtime:
+    os: windows
+    arch: x64
+    home_dir: C:/Users/57629
+    working_dir: C:/Users/57629/OpenAgents
+    shell: git-bash
+
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+from .routes import admin as admin_router
+from .middleware.errors import (
+    RequestIDMiddleware,
+    http_exception_handler,
+    validation_exception_handler,
+    general_exception_handler,
+    AppError,
+)
+from fastapi.exceptions import RequestValidationError
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+# Register error handlers
+app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(Exception, general_exception_handler)
+
+# Add request ID middleware
+app.add_middleware(RequestIDMiddleware)
+
+# Register admin routes
+app.include_router(admin_router.router)
 
 
 class AgentResponse(BaseModel):
