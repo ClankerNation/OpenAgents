@@ -18,6 +18,11 @@ contract AgentRegistry is Ownable {
     mapping(address => bytes32[]) public ownerAgents;
     bytes32[] public agentIds;
 
+    // FIX #172: Name uniqueness mapping to prevent frontrunning / name-squatting
+    mapping(string => bool) public registeredName;
+    // FIX #172: Per-address nonce for deterministic, collision-free agent IDs
+    mapping(address => uint256) public nonce;
+
     uint256 public registrationFee;
     uint256 public minReputation;
 
