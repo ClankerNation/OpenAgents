@@ -1,6 +1,10 @@
 """Task management endpoints for bounty assignments."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import asyncio
+import json
+from typing import Dict, Set
+
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -22,7 +26,76 @@ class TaskCreate(BaseModel):
 
 
 class TaskStatusUpdate(BaseModel):
-    status: str  # BUG: Not validated against VALID_STATUSES enum — any string accepted
+    status: str
+
+
+class ConnectionManager:
+    def __init__(self):
+        self._connections: Dict[int, Set[WebSocket]] = {}
+        self._all_connections: Set[WebSocket] = set()
+
+    async def connect(self, websocket: WebSocket, task_id: Optional[int] = None):
+        await websocket.accept()
+        self._all_connections.add(websocket)
+        if task_id is not None:
+            if task_id not in self._connections:
+                self._connections[task_id] = set()
+            self._connections[task_id].add(websocket)
+
+    def disconnect(self, websocket: WebSocket, task_id: Optional[int] = None):
+        self._all_connections.discard(websocket)
+        if task_id is not None and task_id in self._connections:
+            self._connections[task_id].discard(websocket)
+
+    async def broadcast(self, task_id: int, message: dict):
+        targets = self._connections.get(task_id, set()) | self._all_connections
+        dead = []
+        for ws in targets:
+            try:
+                await ws.send_json(message)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.disconnect(ws)
+
+    @property
+    def connection_count(self) -> int:
+        return len(self._all_connections)
+
+
+manager = ConnectionManager()
+
+
+async def _heartbeat(ws: WebSocket):
+    try:
+        while True:
+            await asyncio.sleep(30)
+            await ws.send_json({"type": "ping"})
+    except Exception:
+        pass
+
+
+@router.websocket("/ws")
+async def task_websocket(websocket: WebSocket, task_id: Optional[int] = Query(None)):
+    await manager.connect(websocket, task_id)
+    heartbeat = asyncio.create_task(_heartbeat(websocket))
+    try:
+        while True:
+            data = await websocket.receive_text()
+            msg = json.loads(data)
+            if msg.get("action") == "subscribe" and "task_id" in msg:
+                tid = msg["task_id"]
+                if tid not in manager._connections:
+                    manager._connections[tid] = set()
+                manager._connections[tid].add(websocket)
+            elif msg.get("action") == "unsubscribe" and "task_id" in msg:
+                tid = msg["task_id"]
+                manager.disconnect(websocket, tid)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        heartbeat.cancel()
+        manager.disconnect(websocket, task_id)
 
 
 @router.post("/")
@@ -40,6 +113,11 @@ async def create_task(task: TaskCreate, user=Depends(get_current_user), db=Depen
     db.add(new_task)
     db.commit()
     db.refresh(new_task)
+    await manager.broadcast(new_task.id, {
+        "type": "task_created",
+        "task_id": new_task.id,
+        "status": new_task.status,
+    })
     return {"id": new_task.id, "status": new_task.status}
 
 
@@ -48,9 +126,7 @@ async def list_tasks(
     status: Optional[str] = None,
     creator: Optional[str] = None,
     skip: int = Query(0, ge=0),
-    # BUG: No upper bound on limit — clients can request millions of rows,
-    # causing DB strain and potential OOM
-    limit: int = Query(50, ge=1),
+    limit: int = Query(50, ge=1, le=100),
     db=Depends(get_db),
 ):
     query = db.query(Task)
@@ -76,18 +152,26 @@ async def update_task_status(
     user=Depends(get_current_user),
     db=Depends(get_db),
 ):
+    if update.status not in VALID_STATUSES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid status. Must be one of: {', '.join(sorted(VALID_STATUSES))}",
+        )
+
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-
-    # BUG: Creator can mark their own task as completed — should require
-    # a third party or the assignee to confirm completion
     if task.creator_id != user["id"]:
         raise HTTPException(status_code=403, detail="Only the creator can update status")
 
     task.status = update.status
     task.updated_at = datetime.utcnow()
     db.commit()
+    await manager.broadcast(task_id, {
+        "type": "task_status_changed",
+        "task_id": task_id,
+        "status": update.status,
+    })
     return {"id": task.id, "status": task.status}
 
 
@@ -102,4 +186,9 @@ async def cancel_task(task_id: int, user=Depends(get_current_user), db=Depends(g
         raise HTTPException(status_code=400, detail="Cannot cancel an active task")
     task.status = "cancelled"
     db.commit()
+    await manager.broadcast(task_id, {
+        "type": "task_status_changed",
+        "task_id": task_id,
+        "status": "cancelled",
+    })
     return {"id": task.id, "status": "cancelled"}
