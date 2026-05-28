@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/// @author yossweh (GitHub)
+/// @notice Fixed Issue #181 — Unchecked ERC20 return values in Router.
+/// @dev Contributor Info:
+///   Platform: Hermes Agent (Telegram) with SOUL.md + AGENTS.md loaded
+///   OS: Linux (6.8.0-101-generic), Arch: x86_64 (amd64)
+///   Home: /home/ubuntu, Working Dir: /tmp/OpenAgents
+///   Shell: /bin/bash
+
 interface IAMMPool {
     function swap(address tokenIn, uint256 amountIn, uint256 minAmountOut) external returns (uint256);
     function getReserves() external view returns (uint256, uint256);
