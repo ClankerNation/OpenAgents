@@ -51,7 +51,8 @@ contract Router {
     ) external returns (uint256 amountOut) {
         require(path.length >= 2, "Path too short");
 
-        IERC20(path[0]).transferFrom(msg.sender, address(this), amountIn);
+        // FIX #181: Check return value — non-standard ERC20s may return false instead of reverting
+        require(IERC20(path[0]).transferFrom(msg.sender, address(this), amountIn), "transferFrom failed");
 
         uint256 currentAmount = amountIn;
 
@@ -71,7 +72,8 @@ contract Router {
         amountOut = currentAmount;
 
         // Transfer final tokens to user
-        IERC20(path[path.length - 1]).transfer(msg.sender, amountOut);
+        // FIX #181: Check return value — non-standard ERC20s may return false instead of reverting
+        require(IERC20(path[path.length - 1]).transfer(msg.sender, amountOut), "transfer failed");
 
         emit MultiHopSwap(msg.sender, path, amountIn, amountOut);
     }
