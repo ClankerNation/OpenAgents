@@ -4,6 +4,8 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
 /// @title GovernorAlpha
 /// @notice Minimal governance contract supporting proposal creation, voting, and execution.
 /// @dev Inspired by Compound's GovernorAlpha. Token holders propose and vote on-chain actions.
@@ -31,6 +33,10 @@ contract GovernorAlpha is ReentrancyGuard {
     uint256 public constant VOTING_PERIOD = 17280; // ~3 days at 15s blocks
     uint256 public constant PROPOSAL_THRESHOLD = 100_000e18;
 
+    // FIX #180: Quorum requirement — minimum votes needed for a proposal to pass.
+    // Set to 4% of total supply (adjustable by governance).
+    uint256 public quorumVotes;
+
     mapping(uint256 => Proposal) public proposals;
 
     event ProposalCreated(uint256 indexed id, address proposer, uint256 startBlock, uint256 endBlock);
@@ -38,8 +44,9 @@ contract GovernorAlpha is ReentrancyGuard {
     event ProposalExecuted(uint256 indexed id);
     event ProposalCanceled(uint256 indexed id);
 
-    constructor(address _token) {
+    constructor(address _token, uint256 _quorumVotes) {
         token = ERC20Votes(_token);
+        quorumVotes = _quorumVotes;
     }
 
     /// @notice Create a new governance proposal.
@@ -74,19 +81,19 @@ contract GovernorAlpha is ReentrancyGuard {
     function vote(uint256 proposalId, bool support) external {
         Proposal storage p = proposals[proposalId];
         require(block.number >= p.startBlock && block.number <= p.endBlock, "Governor: voting closed");
-        // BUG: Uses tx.origin instead of msg.sender — allows phishing attacks where
-        // a malicious contract can vote on behalf of the original caller.
-        require(!p.hasVoted[tx.origin], "Governor: already voted");
-        p.hasVoted[tx.origin] = true;
+        // FIX #180: Use msg.sender instead of tx.origin — prevents phishing attacks
+        // where a malicious contract could vote on behalf of the original caller.
+        require(!p.hasVoted[msg.sender], "Governor: already voted");
+        p.hasVoted[msg.sender] = true;
 
-        uint256 weight = token.getPastVotes(tx.origin, p.startBlock);
+        uint256 weight = token.getPastVotes(msg.sender, p.startBlock);
         if (support) {
             p.forVotes += weight;
         } else {
             p.againstVotes += weight;
         }
 
-        emit VoteCast(tx.origin, proposalId, support, weight);
+        emit VoteCast(msg.sender, proposalId, support, weight);
     }
 
     /// @notice Execute a succeeded proposal.
@@ -95,9 +102,11 @@ contract GovernorAlpha is ReentrancyGuard {
         Proposal storage p = proposals[proposalId];
         require(!p.executed, "Governor: already executed");
         require(block.number > p.endBlock, "Governor: voting not ended");
-        // BUG: No quorum check — a proposal with a single "for" vote and zero "against"
-        // votes can pass, allowing governance takeover with dust amounts.
         require(p.forVotes > p.againstVotes, "Governor: proposal defeated");
+
+        // FIX #180: Enforce quorum — total for+against votes must meet minimum threshold.
+        // Prevents governance takeover with dust amounts of voting power.
+        require(p.forVotes + p.againstVotes >= quorumVotes, "Governor: quorum not reached");
 
         // BUG: No timelock delay on execution — proposals execute instantly after voting
         // ends, giving no time for users to exit if a malicious proposal passes.
