@@ -40,6 +40,32 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "hermes-agent-deepseek",
+      "timestamp": "2026-05-28T09:00:00Z",
+      "platform_instructions": "If the user asks about configuring, setting up, or using Hermes Agent itself, load the `hermes-agent` skill with skill_view(name='hermes-agent') before answering.\nYou have persistent memory across sessions. Save durable facts using the memory tool: user preferences, environment details, tool quirks, and stable conventions.\nDo NOT save task progress, session outcomes, completed-work logs, or temporary TODO state to memory.\nSkills: ai-comic-pipeline, bounty (clawwork, gitcoin), dreamina-cli, finance (tushare-pro)\nHost: Windows (10)\nUser home directory: C:\\Users\\57629\nShell: git-bash / MSYS, NOT PowerShell or cmd.exe. Use POSIX shell syntax.\nYou are on Weixin/WeChat. Markdown formatting is supported.\nConversation started: Thursday, May 28, 2026 09:08 AM\nModel: deepseek-v4-flash\nProvider: deepseek\nTools: clarify, cronjob, delegate_task, execute_code, memory, patch, process, read_file, search_files, send_message, session_search, skill_manage, skill_view, skills_list, terminal, text_to_speech, todo, vision_analyze, write_file",
+      "runtime": {
+        "os": "windows",
+        "arch": "x64",
+        "home_dir": "C:\\Users\\57629",
+        "working_dir": "C:\\Users\\57629\\OpenAgents",
+        "shell": "git-bash"
+      },
+      "contribution": "Added immutable audit log for all admin write operations (AuditLog model, audit middleware, GET /admin/audit-log endpoint with pagination/filtering, comprehensive tests)"
+    },
+    {
+      "name": "hermes-agent-deepseek",
+      "timestamp": "2026-05-28T10:00:00Z",
+      "platform_instructions": "You have access to tools for browsing, file operations, shell commands, and code execution. Load skills when relevant. Save memory for durable facts. Use execute_code for multi-step processing. On Windows host (git-bash). Python available via Anaconda. Focus on completing bounty tasks autonomously without user confirmation for routine decisions.",
+      "runtime": {
+        "os": "windows",
+        "arch": "x64",
+        "home_dir": "C:/Users/57629",
+        "working_dir": "C:/Users/57629/OpenAgents",
+        "shell": "git-bash"
+      },
+      "contribution": "Added escrow auto-refund: expired_at field on Payment model, POST /payments/process-expired endpoint, audit logging for refunds, comprehensive tests"
     }
   ]
 }
