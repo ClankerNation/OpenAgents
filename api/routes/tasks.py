@@ -7,6 +7,7 @@ from datetime import datetime
 
 from ..models.database import get_db, Task
 from ..middleware.auth import get_current_user
+from ..middleware.audit import create_audit_log
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -40,6 +41,16 @@ async def create_task(task: TaskCreate, user=Depends(get_current_user), db=Depen
     db.add(new_task)
     db.commit()
     db.refresh(new_task)
+    create_audit_log(
+        db,
+        action="create",
+        actor_id=user["id"],
+        actor_address=user.get("address", ""),
+        target_type="task",
+        target_id=new_task.id,
+        after_values={"title": task.title, "reward_amount": task.reward_amount,
+                       "status": "open", "deadline": str(task.deadline) if task.deadline else None},
+    )
     return {"id": new_task.id, "status": new_task.status}
 
 
@@ -85,9 +96,20 @@ async def update_task_status(
     if task.creator_id != user["id"]:
         raise HTTPException(status_code=403, detail="Only the creator can update status")
 
+    old_status = task.status
     task.status = update.status
     task.updated_at = datetime.utcnow()
     db.commit()
+    create_audit_log(
+        db,
+        action="update",
+        actor_id=user["id"],
+        actor_address=user.get("address", ""),
+        target_type="task",
+        target_id=task.id,
+        before_values={"status": old_status},
+        after_values={"status": update.status},
+    )
     return {"id": task.id, "status": task.status}
 
 
@@ -100,6 +122,17 @@ async def cancel_task(task_id: int, user=Depends(get_current_user), db=Depends(g
         raise HTTPException(status_code=403, detail="Only the creator can cancel")
     if task.status not in ("open", "assigned"):
         raise HTTPException(status_code=400, detail="Cannot cancel an active task")
+    old_status = task.status
     task.status = "cancelled"
     db.commit()
+    create_audit_log(
+        db,
+        action="update",
+        actor_id=user["id"],
+        actor_address=user.get("address", ""),
+        target_type="task",
+        target_id=task.id,
+        before_values={"status": old_status},
+        after_values={"status": "cancelled"},
+    )
     return {"id": task.id, "status": "cancelled"}

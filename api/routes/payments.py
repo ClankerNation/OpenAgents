@@ -7,6 +7,7 @@ from datetime import datetime
 
 from ..models.database import get_db, Payment, Task
 from ..middleware.auth import get_current_user
+from ..middleware.audit import create_audit_log
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 
@@ -47,6 +48,16 @@ async def deposit_escrow(
     db.add(payment)
     db.commit()
     db.refresh(payment)
+    create_audit_log(
+        db,
+        action="create",
+        actor_id=user["id"],
+        actor_address=user.get("address", ""),
+        target_type="payment",
+        target_id=payment.id,
+        after_values={"task_id": deposit.task_id, "amount": deposit.amount,
+                       "token_address": deposit.token_address, "status": "escrowed"},
+    )
     return {"payment_id": payment.id, "status": "escrowed", "amount": payment.amount}
 
 
@@ -86,6 +97,15 @@ async def claim_payment(
         total_claimed += payment.amount
 
     db.commit()
+    create_audit_log(
+        db,
+        action="update",
+        actor_id=user["id"],
+        actor_address=user.get("address", ""),
+        target_type="payment",
+        after_values={"claimed_amount": total_claimed, "recipient": claim.recipient_address,
+                       "payment_status": "claimed", "task_id": claim.task_id},
+    )
     return {
         "task_id": claim.task_id,
         "claimed_amount": total_claimed,

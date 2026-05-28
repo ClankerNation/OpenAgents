@@ -7,6 +7,7 @@ from datetime import datetime
 
 from ..models.database import get_db, Agent
 from ..middleware.auth import get_current_user
+from ..middleware.audit import create_audit_log
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -37,6 +38,16 @@ async def create_agent(agent: AgentCreate, user=Depends(get_current_user), db=De
     db.add(new_agent)
     db.commit()
     db.refresh(new_agent)
+    create_audit_log(
+        db,
+        action="create",
+        actor_id=user["id"],
+        actor_address=user.get("address", ""),
+        target_type="agent",
+        target_id=new_agent.id,
+        after_values={"name": new_agent.name, "description": new_agent.description,
+                       "model_type": new_agent.model_type, "config": new_agent.config},
+    )
     return {"id": new_agent.id, "name": new_agent.name, "owner": user["address"]}
 
 
@@ -71,9 +82,23 @@ async def update_agent(
         raise HTTPException(status_code=404, detail="Agent not found")
     if agent.owner_id != user["id"]:
         raise HTTPException(status_code=403, detail="Not the owner")
+    before = {"name": agent.name, "description": agent.description,
+              "config": agent.config, "model_type": agent.model_type}
     for field, value in update.dict(exclude_unset=True).items():
         setattr(agent, field, value)
     db.commit()
+    after = {"name": agent.name, "description": agent.description,
+             "config": agent.config, "model_type": agent.model_type}
+    create_audit_log(
+        db,
+        action="update",
+        actor_id=user["id"],
+        actor_address=user.get("address", ""),
+        target_type="agent",
+        target_id=agent.id,
+        before_values=before,
+        after_values=after,
+    )
     return agent
 
 
@@ -83,6 +108,17 @@ async def delete_agent(agent_id: int, db=Depends(get_db)):
     agent = db.query(Agent).filter(Agent.id == agent_id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+    before = {"name": agent.name, "description": agent.description,
+              "config": agent.config, "model_type": agent.model_type}
     db.delete(agent)
     db.commit()
+    create_audit_log(
+        db,
+        action="delete",
+        actor_id=0,
+        actor_address="unknown",
+        target_type="agent",
+        target_id=agent_id,
+        before_values=before,
+    )
     return {"deleted": True}
