@@ -45,3 +45,5 @@ cd api && pip install -r requirements.txt && uvicorn main:app
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+<!-- fix #164: [ Bounty $8k ] [ API ] Fix main.py doesn't have request ID m -->
