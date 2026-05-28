@@ -2,42 +2,42 @@
 
 @generated-by:
   Name: Antigravity
-  Timestamp: 2026-05-28T11:10:00+05:30
-  Startup-Instructions:
-    1. Create a python virtual environment:
-       python3 -m venv venv
-    2. Activate the virtual environment:
-       source venv/bin/activate
-    3. Install the dependencies:
-       pip install -r api/requirements.txt
-    4. Run the development server:
-       export JWT_SECRET="your-secret-key"
-       uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+  Timestamp: 2026-05-28T11:42:51+05:30
+  Startup-Configuration: |
+    You are Antigravity, a powerful agentic AI coding assistant designed by the Google DeepMind team working on Advanced Agentic Coding.
+    You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.
+    The USER will send you requests, which you must always prioritize addressing. User requests are enclosed within <USER_REQUEST> tags.
   Runtime-Info:
-    OS: mac
-    Python: 3
-    FastAPI: >=0.115.0
-    PyJWT: >=2.8.0
+    Operating System: mac
+    Architecture: arm64
+    Home Directory: /Users/himanshujha
+    Working Directory: /Users/himanshujha/.gemini/antigravity/scratch/OpenAgents
 """
 
 import jwt
 import os
 import uuid
 import logging
+import threading
+from datetime import datetime, timedelta, timezone
 from fastapi import Request, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from datetime import datetime, timedelta
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Development fallback setup
+# Fallback setup - raise immediately at import time in non-development environment
 JWT_SECRET = os.getenv("JWT_SECRET")
+env = os.getenv("ENV", "development").lower()
 is_jwt_secret_fallback = False
+
 if not JWT_SECRET:
-    JWT_SECRET = "dev_fallback_secret_value_do_not_use_in_production"
-    is_jwt_secret_fallback = True
-    logger.warning("JWT_SECRET env var is missing. Using development fallback secret.")
+    if env == "development":
+        JWT_SECRET = "dev_fallback_secret_value_do_not_use_in_production"
+        is_jwt_secret_fallback = True
+        logger.warning("JWT_SECRET env var is missing. Using development fallback secret.")
+    else:
+        raise RuntimeError("JWT_SECRET environment variable is missing in non-development environment!")
 
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
@@ -50,18 +50,21 @@ class InMemoryRevocationStore:
     """Thread-safe in-memory store for tracking revoked token JTIs."""
     def __init__(self):
         self._revoked = {}  # jti -> expires_at (datetime)
+        self._lock = threading.Lock()
 
     def revoke(self, jti: str, expires_at: datetime):
-        self._revoked[jti] = expires_at
+        with self._lock:
+            self._revoked[jti] = expires_at
 
     def is_revoked(self, jti: str) -> bool:
-        if jti not in self._revoked:
-            return False
-        # Clean up if expired
-        if datetime.utcnow() > self._revoked[jti]:
-            del self._revoked[jti]
-            return False
-        return True
+        with self._lock:
+            if jti not in self._revoked:
+                return False
+            # Clean up if expired
+            if datetime.now(timezone.utc) > self._revoked[jti]:
+                del self._revoked[jti]
+                return False
+            return True
 
 
 revocation_store = InMemoryRevocationStore()
@@ -69,17 +72,19 @@ revocation_store = InMemoryRevocationStore()
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    now = datetime.now(timezone.utc)
+    expire = now + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     jti = to_encode.get("jti") or str(uuid.uuid4())
-    to_encode.update({"exp": expire, "iat": datetime.utcnow(), "type": "access", "jti": jti})
+    to_encode.update({"exp": expire, "iat": now, "type": "access", "jti": jti})
     return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
 def create_refresh_token(data: dict) -> str:
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    now = datetime.now(timezone.utc)
+    expire = now + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     jti = to_encode.get("jti") or str(uuid.uuid4())
-    to_encode.update({"exp": expire, "iat": datetime.utcnow(), "type": "refresh", "jti": jti})
+    to_encode.update({"exp": expire, "iat": now, "type": "refresh", "jti": jti})
     return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
@@ -107,19 +112,21 @@ def decode_token(token: str) -> dict:
 def revoke_token(token: str) -> bool:
     """Decodes a token and adds its JTI to the revocation list."""
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        # decode_token already validates the signature, exp, and checks jti presence
+        payload = decode_token(token)
         jti = payload.get("jti")
         exp = payload.get("exp")
-        if jti and exp:
-            expires_at = datetime.utcfromtimestamp(exp)
-            revocation_store.revoke(jti, expires_at)
-            return True
-    except jwt.ExpiredSignatureError:
-        # Already expired token is effectively revoked/inactive
+        # Since decode_token passed, we know exp and jti are valid and present
+        expires_at = datetime.fromtimestamp(exp, timezone.utc)
+        revocation_store.revoke(jti, expires_at)
         return True
-    except jwt.InvalidTokenError:
-        pass
-    return False
+    except HTTPException as e:
+        # If it's already expired, consider it effectively revoked/inactive
+        if "expired" in str(e.detail).lower():
+            return True
+        raise e
+    except jwt.InvalidTokenError as e:
+        raise HTTPException(status_code=401, detail="Invalid token") from e
 
 
 async def get_current_user(

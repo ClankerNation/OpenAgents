@@ -17,12 +17,6 @@ class RefreshRequest(BaseModel):
 class RevokeRequest(BaseModel):
     token: Optional[str] = None
 
-@app.on_event("startup")
-async def startup_event():
-    env = os.getenv("ENV", "development").lower()
-    if auth.is_jwt_secret_fallback and env != "development":
-        raise RuntimeError("JWT_SECRET environment variable is missing in non-development environment!")
-
 
 class AgentResponse(BaseModel):
     agent_id: str
@@ -139,14 +133,8 @@ async def refresh_auth_token(body: RefreshRequest):
     if payload.get("type") != "refresh":
         raise HTTPException(status_code=401, detail="Invalid token type")
         
-    jti = payload.get("jti")
-    if jti:
-        from .middleware.auth import revocation_store
-        from datetime import datetime
-        exp = payload.get("exp")
-        if exp:
-            expires_at = datetime.utcfromtimestamp(exp)
-            revocation_store.revoke(jti, expires_at)
+    # Revoke old refresh token to prevent reuse (token rotation)
+    auth.revoke_token(token)
             
     user_id = payload.get("sub")
     address = payload.get("address")

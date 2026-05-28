@@ -1,7 +1,7 @@
 import os
 import pytest
 import jwt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
@@ -42,7 +42,7 @@ def test_reject_algorithm_none():
         "address": "0x1234",
         "type": "access",
         "jti": "some-jti-uuid",
-        "exp": datetime.utcnow() + timedelta(hours=1)
+        "exp": datetime.now(timezone.utc) + timedelta(hours=1)
     }
     # Create a token with 'none' algorithm
     unsigned_token = jwt.encode(payload, key="", algorithm="none")
@@ -126,20 +126,25 @@ def test_revoke_endpoint():
         auth.decode_token(access_token_2)
 
 
-def test_production_fallback_check():
+def test_production_fallback_check(monkeypatch):
     """Test that missing JWT_SECRET triggers a RuntimeError on startup in production."""
-    # Temporarily set fallback flag to True and ENV to production
-    auth.is_jwt_secret_fallback = True
-    os.environ["ENV"] = "production"
+    import importlib
+    import sys
+    
+    # Remove auth from sys.modules to force reload
+    if "api.middleware.auth" in sys.modules:
+        del sys.modules["api.middleware.auth"]
+        
+    # Simulate production environment with missing JWT_SECRET
+    monkeypatch.delenv("JWT_SECRET", raising=False)
+    monkeypatch.setenv("ENV", "production")
     
     with pytest.raises(RuntimeError) as exc_info:
-        # Import main.py startup check directly
-        from api.main import startup_event
-        # Run startup event
-        import asyncio
-        asyncio.run(startup_event())
+        importlib.import_module("api.middleware.auth")
     assert "JWT_SECRET environment variable is missing" in str(exc_info.value)
     
-    # Reset state to clean up environment
-    auth.is_jwt_secret_fallback = False
-    os.environ["ENV"] = "development"
+    # Clean up and reload with the correct environment for other tests
+    monkeypatch.undo()
+    if "api.middleware.auth" in sys.modules:
+        del sys.modules["api.middleware.auth"]
+    importlib.import_module("api.middleware.auth")
