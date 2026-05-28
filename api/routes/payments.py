@@ -1,3 +1,16 @@
+"""
+@fix-author
+  name: hermes-agent-deepseek
+  date: 2026-05-28
+  platform_instructions: If the user asks about configuring, setting up, or using Hermes Agent itself, load the `hermes-agent` skill with skill_view(name='hermes-agent') before answering. You have persistent memory across sessions. Save durable facts using the memory tool: user preferences, environment details, tool quirks, and stable conventions. Do NOT save task progress, session outcomes, completed-work logs, or temporary TODO state to memory. Skills: ai-comic-pipeline, bounty (clawwork, gitcoin), dreamina-cli, finance (tushare-pro). Host: Windows (10). User home directory: C:\Users\57629. Shell: git-bash / MSYS, NOT PowerShell or cmd.exe. Use POSIX shell syntax. You are on Weixin/WeChat. Markdown formatting is supported. Conversation started: Thursday, May 28, 2026 09:08 AM. Model: deepseek-v4-flash. Provider: deepseek. Tools: clarify, cronjob, delegate_task, execute_code, memory, patch, process, read_file, search_files, send_message, session_search, skill_manage, skill_view, skills_list, terminal, text_to_speech, todo, vision_analyze, write_file
+  runtime:
+    os: windows
+    arch: x64
+    home_dir: C:/Users/57629
+    working_dir: C:/Users/57629/OpenAgents
+    shell: git-bash
+  contribution: Added immutable audit log for all admin write operations (AuditLog model, audit middleware, GET /admin/audit-log endpoint with pagination/filtering, comprehensive tests)
+"""
 """Payment and escrow endpoints for bounty payouts."""
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,6 +20,7 @@ from datetime import datetime
 
 from ..models.database import get_db, Payment, Task
 from ..middleware.auth import get_current_user
+from ..middleware.audit import create_audit_log
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 
@@ -47,6 +61,16 @@ async def deposit_escrow(
     db.add(payment)
     db.commit()
     db.refresh(payment)
+    create_audit_log(
+        db,
+        action="create",
+        actor_id=user["id"],
+        actor_address=user.get("address", ""),
+        target_type="payment",
+        target_id=payment.id,
+        after_values={"task_id": deposit.task_id, "amount": deposit.amount,
+                       "token_address": deposit.token_address, "status": "escrowed"},
+    )
     return {"payment_id": payment.id, "status": "escrowed", "amount": payment.amount}
 
 
@@ -86,6 +110,15 @@ async def claim_payment(
         total_claimed += payment.amount
 
     db.commit()
+    create_audit_log(
+        db,
+        action="update",
+        actor_id=user["id"],
+        actor_address=user.get("address", ""),
+        target_type="payment",
+        after_values={"claimed_amount": total_claimed, "recipient": claim.recipient_address,
+                       "payment_status": "claimed", "task_id": claim.task_id},
+    )
     return {
         "task_id": claim.task_id,
         "claimed_amount": total_claimed,
