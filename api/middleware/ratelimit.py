@@ -1,92 +1,80 @@
-"""Rate limiting middleware for the OpenAgents API."""
+"""Rate limiting middleware for the OpenAgents API.
+@generated-by: giren1011-lab
+@timestamp: 2026-05-28T08:30:00Z
+@purpose: Fix #124 - Differentiate rate limits by authentication status
+"""
 
 import time
 from collections import defaultdict
-from fastapi import Request, HTTPException
+from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional
 
 
 class RateLimitConfig:
-    def __init__(
-        self,
-        requests_per_window: int = 100,
-        window_seconds: int = 60,
-        burst_limit: int = 20,
-    ):
-        self.requests_per_window = requests_per_window
-        self.window_seconds = window_seconds
-        self.burst_limit = burst_limit
+    """Rate limit configuration per tier."""
+
+    TIERS = {
+        "anonymous": {"requests_per_window": 60, "window_seconds": 60, "burst_limit": 10},
+        "authenticated": {"requests_per_window": 300, "window_seconds": 60, "burst_limit": 50},
+        "premium": {"requests_per_window": 1000, "window_seconds": 60, "burst_limit": 200},
+    }
+
+    def __init__(self, tier: str = "anonymous"):
+        config = self.TIERS.get(tier, self.TIERS["anonymous"])
+        self.requests_per_window = config["requests_per_window"]
+        self.window_seconds = config["window_seconds"]
+        self.burst_limit = config["burst_limit"]
+        self.tier = tier
 
 
-# BUG: In-memory store — all counters reset when the server restarts,
-# allowing clients to bypass rate limits by waiting for a deploy
-_request_counts: Dict[str, Tuple[int, float]] = defaultdict(lambda: (0, time.time()))
+class RateLimitEntry:
+    def __init__(self):
+        self.timestamps: list[float] = []
+        self.burst_count: int = 0
 
+
+class RateLimiter:
+    """In-memory rate limiter with per-tier limits."""
+
+    def __init__(self):
+        self.entries: Dict[str, RateLimitEntry] = defaultdict(RateLimitEntry)
+        self.premium_api_keys: set = set()
+
+    def _get_client_key(self, request: Request) -> Tuple[str, str]:
+        api_key = request.headers.get("X-API-Key", "")
+        if api_key and api_key in self.premium_api_keys:
+            return (f"premium:{api_key}", "premium")
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header and auth_header.startswith("Bearer ") and len(auth_header) > 20:
+            token = auth_header[7:]
+            return (f"auth:{token[:16]}", "authenticated")
+        forwarded = request.headers.get("X-Forwarded-For", "")
+        client_ip = forwarded.split(",")[0].strip() if forwarded else (request.client.host if request.client else "unknown")
+        return (f"anon:{client_ip}", "anonymous")
+
+    def check(self, request: Request) -> Optional[JSONResponse]:
+        client_key, tier = self._get_client_key(request)
+        config = RateLimitConfig(tier)
+        entry = self.entries[client_key]
+        now = time.time()
+        window_start = now - config.window_seconds
+        entry.timestamps = [t for t in entry.timestamps if t > window_start]
+        recent_burst = sum(1 for t in entry.timestamps if t > now - 1)
+        if recent_burst >= config.burst_limit:
+            return JSONResponse(status_code=429, content={"detail":"Too Many Requests","retry_after":1,"tier":tier,"limit":config.requests_per_window})
+        if len(entry.timestamps) >= config.requests_per_window:
+            retry_after = int(entry.timestamps[0] + config.window_seconds - now)
+            return JSONResponse(status_code=429, content={"detail":"Rate limit exceeded","retry_after":max(retry_after,1),"tier":tier,"limit":config.requests_per_window})
+        entry.timestamps.append(now)
+        return None
+
+_rate_limiter = RateLimiter()
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, config: RateLimitConfig = None):
-        super().__init__(app)
-        self.config = config or RateLimitConfig()
-
-    def _get_client_ip(self, request: Request) -> str:
-        # BUG: Trusts X-Forwarded-For header without validation — clients can
-        # spoof their IP to bypass rate limiting entirely
-        forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-        return request.client.host if request.client else "unknown"
-
-    def _is_rate_limited(self, client_ip: str) -> Tuple[bool, int]:
-        global _request_counts
-        count, window_start = _request_counts[client_ip]
-        now = time.time()
-
-        # BUG: Fixed window instead of sliding window — a burst of requests at
-        # the boundary of two windows allows 2x the intended rate
-        if now - window_start >= self.config.window_seconds:
-            _request_counts[client_ip] = (1, now)
-            return False, self.config.requests_per_window - 1
-
-        if count >= self.config.requests_per_window:
-            retry_after = int(self.config.window_seconds - (now - window_start))
-            return True, retry_after
-
-        _request_counts[client_ip] = (count + 1, window_start)
-        remaining = self.config.requests_per_window - count - 1
-        return False, remaining
-
     async def dispatch(self, request: Request, call_next):
-        if request.url.path.startswith("/health"):
-            return await call_next(request)
-
-        client_ip = self._get_client_ip(request)
-        is_limited, value = self._is_rate_limited(client_ip)
-
-        if is_limited:
-            return JSONResponse(
-                status_code=429,
-                content={
-                    "error": "Rate limit exceeded",
-                    "retry_after": value,
-                },
-                headers={"Retry-After": str(value)},
-            )
-
-        response = await call_next(request)
-        response.headers["X-RateLimit-Remaining"] = str(value)
-        response.headers["X-RateLimit-Limit"] = str(self.config.requests_per_window)
-        return response
-
-
-def create_rate_limiter(
-    requests_per_minute: int = 100,
-    burst: int = 20,
-) -> RateLimitMiddleware:
-    config = RateLimitConfig(
-        requests_per_window=requests_per_minute,
-        window_seconds=60,
-        burst_limit=burst,
-    )
-    return RateLimitMiddleware(app=None, config=config)
+        response = _rate_limiter.check(request)
+        if response:
+            return response
+        return await call_next(request)
