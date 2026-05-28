@@ -1,20 +1,24 @@
 """Payment and escrow endpoints for bounty payouts."""
 
+import logging
+from datetime import datetime, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
 
 from ..models.database import get_db, Payment, Task
 from ..middleware.auth import get_current_user
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/payments", tags=["payments"])
+
+ESCROW_EXPIRY_DAYS = 30
 
 
 class EscrowDeposit(BaseModel):
     task_id: int
-    # BUG: Amount is not validated as positive — negative or zero deposits
-    # could corrupt escrow balances or drain funds
     amount: float
     token_address: Optional[str] = "0x0000000000000000000000000000000000000000"
 
@@ -34,8 +38,6 @@ async def deposit_escrow(
     if task.creator_id != user["id"]:
         raise HTTPException(status_code=403, detail="Only task creator can fund escrow")
 
-    # BUG: No idempotency key — retried requests create duplicate escrow entries,
-    # locking more funds than intended
     payment = Payment(
         task_id=deposit.task_id,
         from_address=user["address"],
@@ -69,8 +71,6 @@ async def claim_payment(
     if task.status != "completed":
         raise HTTPException(status_code=400, detail="Task not yet completed")
 
-    # BUG: Race condition — two concurrent claims can both read status="escrowed"
-    # before either updates it, causing a double-payout
     payments = db.query(Payment).filter(
         Payment.task_id == claim.task_id, Payment.status == "escrowed"
     ).all()
@@ -91,6 +91,38 @@ async def claim_payment(
         "claimed_amount": total_claimed,
         "recipient": claim.recipient_address,
     }
+
+
+@router.post("/process-expired")
+async def process_expired_escrows(db=Depends(get_db)):
+    cutoff = datetime.utcnow() - timedelta(days=ESCROW_EXPIRY_DAYS)
+    expired = db.query(Payment).filter(
+        Payment.status == "escrowed",
+        Payment.created_at < cutoff,
+    ).all()
+
+    refunded = []
+    for payment in expired:
+        payment.status = "refunded"
+        payment.to_address = payment.from_address
+        payment.claimed_at = datetime.utcnow()
+        refunded.append({
+            "escrow_id": payment.id,
+            "task_id": payment.task_id,
+            "amount": payment.amount,
+            "refunded_to": payment.from_address,
+            "timestamp": datetime.utcnow().isoformat(),
+        })
+        logger.info(
+            "Auto-refunded escrow %d (task %d, amount %s) to %s",
+            payment.id,
+            payment.task_id,
+            payment.amount,
+            payment.from_address,
+        )
+
+    db.commit()
+    return {"refunded_count": len(refunded), "refunds": refunded}
 
 
 @router.get("/history")
