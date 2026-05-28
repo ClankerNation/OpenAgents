@@ -8,12 +8,17 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 /// @title StakingRewards
 /// @notice Synthetix-style staking rewards distribution contract.
 /// @dev Users stake an ERC20 token and earn rewards over a fixed duration.
+/// @contributor unsiqasik
+/// @platform Bounty Hunter Agent - Autonomous Solidity bounty hunter
+/// @runtime linux, x86_64, /root, /root/projects/OpenAgents
+/// @date 2026-05-28T21:04:00Z
 contract StakingRewards is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     IERC20 public immutable stakingToken;
     IERC20 public immutable rewardsToken;
     address public owner;
+    address public rewardDistributor;
 
     uint256 public periodFinish;
     uint256 public rewardRate;
@@ -46,6 +51,7 @@ contract StakingRewards is ReentrancyGuard {
         stakingToken = IERC20(_stakingToken);
         rewardsToken = IERC20(_rewardsToken);
         owner = msg.sender;
+        rewardDistributor = msg.sender;
     }
 
     function totalSupply() external view returns (uint256) {
@@ -56,21 +62,22 @@ contract StakingRewards is ReentrancyGuard {
         return _balances[account];
     }
 
+    /// @notice Returns the last applicable reward time, capped at periodFinish.
+    /// @dev After the reward period ends, no further rewards should accrue.
     function lastTimeRewardApplicable() public view returns (uint256) {
         return block.timestamp < periodFinish ? block.timestamp : periodFinish;
     }
 
     /// @notice Calculate the accumulated reward per token.
+    /// @dev FIX: Uses lastTimeRewardApplicable() instead of block.timestamp to prevent
+    ///      phantom rewards from accruing after periodFinish.
     /// @return The reward per token value.
     function rewardPerToken() public view returns (uint256) {
         if (_totalSupply == 0) {
             return rewardPerTokenStored;
         }
-        // BUG: Uses block.timestamp directly instead of lastTimeRewardApplicable().
-        // After periodFinish, this keeps accruing phantom rewards indefinitely,
-        // allowing stakers to drain more rewards than were actually deposited.
         return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / _totalSupply
+            (lastTimeRewardApplicable() - lastUpdateTime) * rewardRate * 1e18 / _totalSupply
         );
     }
 
@@ -112,22 +119,34 @@ contract StakingRewards is ReentrancyGuard {
 
     /// @notice Notify the contract of a new reward amount to distribute.
     /// @param reward Total reward tokens to distribute over the duration.
-    // BUG: No access control — anyone can call notifyRewardAmount. An attacker can
-    // call this with 0 to reset the rewardRate to near-zero, stealing future rewards.
+    /// @dev FIX: Added access control — only owner or rewardDistributor can call.
+    ///      FIX: Uses 1e18 precision multiplier for rewardRate to reduce truncation loss.
     function notifyRewardAmount(uint256 reward) external updateReward(address(0)) {
+        require(
+            msg.sender == owner || msg.sender == rewardDistributor,
+            "StakingRewards: unauthorized"
+        );
+
         if (block.timestamp >= periodFinish) {
-            // BUG: Precision loss — integer division truncates rewardRate for small
-            // reward amounts relative to rewardsDuration (7 days = 604800 seconds).
-            // E.g., 500000 wei / 604800 = 0, meaning all rewards are lost.
-            rewardRate = reward / rewardsDuration;
+            // FIX: Use 1e18 precision to minimize truncation loss.
+            // rewardRate is now in wei per second scaled by 1e18.
+            rewardRate = (reward * 1e18) / rewardsDuration;
         } else {
             uint256 remaining = periodFinish - block.timestamp;
-            uint256 leftover = remaining * rewardRate;
-            rewardRate = (reward + leftover) / rewardsDuration;
+            uint256 leftover = remaining * rewardRate / 1e18;
+            rewardRate = ((reward + leftover) * 1e18) / rewardsDuration;
         }
 
         lastUpdateTime = block.timestamp;
         periodFinish = block.timestamp + rewardsDuration;
         emit RewardAdded(reward);
+    }
+
+    /// @notice Update the reward distributor address.
+    /// @param _distributor New distributor address.
+    function setRewardDistributor(address _distributor) external {
+        require(msg.sender == owner, "StakingRewards: not owner");
+        require(_distributor != address(0), "StakingRewards: zero address");
+        rewardDistributor = _distributor;
     }
 }
