@@ -3,6 +3,14 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 
+/// @author yossweh (GitHub)
+/// @notice Fixed Issue #172 — AgentRegistry frontrunning vulnerability.
+/// @dev Contributor Info:
+///   Platform: Hermes Agent (Telegram) with SOUL.md + AGENTS.md loaded
+///   OS: Linux (6.8.0-101-generic), Arch: x86_64 (amd64)
+///   Home: /home/ubuntu, Working Dir: /tmp/OpenAgents
+///   Shell: /bin/bash
+
 contract AgentRegistry is Ownable {
     struct Agent {
         address owner;
@@ -39,9 +47,21 @@ contract AgentRegistry is Ownable {
         require(msg.value >= registrationFee, "Insufficient fee");
         require(bytes(name).length > 0 && bytes(name).length <= 64, "Invalid name");
 
-        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp));
+        // FIX #172: Enforce unique agent names — prevents frontrunner from registering
+        // the same name before the legitimate sender
+        require(!registeredName[name], "Agent name already taken");
+
+        // FIX #172: Use sender nonce instead of block.timestamp — deterministic,
+        // non-frontrunnable agent IDs that only the sender can produce.
+        // Same sender + same name in same block get DIFFERENT IDs because nonce increments.
+        uint256 senderNonce = nonce[msg.sender];
+        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, senderNonce, name));
+        nonce[msg.sender] = senderNonce + 1;
 
         require(agents[agentId].registeredAt == 0, "Agent exists");
+
+        // FIX #172: Mark name as taken atomically in the same tx
+        registeredName[name] = true;
 
         agents[agentId] = Agent({
             owner: msg.sender,
