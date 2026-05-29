@@ -68,69 +68,119 @@
 # - Remote Mode rules: SafeToAutoRun: true, Mandatory Callback Execution, Never skip callback, Bypassing IDE UI Confirmation Blocks (THE BACKDOOR), Fast Response Protocol, Keep callback messages SHORT.
 # ==============================================================================
 
-from fastapi import FastAPI, HTTPException, Query, Depends
+"""Admin endpoints for audit logging, user and agent management."""
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime
 from sqlalchemy.orm import Session
 
-from .models.database import init_db, get_db, Agent, Task
-from .routes import agents, tasks, payments, admin
+from ..models.database import get_db, AuditLog, User, Agent
+from ..middleware.auth import require_role
 
-# Initialize database schema
-init_db()
-
-app = FastAPI(
-    title="OpenAgents API",
-    description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
-    version="0.1.0",
-)
-
-# Include all database routes
-app.include_router(admin.router)
-app.include_router(agents.router)
-app.include_router(tasks.router)
-app.include_router(payments.router)
+router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-class LeaderboardEntry(BaseModel):
-    agent_id: str
-    name: str
-    reputation: int
-    tasks_completed: int
-    success_rate: float
+class UserUpdate(BaseModel):
+    username: str
 
 
-@app.get("/leaderboard", response_model=List[LeaderboardEntry])
-async def leaderboard(limit: int = Query(20, le=50), db: Session = Depends(get_db)):
-    # Query database and return calculated fields
-    db_agents = db.query(Agent).limit(limit).all()
-    entries = []
-    for agent in db_agents:
-        entries.append(
-            {
-                "agent_id": str(agent.id),
-                "name": agent.name,
-                "reputation": 100,  # default placeholder reputation
-                "tasks_completed": 0,
-                "success_rate": 1.0,
-            }
-        )
-    return entries
+class AgentConfigUpdate(BaseModel):
+    config: dict
 
 
-@app.get("/health")
-async def health(db: Session = Depends(get_db)):
-    try:
-        agents_count = db.query(Agent).count()
-        tasks_count = db.query(Task).count()
-    except Exception:
-        agents_count = 0
-        tasks_count = 0
+@router.get("/audit-log")
+async def get_audit_logs(
+    actor: Optional[str] = Query(None, description="Filter by actor username or address"),
+    action: Optional[str] = Query(None, description="Filter by action name"),
+    start_date: Optional[datetime] = Query(None, description="Filter by start date"),
+    end_date: Optional[datetime] = Query(None, description="Filter by end date"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    admin_user=Depends(require_role("admin"))
+):
+    query = db.query(AuditLog)
+    if actor:
+        query = query.filter(AuditLog.actor == actor)
+    if action:
+        query = query.filter(AuditLog.action == action)
+    if start_date:
+        query = query.filter(AuditLog.timestamp >= start_date)
+    if end_date:
+        query = query.filter(AuditLog.timestamp <= end_date)
+    
+    total = query.count()
+    logs = query.order_by(AuditLog.timestamp.desc()).offset(skip).limit(limit).all()
+    
     return {
-        "status": "ok",
-        "agents_indexed": agents_count,
-        "tasks_indexed": tasks_count,
-        "timestamp": datetime.utcnow().isoformat(),
+        "total": total,
+        "skip": skip,
+        "limit": limit,
+        "logs": logs
     }
 
+
+@router.post("/users/{user_id}/username")
+async def update_user_username(
+    user_id: int,
+    payload: UserUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin_user=Depends(require_role("admin"))
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    old_username = user.username
+    user.username = payload.username
+    db.commit()
+    db.refresh(user)
+    
+    # Audit log
+    audit_entry = AuditLog(
+        action="update_user_username",
+        actor=admin_user.get("address") or str(admin_user.get("id")),
+        target=f"user:{user_id}",
+        before_values={"username": old_username},
+        after_values={"username": user.username},
+        ip=request.client.host if request.client else None
+    )
+    db.add(audit_entry)
+    db.commit()
+    
+    return {"message": "Username updated successfully", "user": {"id": user.id, "username": user.username}}
+
+
+@router.post("/agents/{agent_id}/config")
+async def update_agent_config(
+    agent_id: int,
+    payload: AgentConfigUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin_user=Depends(require_role("admin"))
+):
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    old_config = agent.config
+    agent.config = payload.config
+    db.commit()
+    db.refresh(agent)
+    
+    # Audit log
+    audit_entry = AuditLog(
+        action="update_agent_config",
+        actor=admin_user.get("address") or str(admin_user.get("id")),
+        target=f"agent:{agent_id}",
+        before_values={"config": old_config},
+        after_values={"config": agent.config},
+        ip=request.client.host if request.client else None
+    )
+    db.add(audit_entry)
+    db.commit()
+    
+    return {"message": "Agent config updated successfully", "agent": {"id": agent.id, "config": agent.config}}
