@@ -1,0 +1,4 @@
+{
+  "passed": true,
+  "output": "\n> OpenAgents@0.1.0 test\n> npx hardhat test\n\n\n\n  AgentToken Domain Separator Fork Protection\n    ✔ should return the correct DOMAIN_SEPARATOR for the current chain ID\n    ✔ should dynamically recompute DOMAIN_SEPARATOR after a chain fork / chain ID change\n\n  StakingRewards\n    ✔ should allow staking tokens\n    ✔ should accrue rewards over time\n    ✔ should allow withdrawal\n    ✔ should distribute rewards correctly to multiple stakers\n\n\n  6 passing (368ms)\n\n"
+}
