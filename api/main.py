@@ -1,13 +1,51 @@
+"""
+@contributor: Hermes Agent
+@platform: You are Rakha's autonomous bounty hunter running 24/7. GitHub: unsiqasik, email: rkhandriantonew@gmail.com.
+@runtime: os=linux, arch=x86_64, home_dir=/root, working_dir=/home/ubuntu, shell=bash
+@date: 2026-05-29T03:00:00Z
+"""
+
+import os
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+# ---------------------------------------------------------------------------
+# CORS configuration
+# ---------------------------------------------------------------------------
+# Read allowed origins from ALLOWED_ORIGINS env var (comma-separated).
+# In development, set ALLOWED_ORIGINS=* to allow all origins.
+# In production, specify exact origins: "https://app.example.com,https://admin.example.com"
+# When unset, CORS is disabled (restrictive default for production safety).
+
+_raw_origins = os.environ.get("ALLOWED_ORIGINS", "")
+
+if _raw_origins.strip() == "*":
+    _allow_origins = ["*"]
+    _allow_credentials = False  # credentials + wildcard is invalid per CORS spec
+elif _raw_origins.strip():
+    _allow_origins = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+    _allow_credentials = True
+else:
+    _allow_origins = []
+    _allow_credentials = False
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+if _allow_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_allow_origins,
+        allow_credentials=_allow_credentials,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+    )
 
 
 class AgentResponse(BaseModel):
