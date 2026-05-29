@@ -11,6 +11,14 @@ from ..middleware.auth import get_current_user
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 VALID_STATUSES = {"open", "assigned", "in_progress", "review", "completed", "cancelled"}
+ALLOWED_TRANSITIONS = {
+    "open": {"assigned", "cancelled"},
+    "assigned": {"in_progress", "cancelled"},
+    "in_progress": {"review", "completed"},
+    "review": {"completed", "cancelled"},
+    "completed": set(),
+    "cancelled": set(),
+}
 
 
 class TaskCreate(BaseModel):
@@ -48,12 +56,22 @@ async def list_tasks(
     status: Optional[str] = None,
     creator: Optional[str] = None,
     skip: int = Query(0, ge=0),
-    # BUG: No upper bound on limit — clients can request millions of rows,
-    # causing DB strain and potential OOM
-    limit: int = Query(50, ge=1),
+    limit: int = Query(50, ge=1, le=100),
     db=Depends(get_db),
 ):
     query = db.query(Task)
+    now = datetime.utcnow()
+    expired_tasks = db.query(Task).filter(
+        Task.deadline.isnot(None),
+        Task.deadline < now,
+        Task.status.in_(("open", "assigned", "in_progress", "review")),
+    ).all()
+    for expired in expired_tasks:
+        expired.status = "cancelled"
+        expired.updated_at = now
+    if expired_tasks:
+        db.commit()
+
     if status:
         query = query.filter(Task.status == status)
     if creator:
@@ -80,10 +98,19 @@ async def update_task_status(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # BUG: Creator can mark their own task as completed — should require
-    # a third party or the assignee to confirm completion
-    if task.creator_id != user["id"]:
-        raise HTTPException(status_code=403, detail="Only the creator can update status")
+    if update.status not in VALID_STATUSES:
+        raise HTTPException(status_code=400, detail="Invalid task status")
+    if task.deadline and task.deadline < datetime.utcnow() and task.status != "cancelled":
+        task.status = "cancelled"
+        task.updated_at = datetime.utcnow()
+        db.commit()
+        raise HTTPException(status_code=400, detail="Task deadline expired")
+    if update.status not in ALLOWED_TRANSITIONS.get(task.status, set()):
+        raise HTTPException(status_code=400, detail="Invalid status transition")
+    if update.status == "completed" and task.creator_id == user["id"]:
+        raise HTTPException(status_code=403, detail="Creator cannot complete own task")
+    if task.creator_id != user["id"] and task.agent_id != user.get("agent_id"):
+        raise HTTPException(status_code=403, detail="Not authorized to update task")
 
     task.status = update.status
     task.updated_at = datetime.utcnow()
