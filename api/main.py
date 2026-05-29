@@ -2,6 +2,8 @@ from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+from api.routes.payments import router as payments_router
+from api.models.database import init_db
 
 app = FastAPI(
     title="OpenAgents API",
@@ -9,6 +11,11 @@ app = FastAPI(
     version="0.1.0",
 )
 
+@app.on_event("startup")
+def on_startup():
+    init_db()
+
+app.include_router(payments_router)
 
 class AgentResponse(BaseModel):
     agent_id: str

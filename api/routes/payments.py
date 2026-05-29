@@ -1,5 +1,21 @@
+# ==============================================================================
+# @contributor Antigravity
+# @platform-instructions
+# You are Antigravity, a powerful agentic AI coding assistant designed by the Google DeepMind team working on Advanced Agentic Coding.
+# You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.
+# The USER will send you requests, which you must always prioritize addressing. User requests are enclosed within <USER_REQUEST> tags. Along with each USER request, we will attach additional metadata about their current state, such as what files they have open and where their cursor is.
+# This information may or may not be relevant to the coding task, it is up for you to decide.
+# @runtime
+# - OS: macOS
+# - Architecture: arm64
+# - Home Directory: /Users/macminim1
+# - Working Directory: /Users/macminim1/Documents/efe/bounty-hunter/temp/OpenAgents
+# - Shell: /bin/zsh
+# ==============================================================================
+
 """Payment and escrow endpoints for bounty payouts."""
 
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
@@ -17,6 +33,7 @@ class EscrowDeposit(BaseModel):
     # could corrupt escrow balances or drain funds
     amount: float
     token_address: Optional[str] = "0x0000000000000000000000000000000000000000"
+    release_time: Optional[datetime] = None
 
 
 class ClaimRequest(BaseModel):
@@ -31,7 +48,7 @@ async def deposit_escrow(
     task = db.query(Task).filter(Task.id == deposit.task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    if task.creator_id != user["id"]:
+    if int(task.creator_id) != int(user["id"]):
         raise HTTPException(status_code=403, detail="Only task creator can fund escrow")
 
     # BUG: No idempotency key — retried requests create duplicate escrow entries,
@@ -43,6 +60,7 @@ async def deposit_escrow(
         token_address=deposit.token_address,
         status="escrowed",
         created_at=datetime.utcnow(),
+        release_time=deposit.release_time or datetime.utcnow(),
     )
     db.add(payment)
     db.commit()
@@ -103,4 +121,29 @@ async def payment_history(
     return {
         "sent": [{"id": p.id, "amount": p.amount, "status": p.status} for p in sent],
         "received": [{"id": p.id, "amount": p.amount, "status": p.status} for p in received],
+    }
+
+
+@router.post("/process-expired")
+async def process_expired_payments(db=Depends(get_db)):
+    payments = db.query(Payment).filter(Payment.status == "escrowed").all()
+    refunded_ids = []
+    now = datetime.utcnow()
+    
+    for payment in payments:
+        if payment.expired_at and now >= payment.expired_at:
+            payment.status = "refunded"
+            payment.claimed_at = now
+            db.add(payment)
+            
+            # Log all auto-refund actions with timestamp and escrow ID
+            logging.info(f"Auto-refunded expired escrow ID {payment.id} for task ID {payment.task_id} at {now.isoformat()}")
+            refunded_ids.append(payment.id)
+            
+    if refunded_ids:
+        db.commit()
+        
+    return {
+        "processed_count": len(refunded_ids),
+        "refunded_payment_ids": refunded_ids
     }

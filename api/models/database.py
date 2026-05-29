@@ -82,8 +82,24 @@ class Payment(Base):
     status = Column(String(32), default="pending")
     created_at = Column(DateTime, default=datetime.utcnow)
     claimed_at = Column(DateTime, nullable=True)
+    release_time = Column(DateTime, default=datetime.utcnow)
 
     task = relationship("Task", back_populates="payments")
+
+    @property
+    def expired_at(self):
+        if self.release_time:
+            from datetime import timedelta
+            return self.release_time + timedelta(days=30)
+        return None
+
+    @property
+    def releaseTime(self):
+        return self.release_time
+
+    @releaseTime.setter
+    def releaseTime(self, value):
+        self.release_time = value
 
 
 def init_db():
