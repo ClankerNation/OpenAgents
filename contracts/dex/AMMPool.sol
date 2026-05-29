@@ -23,7 +23,10 @@ contract AMMPool {
 
     event LiquidityAdded(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
     event LiquidityRemoved(address indexed provider, uint256 amountA, uint256 amountB);
-    event Swap(address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut);
+    event Mint(address indexed sender, uint256 amountA, uint256 amountB);
+    event Burn(address indexed sender, uint256 amountA, uint256 amountB, address indexed to);
+    event Swap(address indexed user, address indexed tokenIn, uint256 amountIn, uint256 amountOut);
+    event Sync(uint256 reserveA, uint256 reserveB);
 
     constructor(address _tokenA, address _tokenB) {
         tokenA = IERC20(_tokenA);
@@ -53,6 +56,8 @@ contract AMMPool {
         totalLiquidity += lpTokens;
 
         emit LiquidityAdded(msg.sender, amountA, amountB, lpTokens);
+        emit Mint(msg.sender, amountA, amountB);
+        emit Sync(reserveA, reserveB);
     }
 
     function removeLiquidity(uint256 lpTokens) external {
@@ -70,6 +75,8 @@ contract AMMPool {
         require(tokenB.transfer(msg.sender, amountB), "Transfer B failed");
 
         emit LiquidityRemoved(msg.sender, amountA, amountB);
+        emit Burn(msg.sender, amountA, amountB, msg.sender);
+        emit Sync(reserveA, reserveB);
     }
 
     // BUG: Swap has no deadline parameter — transaction can sit in mempool and execute
@@ -103,6 +110,7 @@ contract AMMPool {
         }
 
         emit Swap(msg.sender, tokenIn, amountIn, amountOut);
+        emit Sync(reserveA, reserveB);
     }
 
     function _sqrt(uint256 y) internal pure returns (uint256 z) {
