@@ -9,10 +9,29 @@ export interface AgentConfig {
   routerAddress: string;
 }
 
+export interface GetOpenTasksOptions {
+  offset?: number;
+  limit?: number;
+  status?: number;
+  batchSize?: number;
+}
+
+export interface SDKTask {
+  id: number;
+  creator: string;
+  assignedAgent: string;
+  description: string;
+  reward: bigint;
+  deadline: bigint;
+  status: number;
+  result: string;
+}
+
 export class OpenAgentsSDK {
   private provider: ethers.JsonRpcProvider;
   private signer: ethers.Wallet;
   private config: AgentConfig;
+  private taskCountCache: { blockNumber: number; count: bigint } | null = null;
 
   constructor(config: AgentConfig) {
     this.config = config;
@@ -60,8 +79,47 @@ export class OpenAgentsSDK {
     await tx.wait();
   }
 
-  async getOpenTasks(): Promise<any[]> {
-    const router = new ethers.Contract(
+  async getOpenTasks(options: GetOpenTasksOptions = {}): Promise<SDKTask[]> {
+    const router = this.createRouterReader();
+    const offset = Math.max(0, options.offset ?? 0);
+    const limit = Math.max(0, options.limit ?? 50);
+    const batchSize = Math.min(Math.max(1, options.batchSize ?? 10), 10);
+    const statusFilter = options.status ?? 0;
+    const count = Number(await this.getCachedTaskCount(router));
+    const end = Math.min(count, offset + limit);
+    const tasks: SDKTask[] = [];
+
+    for (let start = offset; start < end; start += batchSize) {
+      const ids = Array.from(
+        { length: Math.min(batchSize, end - start) },
+        (_, index) => start + index
+      );
+      const batch = await Promise.all(ids.map(async (id) => ({
+        id,
+        task: await router.tasks(id),
+      })));
+
+      for (const { id, task } of batch) {
+        const status = Number(task[5]);
+        if (status !== statusFilter) continue;
+        tasks.push({
+          id,
+          creator: task[0],
+          assignedAgent: task[1],
+          description: task[2],
+          reward: task[3],
+          deadline: task[4],
+          status,
+          result: task[6],
+        });
+      }
+    }
+
+    return tasks;
+  }
+
+  protected createRouterReader(): ethers.Contract {
+    return new ethers.Contract(
       this.config.routerAddress,
       [
         "function taskCount() view returns (uint256)",
@@ -69,23 +127,20 @@ export class OpenAgentsSDK {
       ],
       this.provider
     );
+  }
 
-    const count = await router.taskCount();
-    const openTasks = [];
+  protected async getCurrentBlockNumber(): Promise<number> {
+    return this.provider.getBlockNumber();
+  }
 
-    for (let i = 0; i < count; i++) {
-      const task = await router.tasks(i);
-      if (task[5] === 0) {
-        openTasks.push({
-          id: i,
-          creator: task[0],
-          description: task[2],
-          reward: task[3],
-          deadline: task[4],
-        });
-      }
+  private async getCachedTaskCount(router: ethers.Contract): Promise<bigint> {
+    const blockNumber = await this.getCurrentBlockNumber();
+    if (this.taskCountCache?.blockNumber === blockNumber) {
+      return this.taskCountCache.count;
     }
 
-    return openTasks;
+    const count = await router.taskCount();
+    this.taskCountCache = { blockNumber, count };
+    return count;
   }
 }
