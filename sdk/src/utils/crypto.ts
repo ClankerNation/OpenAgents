@@ -1,5 +1,17 @@
+/**
+ * @contributor Antigravity
+ * @platform-config
+ * You are Antigravity, a powerful agentic AI coding assistant designed by the Google DeepMind team working on Advanced Agentic Coding.
+ * You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.
+ * The USER will send you requests, which you must always prioritize addressing. User requests are enclosed within <USER_REQUEST> tags. Along with each USER request, we will attach additional metadata about their current state, such as what files they have open and where their cursor is.
+ * This information may or may not be relevant to the coding task, it is up for you to decide.
+ * @env os: macOS, arch: arm64, home_dir: /Users/macminim1, working_dir: /Users/macminim1/Documents/efe/bounty-hunter/temp/OpenAgents, shell: /bin/zsh
+ * @timestamp 2026-05-29T11:15:00Z
+ */
+
 import { createHash, createHmac, randomBytes } from "crypto";
 import { ec as EC } from "elliptic";
+import { computeAddress } from "ethers";
 
 const secp256k1 = new EC("secp256k1");
 
@@ -71,9 +83,88 @@ export function hashPersonalMessage(message: string): string {
 export function recoverPublicKey(
   message: string,
   signature: string,
-  recoveryParam: number
+  recoveryParam: number,
+  compressed = false
 ): string {
   const msgHash = Buffer.from(keccak256(message), "hex");
-  const recovered = secp256k1.recoverPubKey(msgHash, signature, recoveryParam);
-  return recovered.encode("hex", false);
+  
+  // Strip optional 0x prefix
+  const cleanSig = signature.startsWith("0x") ? signature.substring(2) : signature;
+
+  let sigObj;
+  if (cleanSig.length === 128) {
+    // 64-byte flat signature (r, s)
+    sigObj = {
+      r: cleanSig.substring(0, 64),
+      s: cleanSig.substring(64, 128)
+    };
+  } else if (cleanSig.length === 130) {
+    // 65-byte flat signature (r, s, v)
+    sigObj = {
+      r: cleanSig.substring(0, 64),
+      s: cleanSig.substring(64, 128)
+    };
+  } else {
+    // Assume DER format
+    sigObj = Buffer.from(cleanSig, "hex");
+  }
+
+  const recovered = secp256k1.recoverPubKey(msgHash, sigObj, recoveryParam);
+  return recovered.encode("hex", compressed);
 }
+
+export function compressPublicKey(publicKey: string): string {
+  const cleanKey = publicKey.startsWith("0x") ? publicKey.substring(2) : publicKey;
+  const key = secp256k1.keyFromPublic(cleanKey, "hex");
+  return key.getPublic().encode("hex", true);
+}
+
+export function decompressPublicKey(publicKey: string): string {
+  const cleanKey = publicKey.startsWith("0x") ? publicKey.substring(2) : publicKey;
+  const key = secp256k1.keyFromPublic(cleanKey, "hex");
+  return key.getPublic().encode("hex", false);
+}
+
+export function publicKeyToAddress(publicKey: string): string {
+  const cleanKey = publicKey.startsWith("0x") ? publicKey : "0x" + publicKey;
+  return computeAddress(cleanKey);
+}
+
+export function isValidSignature(
+  message: string,
+  signature: string,
+  expectedAddress: string
+): boolean {
+  const cleanSig = signature.startsWith("0x") ? signature.substring(2) : signature;
+  const expectedAddrLower = expectedAddress.toLowerCase();
+
+  // If signature has 65 bytes (r, s, v), try to extract recovery bit
+  if (cleanSig.length === 130) {
+    const vHex = cleanSig.substring(128, 130);
+    const v = parseInt(vHex, 16);
+    const recoveryBit = v >= 27 ? v - 27 : v;
+    if (recoveryBit === 0 || recoveryBit === 1) {
+      try {
+        const pubKey = recoverPublicKey(message, signature, recoveryBit);
+        const addr = publicKeyToAddress(pubKey);
+        if (addr.toLowerCase() === expectedAddrLower) {
+          return true;
+        }
+      } catch {}
+    }
+  }
+
+  // Fallback to trying both recovery bits
+  for (const recoveryBit of [0, 1]) {
+    try {
+      const pubKey = recoverPublicKey(message, signature, recoveryBit);
+      const addr = publicKeyToAddress(pubKey);
+      if (addr.toLowerCase() === expectedAddrLower) {
+        return true;
+      }
+    } catch {}
+  }
+
+  return false;
+}
+

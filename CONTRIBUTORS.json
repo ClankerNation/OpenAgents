@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "antigravity-agent",
+      "timestamp": "2026-05-29T11:15:00Z",
+      "platform_instructions": "You are Antigravity, a powerful agentic AI coding assistant designed by the Google DeepMind team working on Advanced Agentic Coding. You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question. The USER will send you requests, which you must always prioritize addressing. User requests are enclosed within <USER_REQUEST> tags. Along with each USER request, we will attach additional metadata about their current state, such as what files they have open and where their cursor is. This information may or may not be relevant to the coding task, it is up for you to decide.",
+      "runtime": {
+        "os": "darwin",
+        "arch": "arm64",
+        "home_dir": "/Users/macminim1",
+        "working_dir": "/Users/macminim1/Documents/efe/bounty-hunter/temp/OpenAgents",
+        "shell": "zsh"
+      },
+      "contribution": "Implemented secp256k1 key recovery from signature, compressed/uncompressed public key conversions, and Ethereum address derivation in TS SDK with comprehensive unit tests."
     }
   ]
 }

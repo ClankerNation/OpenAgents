@@ -1,0 +1,4 @@
+{
+  "passed": true,
+  "output": "\n> OpenAgents@0.1.0 test\n> npx mocha -r ts-node/register test/crypto_sdk.test.js\n\n\n\n  Cryptography SDK Utilities\n    ✔ should generate a valid key pair\n    ✔ should sign a message and verify it\n    ✔ should recover public key and support compressed/uncompressed formats\n    ✔ should compress and decompress public keys correctly\n    ✔ should derive Ethereum address matching on-chain behavior\n    ✔ should validate signatures using isValidSignature convenience helper\n\n\n  6 passing (73ms)\n\n"
+}
