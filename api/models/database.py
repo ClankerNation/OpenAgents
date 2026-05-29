@@ -2,7 +2,7 @@
 
 from sqlalchemy import (
     create_engine, Column, Integer, String, Float, Text, JSON,
-    ForeignKey, DateTime, Enum as SAEnum,
+    ForeignKey, DateTime, Enum as SAEnum, UniqueConstraint,
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -72,6 +72,9 @@ class Task(Base):
 
 class Payment(Base):
     __tablename__ = "payments"
+    __table_args__ = (
+        UniqueConstraint("task_id", "idempotency_key", name="uq_payment_task_idempotency"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
@@ -80,10 +83,24 @@ class Payment(Base):
     amount = Column(Float, nullable=False)
     token_address = Column(String(42), default="0x0000000000000000000000000000000000000000")
     status = Column(String(32), default="pending")
+    idempotency_key = Column(String(128), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     claimed_at = Column(DateTime, nullable=True)
 
     task = relationship("Task", back_populates="payments")
+
+
+class PaymentAuditLog(Base):
+    __tablename__ = "payment_audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    payment_id = Column(Integer, ForeignKey("payments.id"), nullable=True)
+    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
+    actor_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    action = Column(String(64), nullable=False)
+    amount = Column(Float, nullable=True)
+    idempotency_key = Column(String(128), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 def init_db():
