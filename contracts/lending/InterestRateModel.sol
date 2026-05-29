@@ -5,6 +5,13 @@ pragma solidity ^0.8.20;
 /// @notice Variable interest rate model based on pool utilization
 /// @dev Rate increases with utilization, with a kink at the optimal point
 contract InterestRateModel {
+    struct Parameters {
+        uint256 baseRate;
+        uint256 multiplier;
+        uint256 jumpMultiplier;
+        uint256 kink;
+    }
+
     // BUG: No bounds on base rate — admin can set baseRate to any value including
     // extremely high values that make borrowing effectively impossible, or zero
     // which means lenders earn nothing at low utilization
@@ -18,7 +25,7 @@ contract InterestRateModel {
 
     address public admin;
 
-    event RateParamsUpdated(uint256 baseRate, uint256 multiplier, uint256 jumpMultiplier, uint256 kink);
+    event RateParametersUpdated(Parameters oldParameters, Parameters newParameters);
 
     modifier onlyAdmin() {
         require(msg.sender == admin, "Not admin");
@@ -44,11 +51,21 @@ contract InterestRateModel {
         uint256 _jumpMultiplier,
         uint256 _kink
     ) external onlyAdmin {
+        Parameters memory oldParameters = getParameters();
         baseRate = _baseRate;
         multiplier = _multiplier;
         jumpMultiplier = _jumpMultiplier;
         kink = _kink;
-        emit RateParamsUpdated(_baseRate, _multiplier, _jumpMultiplier, _kink);
+        emit RateParametersUpdated(oldParameters, getParameters());
+    }
+
+    function getParameters() public view returns (Parameters memory) {
+        return Parameters({
+            baseRate: baseRate,
+            multiplier: multiplier,
+            jumpMultiplier: jumpMultiplier,
+            kink: kink
+        });
     }
 
     function getUtilization(uint256 totalBorrowed, uint256 totalDeposits) public pure returns (uint256) {
