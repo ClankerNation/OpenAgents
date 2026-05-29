@@ -1,3 +1,18 @@
+// ==============================================================================
+// @contributor Antigravity
+// @platform-instructions
+// You are Antigravity, a powerful agentic AI coding assistant designed by the Google DeepMind team working on Advanced Agentic Coding.
+// You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.
+// The USER will send you requests, which you must always prioritize addressing. User requests are enclosed within <USER_REQUEST> tags. Along with each USER request, we will attach additional metadata about their current state, such as what files they have open and where their cursor is.
+// This information may or may not be relevant to the coding task, it is up for you to decide.
+// @runtime
+// - OS: macOS
+// - Architecture: arm64
+// - Home Directory: /Users/macminim1
+// - Working Directory: /Users/macminim1/Documents/efe/bounty-hunter/temp/OpenAgents
+// - Shell: /bin/zsh
+// ==============================================================================
+
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -37,6 +52,7 @@ contract MultiTokenStaking is Ownable, ReentrancyGuard {
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
     event Harvest(address indexed user, uint256 indexed pid, uint256 amount);
+    event EmergencyWithdraw(address indexed user, uint256 indexed pid, uint256 amount);
 
     // BUG: Missing zero-address validation — rewardToken can be set to address(0),
     // causing all reward transfers to silently burn tokens or revert unpredictably.
@@ -143,5 +159,21 @@ contract MultiTokenStaking is Ownable, ReentrancyGuard {
             accRewardPerShare += reward * 1e12 / pool.totalStaked;
         }
         return user.amount * accRewardPerShare / 1e12 - user.rewardDebt;
+    }
+
+    /// @notice Withdraw staked tokens without caring about rewards (EMERGENCY ONLY).
+    /// @param poolId Pool ID.
+    function emergencyWithdraw(uint256 poolId) external nonReentrant {
+        PoolInfo storage pool = poolInfo[poolId];
+        UserInfo storage user = userInfo[poolId][msg.sender];
+        uint256 amount = user.amount;
+        require(amount > 0, "Staking: balance is zero");
+
+        pool.totalStaked -= amount;
+        user.amount = 0;
+        user.rewardDebt = 0;
+
+        pool.stakeToken.safeTransfer(msg.sender, amount);
+        emit EmergencyWithdraw(msg.sender, poolId, amount);
     }
 }

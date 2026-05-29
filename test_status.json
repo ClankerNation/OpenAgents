@@ -1,0 +1,4 @@
+{
+  "passed": true,
+  "output": "\n> OpenAgents@0.1.0 test\n> npx hardhat test test/MultiTokenStaking.test.js\n\n\n\n  MultiTokenStaking\n    ✔ should allow stake and emergency withdraw\n\n\n  1 passing (372ms)\n\n"
+}
