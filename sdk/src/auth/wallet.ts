@@ -1,5 +1,4 @@
-import { generateKeyPair, signMessage, keccak256 } from "../utils/crypto";
-import { encodeParams, AbiParam } from "../utils/encoding";
+import { ethers } from "ethers";
 import { RpcProvider } from "../providers/rpc";
 
 export interface WalletConfig {
@@ -13,8 +12,11 @@ export interface Transaction {
   data: string;
   gasLimit: bigint;
   gasPrice?: bigint;
+  maxFeePerGas?: bigint;
+  maxPriorityFeePerGas?: bigint;
   nonce?: number;
   chainId?: number;
+  type?: 0 | 1 | 2;
 }
 
 export interface SignedTransaction {
@@ -34,42 +36,47 @@ export class Wallet {
     if (config.privateKey) {
       this.privateKey = config.privateKey;
     } else {
-      const keyPair = generateKeyPair();
-      this.privateKey = keyPair.privateKey;
+      this.privateKey = ethers.Wallet.createRandom().privateKey;
     }
     this.address = this.deriveAddress(this.privateKey);
     this.provider = config.provider;
   }
 
   private deriveAddress(privateKey: string): string {
-    const { ec as EC } = require("elliptic");
-    const curve = new EC("secp256k1");
-    const key = curve.keyFromPrivate(privateKey, "hex");
-    const pubKey = key.getPublic(false, "hex").slice(2); // remove 04 prefix
-    const hash = keccak256(Buffer.from(pubKey, "hex"));
-    return "0x" + hash.slice(-40);
+    return new ethers.Wallet(this.normalizePrivateKey(privateKey)).address;
   }
 
   async signTransaction(tx: Transaction): Promise<SignedTransaction> {
-    // BUG: No chain ID validation — transaction could be replayed on a different
-    // chain if chainId is missing or mismatched with the provider
     const nonce = tx.nonce ?? await this.getNonce();
-    const gasPrice = tx.gasPrice ?? BigInt(await this.provider.call("eth_gasPrice") as string);
+    const chainId = tx.chainId ?? this.provider.getChainId();
+    const type = tx.type ?? (tx.maxFeePerGas !== undefined ? 2 : 0);
+    const signer = new ethers.Wallet(this.normalizePrivateKey(this.privateKey));
 
-    const txData = encodeParams([
-      { type: "uint256", value: nonce } as AbiParam,
-      { type: "uint256", value: gasPrice } as AbiParam,
-      { type: "uint256", value: tx.gasLimit } as AbiParam,
-      { type: "address", value: tx.to } as AbiParam,
-      { type: "uint256", value: tx.value } as AbiParam,
-    ]);
+    const request: ethers.TransactionRequest = {
+      to: tx.to,
+      value: tx.value,
+      data: tx.data,
+      gasLimit: tx.gasLimit,
+      nonce,
+      chainId,
+      type,
+    };
 
-    const txHash = keccak256(txData);
-    const signature = signMessage(this.privateKey, txHash);
+    if (type === 2) {
+      if (tx.maxFeePerGas === undefined || tx.maxPriorityFeePerGas === undefined) {
+        throw new Error("EIP-1559 transactions require maxFeePerGas and maxPriorityFeePerGas");
+      }
+      request.maxFeePerGas = tx.maxFeePerGas;
+      request.maxPriorityFeePerGas = tx.maxPriorityFeePerGas;
+    } else {
+      request.gasPrice = tx.gasPrice ?? BigInt(await this.provider.call("eth_gasPrice") as string);
+    }
+
+    const raw = await signer.signTransaction(request);
 
     return {
-      raw: "0x" + txData.slice(2) + signature,
-      hash: "0x" + txHash,
+      raw,
+      hash: ethers.keccak256(raw),
     };
   }
 
@@ -98,5 +105,9 @@ export class Wallet {
 
   exportPrivateKey(): string {
     return this.privateKey;
+  }
+
+  private normalizePrivateKey(privateKey: string): string {
+    return privateKey.startsWith("0x") ? privateKey : `0x${privateKey}`;
   }
 }
