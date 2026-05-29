@@ -1,13 +1,51 @@
+import contextvars
+import logging
+import uuid
+from datetime import datetime
+from typing import Optional
+
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
-from typing import Optional
-from datetime import datetime
+
+REQUEST_ID_HEADER = "X-Request-ID"
+request_id_context: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "request_id",
+    default="-",
+)
+
+
+class RequestIdFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = request_id_context.get()
+        return True
+
+
+request_id_filter = RequestIdFilter()
+logging.getLogger().addFilter(request_id_filter)
+logger = logging.getLogger("openagents.api")
+logger.addFilter(request_id_filter)
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+
+@app.middleware("http")
+async def request_id_middleware(request, call_next):
+    request_id = request.headers.get(REQUEST_ID_HEADER) or str(uuid.uuid4())
+    token = request_id_context.set(request_id)
+    request.state.request_id = request_id
+
+    try:
+        logger.info("request started")
+        response = await call_next(request)
+        response.headers[REQUEST_ID_HEADER] = request_id
+        logger.info("request completed")
+        return response
+    finally:
+        request_id_context.reset(token)
 
 
 class AgentResponse(BaseModel):
