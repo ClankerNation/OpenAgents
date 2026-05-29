@@ -16,6 +16,7 @@ contract GovernorAlpha is ReentrancyGuard {
         address[] targets;
         uint256[] values;
         bytes[] calldatas;
+        uint256 snapshotBlock;
         uint256 startBlock;
         uint256 endBlock;
         uint256 forVotes;
@@ -62,6 +63,7 @@ contract GovernorAlpha is ReentrancyGuard {
         p.targets = targets;
         p.values = values;
         p.calldatas = calldatas;
+        p.snapshotBlock = block.number;
         p.startBlock = block.number + VOTING_DELAY;
         p.endBlock = block.number + VOTING_DELAY + VOTING_PERIOD;
 
@@ -79,7 +81,7 @@ contract GovernorAlpha is ReentrancyGuard {
         require(!p.hasVoted[tx.origin], "Governor: already voted");
         p.hasVoted[tx.origin] = true;
 
-        uint256 weight = token.getPastVotes(tx.origin, p.startBlock);
+        uint256 weight = getVotingPower(tx.origin, proposalId);
         if (support) {
             p.forVotes += weight;
         } else {
@@ -87,6 +89,15 @@ contract GovernorAlpha is ReentrancyGuard {
         }
 
         emit VoteCast(tx.origin, proposalId, support, weight);
+    }
+
+    /// @notice Return voting power fixed at proposal creation.
+    /// @param account Voter address to inspect.
+    /// @param proposalId Proposal whose snapshot should be used.
+    function getVotingPower(address account, uint256 proposalId) public view returns (uint256) {
+        Proposal storage p = proposals[proposalId];
+        require(p.id != 0, "Governor: unknown proposal");
+        return token.getPastVotes(account, p.snapshotBlock);
     }
 
     /// @notice Execute a succeeded proposal.
