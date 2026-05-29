@@ -7,6 +7,7 @@ from datetime import datetime
 
 from ..models.database import get_db, Task
 from ..middleware.auth import get_current_user
+from .webhooks import deliver_task_webhooks
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -40,6 +41,7 @@ async def create_task(task: TaskCreate, user=Depends(get_current_user), db=Depen
     db.add(new_task)
     db.commit()
     db.refresh(new_task)
+    await deliver_task_webhooks(new_task, "created", db)
     return {"id": new_task.id, "status": new_task.status}
 
 
@@ -88,6 +90,8 @@ async def update_task_status(
     task.status = update.status
     task.updated_at = datetime.utcnow()
     db.commit()
+    if update.status in {"assigned", "completed", "disputed"}:
+        await deliver_task_webhooks(task, update.status, db)
     return {"id": task.id, "status": task.status}
 
 
