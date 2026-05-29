@@ -2,9 +2,12 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract PaymentEscrow is Ownable {
+    using SafeERC20 for IERC20;
+
     struct Escrow {
         address payer;
         address payee;
@@ -33,20 +36,24 @@ contract PaymentEscrow is Ownable {
         require(payee != address(0), "Invalid payee");
         require(amount > 0, "Amount must be > 0");
 
-        IERC20(token).transferFrom(msg.sender, address(this), amount);
+        IERC20 escrowToken = IERC20(token);
+        uint256 balanceBefore = escrowToken.balanceOf(address(this));
+        escrowToken.safeTransferFrom(msg.sender, address(this), amount);
+        uint256 receivedAmount = escrowToken.balanceOf(address(this)) - balanceBefore;
+        require(receivedAmount > 0, "No tokens received");
 
         uint256 escrowId = escrowCount++;
         escrows[escrowId] = Escrow({
             payer: msg.sender,
             payee: payee,
             token: token,
-            amount: amount,
+            amount: receivedAmount,
             releaseTime: block.timestamp + lockDuration,
             released: false,
             refunded: false
         });
 
-        emit EscrowCreated(escrowId, msg.sender, amount);
+        emit EscrowCreated(escrowId, msg.sender, receivedAmount);
         return escrowId;
     }
 
@@ -56,7 +63,7 @@ contract PaymentEscrow is Ownable {
         require(msg.sender == escrow.payer || msg.sender == owner(), "Not authorized");
 
         escrow.released = true;
-        IERC20(escrow.token).transfer(escrow.payee, escrow.amount);
+        IERC20(escrow.token).safeTransfer(escrow.payee, escrow.amount);
 
         emit EscrowReleased(escrowId, escrow.payee, escrow.amount);
     }
@@ -68,7 +75,7 @@ contract PaymentEscrow is Ownable {
         require(msg.sender == escrow.payer, "Not payer");
 
         escrow.refunded = true;
-        IERC20(escrow.token).transfer(escrow.payer, escrow.amount);
+        IERC20(escrow.token).safeTransfer(escrow.payer, escrow.amount);
 
         emit EscrowRefunded(escrowId, escrow.payer, escrow.amount);
     }
