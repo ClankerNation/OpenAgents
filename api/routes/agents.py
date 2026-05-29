@@ -4,6 +4,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+from urllib.parse import urlparse
+import ipaddress
+import socket
+
+import httpx
 
 from ..models.database import get_db, Agent
 from ..middleware.auth import get_current_user
@@ -15,21 +20,72 @@ class AgentCreate(BaseModel):
     name: str  # BUG: No validation — name can contain SQL injection, XSS, or be empty
     description: Optional[str] = None
     model_type: str = "gpt-4"
+    endpoint: str
     config: Optional[dict] = None
 
 
 class AgentUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    endpoint: Optional[str] = None
     config: Optional[dict] = None
+
+
+def _is_private_host(host: str) -> bool:
+    try:
+        ip_addresses = [ipaddress.ip_address(host)]
+    except ValueError:
+        try:
+            ip_addresses = [
+                ipaddress.ip_address(info[4][0])
+                for info in socket.getaddrinfo(host, None)
+            ]
+        except socket.gaierror:
+            raise HTTPException(status_code=400, detail="Endpoint host cannot be resolved")
+
+    return any(
+        address.is_private
+        or address.is_loopback
+        or address.is_link_local
+        or address.is_multicast
+        or address.is_unspecified
+        for address in ip_addresses
+    )
+
+
+async def validate_endpoint_url(endpoint: str) -> str:
+    parsed = urlparse(endpoint)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or not parsed.hostname:
+        raise HTTPException(status_code=400, detail="Endpoint must be a valid http or https URL")
+
+    if parsed.username or parsed.password:
+        raise HTTPException(status_code=400, detail="Endpoint must not include credentials")
+
+    if _is_private_host(parsed.hostname):
+        raise HTTPException(status_code=400, detail="Endpoint host resolves to a private address")
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0, follow_redirects=False) as client:
+            response = await client.head(endpoint)
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=400, detail="Endpoint reachability check timed out")
+    except httpx.HTTPError:
+        raise HTTPException(status_code=400, detail="Endpoint is not reachable")
+
+    if response.status_code >= 400:
+        raise HTTPException(status_code=400, detail="Endpoint is not reachable")
+
+    return endpoint
 
 
 @router.post("/")
 async def create_agent(agent: AgentCreate, user=Depends(get_current_user), db=Depends(get_db)):
+    endpoint = await validate_endpoint_url(agent.endpoint)
     new_agent = Agent(
         name=agent.name,
         description=agent.description,
         model_type=agent.model_type,
+        endpoint=endpoint,
         config=agent.config or {},
         owner_id=user["id"],
         created_at=datetime.utcnow(),
@@ -37,7 +93,7 @@ async def create_agent(agent: AgentCreate, user=Depends(get_current_user), db=De
     db.add(new_agent)
     db.commit()
     db.refresh(new_agent)
-    return {"id": new_agent.id, "name": new_agent.name, "owner": user["address"]}
+    return {"id": new_agent.id, "name": new_agent.name, "endpoint": new_agent.endpoint, "owner": user["address"]}
 
 
 @router.get("/")
@@ -72,6 +128,8 @@ async def update_agent(
     if agent.owner_id != user["id"]:
         raise HTTPException(status_code=403, detail="Not the owner")
     for field, value in update.dict(exclude_unset=True).items():
+        if field == "endpoint":
+            value = await validate_endpoint_url(value)
         setattr(agent, field, value)
     db.commit()
     return agent
