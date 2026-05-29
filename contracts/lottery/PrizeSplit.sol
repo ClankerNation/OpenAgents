@@ -8,10 +8,12 @@ contract PrizeSplit {
     address public admin;
     uint256 public totalPrize;
     uint256 public roundId;
+    uint256 public constant CLAIM_PERIOD = 90 days;
 
     struct Round {
         address[] winners;
         uint256 prizePool;
+        uint256 reclaimAfter;
         bool finalized;
         mapping(address => uint256) shares;
         mapping(address => bool) claimed;
@@ -22,6 +24,7 @@ contract PrizeSplit {
     event RoundFunded(uint256 indexed roundId, uint256 amount);
     event RoundFinalized(uint256 indexed roundId, uint256 winnerCount);
     event PrizeClaimed(address indexed winner, uint256 amount, uint256 indexed roundId);
+    event UnclaimedPrizesReclaimed(uint256 indexed roundId, uint256 amount);
 
     modifier onlyAdmin() {
         require(msg.sender == admin, "Not admin");
@@ -39,12 +42,11 @@ contract PrizeSplit {
         emit RoundFunded(roundId, msg.value);
     }
 
-    // BUG: No zero-winner check — if winners array is empty, the function
-    // succeeds silently and the prize pool becomes permanently locked
     function finalizeRound(uint256 _roundId, address[] calldata winners) external onlyAdmin {
         Round storage round = rounds[_roundId];
         require(!round.finalized, "Already finalized");
         require(round.prizePool > 0, "No prize pool");
+        require(winners.length > 0, "No winners");
 
         // BUG: Rounding error loses dust — integer division truncates remainder,
         // so (prizePool % winners.length) wei is permanently locked in the contract
@@ -55,12 +57,11 @@ contract PrizeSplit {
             round.shares[winners[i]] = sharePerWinner;
         }
 
+        round.reclaimAfter = block.timestamp + CLAIM_PERIOD;
         round.finalized = true;
         emit RoundFinalized(_roundId, winners.length);
     }
 
-    // BUG: Reentrancy — state (claimed flag) is set after the external call,
-    // allowing a malicious contract to re-enter claimPrize and drain funds
     function claimPrize(uint256 _roundId) external {
         Round storage round = rounds[_roundId];
         require(round.finalized, "Not finalized");
@@ -69,13 +70,37 @@ contract PrizeSplit {
 
         uint256 amount = round.shares[msg.sender];
 
+        round.claimed[msg.sender] = true;
+        totalPrize -= amount;
+
         (bool sent, ) = msg.sender.call{value: amount}("");
         require(sent, "Transfer failed");
 
-        // State updated after external call — reentrancy window
-        round.claimed[msg.sender] = true;
-
         emit PrizeClaimed(msg.sender, amount, _roundId);
+    }
+
+    function reclaimUnclaimed(uint256 _roundId) external onlyAdmin {
+        Round storage round = rounds[_roundId];
+        require(round.finalized, "Not finalized");
+        require(block.timestamp >= round.reclaimAfter, "Claim period active");
+
+        uint256 amount;
+        for (uint256 i = 0; i < round.winners.length; i++) {
+            address winner = round.winners[i];
+            if (!round.claimed[winner]) {
+                uint256 share = round.shares[winner];
+                round.claimed[winner] = true;
+                amount += share;
+            }
+        }
+
+        require(amount > 0, "No unclaimed prizes");
+        totalPrize -= amount;
+
+        (bool sent, ) = admin.call{value: amount}("");
+        require(sent, "Treasury transfer failed");
+
+        emit UnclaimedPrizesReclaimed(_roundId, amount);
     }
 
     function getShare(uint256 _roundId, address winner) external view returns (uint256) {
@@ -84,5 +109,9 @@ contract PrizeSplit {
 
     function isClaimed(uint256 _roundId, address winner) external view returns (bool) {
         return rounds[_roundId].claimed[winner];
+    }
+
+    function getReclaimAfter(uint256 _roundId) external view returns (uint256) {
+        return rounds[_roundId].reclaimAfter;
     }
 }
