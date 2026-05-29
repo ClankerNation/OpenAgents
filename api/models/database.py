@@ -2,7 +2,7 @@
 
 from sqlalchemy import (
     create_engine, Column, Integer, String, Float, Text, JSON,
-    ForeignKey, DateTime, Enum as SAEnum,
+    ForeignKey, DateTime, Enum as SAEnum, event,
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -84,6 +84,27 @@ class Payment(Base):
     claimed_at = Column(DateTime, nullable=True)
 
     task = relationship("Task", back_populates="payments")
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    action = Column(String(128), nullable=False, index=True)
+    actor = Column(String(128), nullable=False, index=True)
+    target = Column(String(256), nullable=False, index=True)
+    before = Column(JSON, nullable=True)
+    after = Column(JSON, nullable=True)
+    ip = Column(String(64), nullable=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+
+def _prevent_audit_mutation(_mapper, _connection, _target):
+    raise ValueError("AuditLog records are immutable")
+
+
+event.listen(AuditLog, "before_update", _prevent_audit_mutation)
+event.listen(AuditLog, "before_delete", _prevent_audit_mutation)
 
 
 def init_db():
