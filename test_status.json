@@ -1,0 +1,4 @@
+{
+  "passed": true,
+  "output": "\n> OpenAgents@0.1.0 test\n> npx hardhat test test/VestingWallet.test.js\n\n\n\n  VestingWallet Token Migration\n    ✔ should deploy with the correct initial parameters\n    ✔ should fail to migrate if not called by the owner\n    ✔ should fail to migrate if invalid token address\n    ✔ should fail to migrate if new token balance is insufficient\n    ✔ should migrate successfully when requirements are met\n    ✔ should allow claims of the new token after migration\n\n\n  6 passing (477ms)\n\n"
+}
