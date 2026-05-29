@@ -26,7 +26,9 @@ contract GovernorAlpha is ReentrancyGuard {
     }
 
     ERC20Votes public immutable token;
+    address public admin;
     uint256 public proposalCount;
+    uint256 public quorumVotes;
     uint256 public constant VOTING_DELAY = 1; // blocks
     uint256 public constant VOTING_PERIOD = 17280; // ~3 days at 15s blocks
     uint256 public constant PROPOSAL_THRESHOLD = 100_000e18;
@@ -37,9 +39,17 @@ contract GovernorAlpha is ReentrancyGuard {
     event VoteCast(address indexed voter, uint256 indexed proposalId, bool support, uint256 weight);
     event ProposalExecuted(uint256 indexed id);
     event ProposalCanceled(uint256 indexed id);
+    event QuorumVotesUpdated(uint256 oldQuorumVotes, uint256 newQuorumVotes);
+
+    modifier onlyAdmin() {
+        require(msg.sender == admin, "Governor: not admin");
+        _;
+    }
 
     constructor(address _token) {
         token = ERC20Votes(_token);
+        admin = msg.sender;
+        quorumVotes = token.totalSupply() * 4 / 100;
     }
 
     /// @notice Create a new governance proposal.
@@ -95,8 +105,7 @@ contract GovernorAlpha is ReentrancyGuard {
         Proposal storage p = proposals[proposalId];
         require(!p.executed, "Governor: already executed");
         require(block.number > p.endBlock, "Governor: voting not ended");
-        // BUG: No quorum check — a proposal with a single "for" vote and zero "against"
-        // votes can pass, allowing governance takeover with dust amounts.
+        require(p.forVotes >= quorumVotes, "Governor: quorum not reached");
         require(p.forVotes > p.againstVotes, "Governor: proposal defeated");
 
         // BUG: No timelock delay on execution — proposals execute instantly after voting
@@ -118,6 +127,12 @@ contract GovernorAlpha is ReentrancyGuard {
         require(!p.executed, "Governor: already executed");
         p.canceled = true;
         emit ProposalCanceled(proposalId);
+    }
+
+    function setQuorumVotes(uint256 newQuorumVotes) external onlyAdmin {
+        uint256 oldQuorumVotes = quorumVotes;
+        quorumVotes = newQuorumVotes;
+        emit QuorumVotesUpdated(oldQuorumVotes, newQuorumVotes);
     }
 
     receive() external payable {}
