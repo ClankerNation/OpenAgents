@@ -2,11 +2,25 @@
  * ABI encoding/decoding utilities for EVM-compatible contract interactions.
  */
 
-export type AbiType = "uint256" | "address" | "bytes32" | "string" | "bool";
+export type AbiType =
+  | "uint256"
+  | "address"
+  | "bytes32"
+  | "string"
+  | "bytes"
+  | "bool"
+  | "tuple"
+  | `${string}[]`;
 
 export interface AbiParam {
   type: AbiType;
   value: string | number | bigint | boolean;
+  components?: AbiTypeDescriptor[];
+}
+
+export interface AbiTypeDescriptor {
+  type: AbiType;
+  components?: AbiTypeDescriptor[];
 }
 
 export function encodeUint256(value: bigint | number): string {
@@ -74,6 +88,129 @@ export function decodeAddress(slot: string): string {
 
 export function decodeBool(slot: string): boolean {
   return BigInt("0x" + slot) !== 0n;
+}
+
+function stripHexPrefix(hex: string): string {
+  return hex.startsWith("0x") ? hex.slice(2) : hex;
+}
+
+function readWord(data: string, byteOffset: number): string {
+  const hex = stripHexPrefix(data);
+  const start = byteOffset * 2;
+  return hex.slice(start, start + 64).padStart(64, "0");
+}
+
+function readUint(data: string, byteOffset: number): bigint {
+  return BigInt("0x" + readWord(data, byteOffset));
+}
+
+function normalizeDescriptor(type: AbiType | AbiTypeDescriptor): AbiTypeDescriptor {
+  return typeof type === "string" ? { type } : type;
+}
+
+function isDynamicType(type: AbiTypeDescriptor): boolean {
+  if (type.type === "string" || type.type === "bytes" || type.type.endsWith("[]")) {
+    return true;
+  }
+  if (type.type === "tuple") {
+    return type.components?.some(isDynamicType) ?? false;
+  }
+  return false;
+}
+
+function decodeStatic(type: AbiTypeDescriptor, data: string, byteOffset: number): unknown {
+  const word = readWord(data, byteOffset);
+
+  switch (type.type) {
+    case "uint256":
+      return BigInt("0x" + word);
+    case "address":
+      return "0x" + word.slice(24).toLowerCase();
+    case "bytes32":
+      return "0x" + word;
+    case "bool":
+      return BigInt("0x" + word) !== 0n;
+    case "tuple":
+      return decodeTuple(type, data, byteOffset, byteOffset);
+    default:
+      throw new Error(`Unsupported static ABI type: ${type.type}`);
+  }
+}
+
+function decodeBytesAt(data: string, byteOffset: number): Buffer {
+  const hex = stripHexPrefix(data);
+  const length = Number(readUint(data, byteOffset));
+  const start = (byteOffset + 32) * 2;
+  return Buffer.from(hex.slice(start, start + length * 2), "hex");
+}
+
+function decodeArray(type: AbiTypeDescriptor, data: string, slotOffset: number, baseOffset: number): unknown[] {
+  const elementType = type.type.slice(0, -2) as AbiType;
+  const elementDescriptor: AbiTypeDescriptor =
+    elementType === "tuple"
+      ? { type: elementType, components: type.components }
+      : { type: elementType };
+  const arrayOffset = Number(readUint(data, slotOffset));
+  const arrayStart = baseOffset + arrayOffset;
+  const length = Number(readUint(data, arrayStart));
+  const values: unknown[] = [];
+
+  for (let i = 0; i < length; i++) {
+    const elementSlot = arrayStart + 32 + i * 32;
+    values.push(decodeType(elementDescriptor, data, elementSlot, arrayStart));
+  }
+
+  return values;
+}
+
+function decodeTuple(type: AbiTypeDescriptor, data: string, slotOffset: number, baseOffset: number): unknown[] {
+  const components = type.components ?? [];
+  const tupleStart = isDynamicType(type) ? baseOffset + Number(readUint(data, slotOffset)) : slotOffset;
+
+  return components.map((component, index) =>
+    decodeType(component, data, tupleStart + index * 32, tupleStart)
+  );
+}
+
+function decodeType(type: AbiTypeDescriptor, data: string, slotOffset: number, baseOffset: number): unknown {
+  if (!isDynamicType(type)) {
+    return decodeStatic(type, data, slotOffset);
+  }
+
+  if (type.type === "string") {
+    return decodeBytesAt(data, baseOffset + Number(readUint(data, slotOffset))).toString("utf8");
+  }
+
+  if (type.type === "bytes") {
+    return decodeBytesAt(data, baseOffset + Number(readUint(data, slotOffset)));
+  }
+
+  if (type.type.endsWith("[]")) {
+    return decodeArray(type, data, slotOffset, baseOffset);
+  }
+
+  if (type.type === "tuple") {
+    return decodeTuple(type, data, slotOffset, baseOffset);
+  }
+
+  throw new Error(`Unsupported ABI type: ${type.type}`);
+}
+
+export function decodeParameter(type: AbiType | AbiTypeDescriptor, data: string): unknown {
+  const descriptor = normalizeDescriptor(type);
+  if (descriptor.type === "tuple" && isDynamicType(descriptor)) {
+    const hexLength = stripHexPrefix(data).length / 2;
+    const possibleOffset = Number(readUint(data, 0));
+    if (possibleOffset < hexLength && possibleOffset % 32 === 0) {
+      return decodeType(descriptor, data, 0, 0);
+    }
+    return decodeTuple(descriptor, data, 0, 0);
+  }
+  return decodeType(descriptor, data, 0, 0);
+}
+
+export function decodeParams(types: Array<AbiType | AbiTypeDescriptor>, data: string): unknown[] {
+  return types.map((type, index) => decodeType(normalizeDescriptor(type), data, index * 32, 0));
 }
 
 export function functionSelector(signature: string): string {
