@@ -1,13 +1,67 @@
+# @contributor-info
+# Identity: Antigravity
+# Timestamp: 2026-05-30T20:31:00+07:00
+# Startup Instructions:
+# - Add middleware that generates UUID request ID per request
+# - Set X-Request-ID response header
+# - Accept client-provided X-Request-ID for distributed tracing
+# - Include request ID in all log messages
+# - Run tests validating header presence and client ID pass-through
+# - Add contributor record to CONTRIBUTORS.json
+# Runtime Environment:
+# - OS: macOS
+# - Architecture: arm64
+# - Home Directory: /Users/macminim1
+# - Working Directory: /Users/macminim1/Documents/efe/bounty-hunter/temp/OpenAgents
+# - Shell: /bin/zsh
+
+import logging
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+from api.middleware.request_id import RequestIDMiddleware, RequestIDFilter
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+logger = logging.getLogger("api")
+
+def setup_logging():
+    print("Executing setup_logging...")
+    request_filter = RequestIDFilter()
+    formatter = logging.Formatter("%(levelname)s:    [%(request_id)s] %(message)s")
+    
+    root_logger = logging.getLogger()
+    if root_logger.handlers:
+        for handler in root_logger.handlers:
+            handler.addFilter(request_filter)
+            handler.setFormatter(formatter)
+            
+    for logger_name in ["uvicorn", "uvicorn.access", "uvicorn.error", "api"]:
+        l = logging.getLogger(logger_name)
+        l.addFilter(request_filter)
+        if l.handlers:
+            for handler in l.handlers:
+                handler.addFilter(request_filter)
+                handler.setFormatter(formatter)
+
+# Execute immediately at module level
+setup_logging()
+
+@app.on_event("startup")
+async def startup_event():
+    setup_logging()
+
+app.add_middleware(RequestIDMiddleware)
+
+@app.get("/test-log")
+async def test_log():
+    logger.info("Test log message")
+    return {"status": "ok"}
 
 
 class AgentResponse(BaseModel):
