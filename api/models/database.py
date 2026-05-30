@@ -82,6 +82,7 @@ class Payment(Base):
     status = Column(String(32), default="pending")
     created_at = Column(DateTime, default=datetime.utcnow)
     claimed_at = Column(DateTime, nullable=True)
+    expires_at = Column(DateTime, nullable=True)
 
     task = relationship("Task", back_populates="payments")
 

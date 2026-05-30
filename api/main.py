@@ -1,13 +1,26 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+from .errors import register_error_handlers
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+# Register structured error handlers (but NOT the RequestID middleware yet)
+register_error_handlers(app)
+
+# Add rate limiting middleware
+from .middleware.ratelimit import RateLimitMiddleware, RateLimitConfig
+app.add_middleware(RateLimitMiddleware, config=RateLimitConfig())
+
+# Add request-ID middleware LAST so it is outermost (runs first)
+from .errors import RequestIDMiddleware
+app.add_middleware(RequestIDMiddleware)
 
 
 class AgentResponse(BaseModel):
@@ -61,7 +74,8 @@ async def list_agents(
 @app.get("/agents/{agent_id}", response_model=AgentResponse)
 async def get_agent(agent_id: str):
     if agent_id not in agents_cache:
-        raise HTTPException(status_code=404, detail="Agent not found")
+        from .errors import APIError, ErrorCode
+        raise APIError(code=ErrorCode.NOT_FOUND, message="Agent not found")
     return agents_cache[agent_id]
 
 
@@ -80,7 +94,8 @@ async def list_tasks(
 @app.get("/tasks/{task_id}", response_model=TaskResponse)
 async def get_task(task_id: int):
     if task_id not in tasks_cache:
-        raise HTTPException(status_code=404, detail="Task not found")
+        from .errors import APIError, ErrorCode
+        raise APIError(code=ErrorCode.NOT_FOUND, message="Task not found")
     return tasks_cache[task_id]
 
 
@@ -110,3 +125,13 @@ async def health():
         "tasks_indexed": len(tasks_cache),
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+
+# Include route modules (agents, tasks, payments)
+from .routes.agents import router as agents_router
+from .routes.tasks import router as tasks_router
+from .routes.payments import router as payments_router
+
+app.include_router(agents_router)
+app.include_router(tasks_router)
+app.include_router(payments_router)
