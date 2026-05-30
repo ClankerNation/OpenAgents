@@ -74,119 +74,62 @@ Runtime Info:
 - Working Directory: /Users/macminim1/Documents/efe
 """
 
-from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel
-from typing import Optional
-from datetime import datetime
-from api.middleware.ratelimit import RateLimitMiddleware
+import os
+os.environ["JWT_SECRET"] = "test_secret"
 
-app = FastAPI(
-    title="OpenAgents API",
-    description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
-    version="0.1.0",
-)
+import time
+import pytest
+from fastapi.testclient import TestClient
+from api.main import app
+from api.middleware.ratelimit import _request_counts
+from api.middleware.auth import generate_login_tokens
 
-# Register Rate Limiting Middleware
-app.add_middleware(RateLimitMiddleware)
+client = TestClient(app)
 
+@pytest.fixture(autouse=True)
+def clear_counts():
+    _request_counts.clear()
+    yield
 
-class AgentResponse(BaseModel):
-    agent_id: str
-    name: str
-    owner: str
-    endpoint: str
-    reputation: int
-    tasks_completed: int
-    registered_at: datetime
-    active: bool
+def test_anonymous_rate_limit():
+    # First request
+    response = client.get("/agents")
+    assert response.status_code == 200
+    assert response.headers["X-RateLimit-Limit"] == "60"
+    assert response.headers["X-RateLimit-Remaining"] == "59"
+    assert "X-RateLimit-Reset" in response.headers
 
+    # Pre-fill requests to simulate limit exceed
+    _request_counts["testclient:anonymous"] = (60, time.time())
 
-class TaskResponse(BaseModel):
-    task_id: int
-    creator: str
-    description: str
-    reward_wei: str
-    deadline: datetime
-    status: str
-    assigned_agent: Optional[str] = None
+    response2 = client.get("/agents")
+    assert response2.status_code == 429
+    assert response2.headers["Retry-After"] in ("59", "60")
+    assert response2.headers["X-RateLimit-Limit"] == "60"
+    assert response2.headers["X-RateLimit-Remaining"] == "0"
 
+def test_authenticated_rate_limit():
+    tokens = generate_login_tokens("user1", "0x1234", roles=["user"])
+    headers = {"Authorization": f"Bearer {tokens['token']}"}
 
-class LeaderboardEntry(BaseModel):
-    agent_id: str
-    name: str
-    reputation: int
-    tasks_completed: int
-    success_rate: float
+    response = client.get("/agents", headers=headers)
+    assert response.status_code == 200
+    assert response.headers["X-RateLimit-Limit"] == "300"
+    assert response.headers["X-RateLimit-Remaining"] == "299"
 
+def test_premium_jwt_rate_limit():
+    tokens = generate_login_tokens("user2", "0x5678", roles=["premium"])
+    headers = {"Authorization": f"Bearer {tokens['token']}"}
 
-# In-memory store (placeholder for DB)
-agents_cache: dict = {}
-tasks_cache: dict = {}
+    response = client.get("/agents", headers=headers)
+    assert response.status_code == 200
+    assert response.headers["X-RateLimit-Limit"] == "1000"
+    assert response.headers["X-RateLimit-Remaining"] == "999"
 
+def test_premium_apikey_rate_limit():
+    headers = {"X-API-Key": "premium-key-value"}
 
-@app.get("/agents", response_model=list[AgentResponse])
-async def list_agents(
-    active_only: bool = Query(True),
-    min_reputation: int = Query(0),
-    limit: int = Query(50, le=100),
-    offset: int = Query(0),
-):
-    results = list(agents_cache.values())
-    if active_only:
-        results = [a for a in results if a.get("active")]
-    results = [a for a in results if a.get("reputation", 0) >= min_reputation]
-    return results[offset : offset + limit]
-
-
-@app.get("/agents/{agent_id}", response_model=AgentResponse)
-async def get_agent(agent_id: str):
-    if agent_id not in agents_cache:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    return agents_cache[agent_id]
-
-
-@app.get("/tasks", response_model=list[TaskResponse])
-async def list_tasks(
-    status: Optional[str] = Query(None),
-    limit: int = Query(50, le=100),
-    offset: int = Query(0),
-):
-    results = list(tasks_cache.values())
-    if status:
-        results = [t for t in results if t.get("status") == status]
-    return results[offset : offset + limit]
-
-
-@app.get("/tasks/{task_id}", response_model=TaskResponse)
-async def get_task(task_id: int):
-    if task_id not in tasks_cache:
-        raise HTTPException(status_code=404, detail="Task not found")
-    return tasks_cache[task_id]
-
-
-@app.get("/leaderboard", response_model=list[LeaderboardEntry])
-async def leaderboard(limit: int = Query(20, le=50)):
-    entries = []
-    for agent in agents_cache.values():
-        completed = agent.get("tasks_completed", 0)
-        entries.append(
-            {
-                "agent_id": agent["agent_id"],
-                "name": agent["name"],
-                "reputation": agent.get("reputation", 0),
-                "tasks_completed": completed,
-                "success_rate": completed / max(completed + 1, 1),
-            }
-        )
-    entries.sort(key=lambda x: x["reputation"], reverse=True)
-    return entries[:limit]
-
-
-@app.get("/health")
-async def health():
-    return {
-        "status": "ok",
-        "agents_indexed": len(agents_cache),
-        "tasks_indexed": len(tasks_cache),
-        "timestamp": datetime.utcnow().isoformat(),
-    }
+    response = client.get("/agents", headers=headers)
+    assert response.status_code == 200
+    assert response.headers["X-RateLimit-Limit"] == "1000"
+    assert response.headers["X-RateLimit-Remaining"] == "999"
