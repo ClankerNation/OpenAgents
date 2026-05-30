@@ -1,0 +1,4 @@
+{
+  "passed": true,
+  "output": "\n> OpenAgents@0.1.0 test\n> hardhat test\n\n\n\n  Permit2 Integration\n    StakingRewards with Permit2\n      ✔ should allow staking using permit2 signature\n      ✔ should fallback to standard approve/transferFrom when signature is empty\n    AMMPool with Permit2\n      ✔ should allow swapping using permit2 signature\n      ✔ should fallback to standard swap when signature is empty\n    LendingPool with Permit2\n      ✔ should allow deposit and repay via permit2 signature\n      ✔ should fallback to standard deposit and repay when signature is empty\n\n  StakingRewards\n    ✔ should allow staking tokens\n    ✔ should accrue rewards over time\n    ✔ should allow withdrawal\n    ✔ should distribute rewards correctly to multiple stakers\n\n\n  10 passing (413ms)\n\n"
+}
