@@ -42,6 +42,17 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
 )
 
+# ---------------------------------------------------------------------------
+# Trusted-host validation — reject Host header injection attacks
+# ---------------------------------------------------------------------------
+from api.middleware.hosts import TrustedHostMiddleware
+
+_raw_hosts = os.environ.get("ALLOWED_HOSTS", "")
+_allowed_hosts = [h.strip().lower() for h in _raw_hosts.split(",") if h.strip()]
+
+if _allowed_hosts:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=_allowed_hosts)
+
 
 class AgentResponse(BaseModel):
     agent_id: str
