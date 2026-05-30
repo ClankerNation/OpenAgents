@@ -1,0 +1,4 @@
+{
+  "passed": true,
+  "output": "\n> OpenAgents@0.1.0 test\n> hardhat test\n\n\n\n  NFTMarketplace Auctions\n    createAuction\n      ✔ should create an auction with parameters\n    placeBid & settleAuction\n      ✔ should reject bids below startPrice\n      ✔ should accept valid first bid and handle bid war increments & refunds\n      ✔ should refund highest bidder and keep NFT with seller if reserve price not met at settlement\n      ✔ should transfer NFT and distribute funds correctly if reserve met at settlement\n\n  StakingRewards\n    ✔ should allow staking tokens\n    ✔ should accrue rewards over time\n    ✔ should allow withdrawal\n    ✔ should distribute rewards correctly to multiple stakers\n\n\n  9 passing (490ms)\n\n"
+}
