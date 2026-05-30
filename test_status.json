@@ -1,0 +1,4 @@
+{
+  "passed": true,
+  "output": "\n> OpenAgents@0.1.0 test\n> hardhat test test/StakingRewards.test.js test/SDKEventSubscription.test.js\n\n\n\n  StakingRewards\n    ✔ should allow staking tokens\n    ✔ should accrue rewards over time\n    ✔ should allow withdrawal\n    ✔ should distribute rewards correctly to multiple stakers\n\n  SDK Event Subscription and Reconnection\n    ✔ should subscribe to events and receive real-time decoded logs\n    ✔ should support filtering by indexed parameters using contract filters\nWebSocket disconnected. Attempting to reconnect...\nWebSocket reconnected successfully. Restoring subscriptions...\nRe-subscribed to event: TestEvent\n    ✔ should automatically reconnect and restore all active subscriptions upon disconnect (54ms)\n\n\n  7 passing (624ms)\n\n"
+}

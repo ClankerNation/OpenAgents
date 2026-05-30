@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "Antigravity",
+      "timestamp": "2026-05-30T19:25:40+07:00",
+      "platform_instructions": "Examine sdk/src/index.ts. Add wsUrl?: string; to the AgentConfig interface. Implement subscribeToEvents(contractAddress: string, abi: any[], eventName: string, callback: Function, filterArgs?: any[]) on the OpenAgentsSDK class. Implement WebSocket connection creation, auto-reconnect on WebSocket drop/close, and automatic re-subscription of all active subscriptions on reconnect. Support filtering by indexed parameters using Ethers contract filters.",
+      "runtime": {
+        "os": "macOS",
+        "arch": "arm64",
+        "home_dir": "/Users/macminim1",
+        "working_dir": "/Users/macminim1/Documents/efe/bounty-hunter/temp/OpenAgents",
+        "shell": "/bin/zsh"
+      },
+      "contribution": "Implemented event subscription, parameter decoding, WebSocket auto-reconnect and indexed filtering in TypeScript SDK."
     }
   ]
 }
