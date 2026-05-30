@@ -70,147 +70,131 @@
 # ==============================================================================
 
 import os
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Optional
-from datetime import datetime
-from api.middleware.ratelimit import RateLimitMiddleware, RateLimitConfig
+import time
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
-app = FastAPI(
-    title="OpenAgents API",
-    description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
-    version="0.1.0",
-)
+# Ensure JWT_SECRET is set before imports
+os.environ["JWT_SECRET"] = "test-secret-key-12345"
 
-# CORS configuration
-allowed_origins_raw = os.getenv("ALLOWED_ORIGINS", "")
-origins = []
-if allowed_origins_raw:
-    origins = [origin.strip() for origin in allowed_origins_raw.split(",") if origin.strip()]
-
-# Wildcard '*' only allowed in development mode
-is_development = os.getenv("ENV", "production").lower() == "development"
-
-if "*" in origins:
-    if not is_development:
-        origins = [o for o in origins if o != "*"]
-
-allow_creds = True
-if "*" in origins:
-    allow_creds = False
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=allow_creds,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
-)
-
-app.add_middleware(
-    RateLimitMiddleware,
-    config=RateLimitConfig()
-)
+from api.main import app
+from api.middleware.ratelimit import RateLimitMiddleware, RateLimitConfig, _request_counts
+from api.middleware.auth import generate_login_tokens
 
 
-class AgentResponse(BaseModel):
-    agent_id: str
-    name: str
-    owner: str
-    endpoint: str
-    reputation: int
-    tasks_completed: int
-    registered_at: datetime
-    active: bool
+@pytest.fixture(autouse=True)
+def clear_rate_limits():
+    """Clear the rate limiting in-memory store before each test."""
+    _request_counts.clear()
 
 
-class TaskResponse(BaseModel):
-    task_id: int
-    creator: str
-    description: str
-    reward_wei: str
-    deadline: datetime
-    status: str
-    assigned_agent: Optional[str] = None
+def test_health_check_bypasses_rate_limit():
+    client = TestClient(app)
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert "X-RateLimit-Limit" not in response.headers
+    assert "X-RateLimit-Remaining" not in response.headers
+    assert "X-RateLimit-Reset" not in response.headers
 
 
-class LeaderboardEntry(BaseModel):
-    agent_id: str
-    name: str
-    reputation: int
-    tasks_completed: int
-    success_rate: float
+def test_main_app_default_rate_limit_headers():
+    client = TestClient(app)
+
+    # 1. Anonymous User (Tier: 60)
+    response = client.get("/agents")
+    # Note: agents endpoint returns 200 or raises 404/etc if DB empty,
+    # but the middleware intercepts it first and adds headers.
+    assert "X-RateLimit-Limit" in response.headers
+    assert response.headers["X-RateLimit-Limit"] == "60"
+    assert "X-RateLimit-Remaining" in response.headers
+    assert "X-RateLimit-Reset" in response.headers
+
+    # 2. Authenticated User (Tier: 300)
+    auth_tokens = generate_login_tokens("user1", "0x123", roles=["user"])
+    headers = {"Authorization": f"Bearer {auth_tokens['token']}"}
+    response_auth = client.get("/agents", headers=headers)
+    assert response_auth.headers["X-RateLimit-Limit"] == "300"
+
+    # 3. Premium API Key User (Tier: 1000)
+    headers_api = {"x-api-key": "my-premium-key-value"}
+    response_api = client.get("/agents", headers=headers_api)
+    assert response_api.headers["X-RateLimit-Limit"] == "1000"
+
+    # 4. Premium Bearer Token User (Tier: 1000)
+    premium_tokens = generate_login_tokens("premium_user", "0xabc", roles=["premium"])
+    headers_token = {"Authorization": f"Bearer {premium_tokens['token']}"}
+    response_premium = client.get("/agents", headers=headers_token)
+    assert response_premium.headers["X-RateLimit-Limit"] == "1000"
 
 
-# In-memory store (placeholder for DB)
-agents_cache: dict = {}
-tasks_cache: dict = {}
+def test_rate_limit_enforcement_and_429():
+    # Construct a dedicated test app with lower limits to verify enforcement and headers
+    test_app = FastAPI()
+    config = RateLimitConfig(
+        requests_per_window=2,
+        auth_requests_per_window=3,
+        premium_requests_per_window=4,
+        window_seconds=10
+    )
+    test_app.add_middleware(RateLimitMiddleware, config=config)
 
+    @test_app.get("/test")
+    def test_route():
+        return {"status": "ok"}
 
-@app.get("/agents", response_model=list[AgentResponse])
-async def list_agents(
-    active_only: bool = Query(True),
-    min_reputation: int = Query(0),
-    limit: int = Query(50, le=100),
-    offset: int = Query(0),
-):
-    results = list(agents_cache.values())
-    if active_only:
-        results = [a for a in results if a.get("active")]
-    results = [a for a in results if a.get("reputation", 0) >= min_reputation]
-    return results[offset : offset + limit]
+    client = TestClient(test_app)
 
+    # A. Anonymous requests (Limit: 2)
+    # Request 1 -> OK
+    r1 = client.get("/test")
+    assert r1.status_code == 200
+    assert r1.headers["X-RateLimit-Limit"] == "2"
+    assert r1.headers["X-RateLimit-Remaining"] == "1"
+    assert "X-RateLimit-Reset" in r1.headers
 
-@app.get("/agents/{agent_id}", response_model=AgentResponse)
-async def get_agent(agent_id: str):
-    if agent_id not in agents_cache:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    return agents_cache[agent_id]
+    # Request 2 -> OK
+    r2 = client.get("/test")
+    assert r2.status_code == 200
+    assert r2.headers["X-RateLimit-Remaining"] == "0"
 
+    # Request 3 -> 429 Rate limited
+    r3 = client.get("/test")
+    assert r3.status_code == 429
+    assert r3.json()["error"] == "Rate limit exceeded"
+    assert "retry_after" in r3.json()
+    assert r3.headers["X-RateLimit-Limit"] == "2"
+    assert r3.headers["X-RateLimit-Remaining"] == "0"
+    assert "Retry-After" in r3.headers
+    assert int(r3.headers["Retry-After"]) >= 0
 
-@app.get("/tasks", response_model=list[TaskResponse])
-async def list_tasks(
-    status: Optional[str] = Query(None),
-    limit: int = Query(50, le=100),
-    offset: int = Query(0),
-):
-    results = list(tasks_cache.values())
-    if status:
-        results = [t for t in results if t.get("status") == status]
-    return results[offset : offset + limit]
+    # B. Authenticated requests (Limit: 3)
+    auth_tokens = generate_login_tokens("user2", "0x234", roles=["user"])
+    auth_headers = {"Authorization": f"Bearer {auth_tokens['token']}"}
 
+    # Request 1, 2, 3 -> OK
+    for i in range(3):
+        r = client.get("/test", headers=auth_headers)
+        assert r.status_code == 200
+        assert r.headers["X-RateLimit-Limit"] == "3"
+        assert r.headers["X-RateLimit-Remaining"] == str(3 - i - 1)
 
-@app.get("/tasks/{task_id}", response_model=TaskResponse)
-async def get_task(task_id: int):
-    if task_id not in tasks_cache:
-        raise HTTPException(status_code=404, detail="Task not found")
-    return tasks_cache[task_id]
+    # Request 4 -> 429
+    r_limited = client.get("/test", headers=auth_headers)
+    assert r_limited.status_code == 429
+    assert r_limited.headers["Retry-After"] is not None
 
+    # C. Premium API key requests (Limit: 4)
+    premium_key_headers = {"x-api-key": "my-premium-api-key"}
 
-@app.get("/leaderboard", response_model=list[LeaderboardEntry])
-async def leaderboard(limit: int = Query(20, le=50)):
-    entries = []
-    for agent in agents_cache.values():
-        completed = agent.get("tasks_completed", 0)
-        entries.append(
-            {
-                "agent_id": agent["agent_id"],
-                "name": agent["name"],
-                "reputation": agent.get("reputation", 0),
-                "tasks_completed": completed,
-                "success_rate": completed / max(completed + 1, 1),
-            }
-        )
-    entries.sort(key=lambda x: x["reputation"], reverse=True)
-    return entries[:limit]
+    # Request 1, 2, 3, 4 -> OK
+    for i in range(4):
+        r = client.get("/test", headers=premium_key_headers)
+        assert r.status_code == 200
+        assert r.headers["X-RateLimit-Limit"] == "4"
+        assert r.headers["X-RateLimit-Remaining"] == str(4 - i - 1)
 
-
-@app.get("/health")
-async def health():
-    return {
-        "status": "ok",
-        "agents_indexed": len(agents_cache),
-        "tasks_indexed": len(tasks_cache),
-        "timestamp": datetime.utcnow().isoformat(),
-    }
+    # Request 5 -> 429
+    r_limited_api = client.get("/test", headers=premium_key_headers)
+    assert r_limited_api.status_code == 429
+    assert r_limited_api.headers["Retry-After"] is not None
