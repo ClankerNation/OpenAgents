@@ -80,6 +80,7 @@ contract LendingPool {
     event Borrowed(address indexed user, uint256 amount);
     event Repaid(address indexed user, uint256 amount);
     event Liquidated(address indexed user, address indexed liquidator, uint256 debtRepaid);
+    event FlashLiquidated(address indexed user, address indexed liquidator, uint256 debt, uint256 fee, uint256 profit);
 
     constructor(address _oracle, address _collateralToken, address _borrowToken) {
         oracle = IPriceFeed(_oracle);
@@ -164,6 +165,43 @@ contract LendingPool {
 
         require(collateralToken.transfer(msg.sender, collateral), "Transfer failed");
         emit Liquidated(user, msg.sender, debt);
+    }
+
+    /// @notice Perform a capital-free liquidation using a flash loan from the pool itself.
+    /// @param user The address of the borrower to liquidate.
+    function flashLiquidate(address user) external {
+        require(!_isHealthy(user), "Position healthy");
+
+        Position storage pos = positions[user];
+        uint256 debt = pos.borrowedAmount;
+        uint256 collateral = pos.collateralAmount;
+
+        require(debt > 0, "No debt");
+
+        // 0.09% flash loan fee
+        uint256 fee = (debt * 9) / 10000;
+        
+        uint256 collateralPrice = oracle.getPrice(address(collateralToken));
+        uint256 borrowPrice = oracle.getPrice(address(borrowToken));
+        require(collateralPrice > 0 && borrowPrice > 0, "Invalid oracle prices");
+
+        // collateralToRepay = (debt + fee) in collateral value
+        uint256 collateralToRepay = ((debt + fee) * borrowPrice) / collateralPrice;
+        require(collateral >= collateralToRepay, "Insufficient collateral to repay loan");
+
+        uint256 profit = collateral - collateralToRepay;
+
+        pos.borrowedAmount = 0;
+        pos.collateralAmount = 0;
+        totalBorrowed -= debt;
+        totalDeposits -= collateral;
+
+        if (profit > 0) {
+            require(collateralToken.transfer(msg.sender, profit), "Transfer failed");
+        }
+
+        emit Liquidated(user, msg.sender, debt);
+        emit FlashLiquidated(user, msg.sender, debt, fee, profit);
     }
 
     function _isHealthy(address user) internal view returns (bool) {
