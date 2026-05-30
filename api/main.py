@@ -1,8 +1,14 @@
+import logging
 import os
+import uuid
+from contextvars import ContextVar
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
 from typing import Optional
 from datetime import datetime
 
@@ -41,6 +47,58 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
 )
+
+# ---------------------------------------------------------------------------
+# Request ID tracing — async-safe via contextvars
+# ---------------------------------------------------------------------------
+request_id_ctx: ContextVar[str] = ContextVar("request_id", default="N/A")
+
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    """Assigns a unique trace token to every inbound request.
+
+    If the client supplies an ``X-Request-ID`` header the value is preserved;
+    otherwise a new hex UUID is generated.  The token is stored in a
+    ``ContextVar`` so downstream handlers and log filters can read it safely
+    across concurrent async tasks, and is echoed back on the response.
+    """
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        incoming_id = request.headers.get("X-Request-ID")
+        rid = incoming_id if incoming_id else uuid.uuid4().hex
+        token = request_id_ctx.set(rid)
+        try:
+            response: Response = await call_next(request)
+            response.headers["X-Request-ID"] = rid
+            return response
+        finally:
+            request_id_ctx.reset(token)
+
+
+app.add_middleware(RequestIDMiddleware)
+
+
+# ---------------------------------------------------------------------------
+# Logging — inject request_id into every log record
+# ---------------------------------------------------------------------------
+class RequestIDFilter(logging.Filter):
+    """Reads the current request ID from the context variable and attaches
+    it to each log record as ``record.request_id``."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = request_id_ctx.get("N/A")
+        return True
+
+
+_log_handler = logging.StreamHandler()
+_log_handler.setFormatter(
+    logging.Formatter("[%(request_id)s] %(levelname)s - %(message)s")
+)
+_log_handler.addFilter(RequestIDFilter())
+
+logger = logging.getLogger("openagents")
+logger.setLevel(logging.INFO)
+logger.addHandler(_log_handler)
 
 
 class AgentResponse(BaseModel):
