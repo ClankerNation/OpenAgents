@@ -1,4 +1,7 @@
+import os
+
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -7,6 +10,36 @@ app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
+)
+
+# ---------------------------------------------------------------------------
+# CORS configuration — resolved dynamically from environment variables
+# ---------------------------------------------------------------------------
+_raw_origins = os.environ.get("ALLOWED_ORIGINS", "")
+_allowed_origins = [
+    origin.strip()
+    for origin in _raw_origins.split(",")
+    if origin.strip()
+]
+
+_app_env = os.environ.get("APP_ENV", os.environ.get("ENVIRONMENT", "production")).lower()
+
+# FastAPI strictly prohibits allow_credentials=True when allow_origins=["*"].
+# In development mode with no explicit origins we fall back to a permissive
+# wildcard but MUST disable credentials to avoid a runtime crash.
+if not _allowed_origins and _app_env == "development":
+    _allowed_origins = ["*"]
+    _allow_credentials = False
+else:
+    # Production: require an explicit origin list with credentials enabled.
+    _allow_credentials = True
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins,
+    allow_credentials=_allow_credentials,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
 )
 
 
