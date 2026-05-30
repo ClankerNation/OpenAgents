@@ -1,4 +1,5 @@
 import { ethers } from "ethers";
+import { deployContract as _deployContract, DeployContractOptions, DeploymentResult } from "./deploy/contract";
 
 export interface AgentConfig {
   name: string;
@@ -88,4 +89,28 @@ export class OpenAgentsSDK {
 
     return openTasks;
   }
+
+  /**
+   * Deploys a smart contract with constructor arguments, gas estimation,
+   * and deployment confirmation.
+   *
+   * @param options - Deployment configuration including bytecode, ABI, constructor args
+   * @returns DeploymentResult with contract address, tx hash, and contract instance
+   *
+   * @example
+   * ```ts
+   * const result = await sdk.deployContract({
+   *   bytecode: "0x608060405234801...",
+   *   abi: ["constructor(address owner, uint256 supply)"],
+   *   constructorArgs: ["0xAbC...", 1000000],
+   * });
+   * console.log("Deployed at:", result.contractAddress);
+   * ```
+   */
+  async deployContract(options: DeployContractOptions): Promise<DeploymentResult> {
+    return _deployContract(this.signer, options);
+  }
 }
+
+// Re-export deploy types for convenience
+export { deployContract, DeployContractOptions, DeploymentResult } from "./deploy/contract";
