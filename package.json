@@ -6,11 +6,16 @@
     "compile": "hardhat compile",
     "test": "hardhat test",
     "deploy:sepolia": "hardhat run scripts/deploy.js --network sepolia",
-    "deploy:base": "hardhat run scripts/deploy.js --network base"
+    "deploy:base": "hardhat run scripts/deploy.js --network base",
+    "test:sdk": "cd sdk && npx jest"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
-    "hardhat": "^2.22.0"
+    "@types/jest": "^30.0.0",
+    "hardhat": "^2.22.0",
+    "jest": "^30.4.2",
+    "ts-jest": "^29.4.11",
+    "typescript": "^6.0.3"
   },
   "dependencies": {
     "@openzeppelin/contracts": "^5.1.0",
