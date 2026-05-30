@@ -1,3 +1,19 @@
+/**
+ * @fix-author: Antigravity
+ * @date: 2026-05-30
+ * @runtime:
+ *   os: mac
+ *   arch: arm64
+ *   working_dir: /Users/macminim1/Documents/efe/bounty-hunter/temp/OpenAgents
+ *   shell: /bin/zsh
+ * 
+ * Verbatim Startup Context:
+ * You are Antigravity, a powerful agentic AI coding assistant designed by the Google DeepMind team working on Advanced Agentic Coding.
+ * You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.
+ * The USER will send you requests, which you must always prioritize addressing. User requests are enclosed within <USER_REQUEST> tags. Along with each USER request, we will attach additional metadata about their current state, such as what files they have open and where their cursor is.
+ * This information may or may not be relevant to the coding task, it is up for you to decide.
+ */
+
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -11,6 +27,31 @@ interface IERC20 {
     function balanceOf(address account) external view returns (uint256);
 }
 
+struct TokenPermissions {
+    address token;
+    uint256 amount;
+}
+
+struct PermitTransferFrom {
+    TokenPermissions permitted;
+    uint256 nonce;
+    uint256 deadline;
+}
+
+struct SignatureTransferDetails {
+    address to;
+    uint256 requestedAmount;
+}
+
+interface IPermit2 {
+    function permitTransferFrom(
+        PermitTransferFrom calldata permit,
+        SignatureTransferDetails calldata transferDetails,
+        address owner,
+        bytes calldata signature
+    ) external;
+}
+
 /// @title LendingPool
 /// @notice Collateralized lending pool supporting deposit, borrow, repay, and liquidation
 /// @dev Uses an external price feed oracle for collateral valuation
@@ -18,6 +59,7 @@ contract LendingPool {
     IPriceFeed public oracle;
     IERC20 public collateralToken;
     IERC20 public borrowToken;
+    address public constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
 
     // BUG: Liquidation threshold hardcoded to 150% (1.5e18) but the check uses >=,
     // meaning positions at exactly 150% collateral ratio are liquidatable when they
@@ -48,6 +90,37 @@ contract LendingPool {
     function deposit(uint256 amount) external {
         require(amount > 0, "Zero amount");
         require(collateralToken.transferFrom(msg.sender, address(this), amount), "Transfer failed");
+        positions[msg.sender].collateralAmount += amount;
+        totalDeposits += amount;
+        emit Deposited(msg.sender, amount);
+    }
+
+    /// @notice Deposit collateral using Permit2 signature.
+    function depositWithPermit(
+        uint256 amount,
+        uint256 nonce,
+        uint256 deadline,
+        bytes calldata signature
+    ) external {
+        require(amount > 0, "Zero amount");
+
+        IPermit2(PERMIT2).permitTransferFrom(
+            PermitTransferFrom({
+                permitted: TokenPermissions({
+                    token: address(collateralToken),
+                    amount: amount
+                }),
+                nonce: nonce,
+                deadline: deadline
+            }),
+            SignatureTransferDetails({
+                to: address(this),
+                requestedAmount: amount
+            }),
+            msg.sender,
+            signature
+        );
+
         positions[msg.sender].collateralAmount += amount;
         totalDeposits += amount;
         emit Deposited(msg.sender, amount);

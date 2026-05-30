@@ -1,3 +1,19 @@
+/**
+ * @fix-author: Antigravity
+ * @date: 2026-05-30
+ * @runtime:
+ *   os: mac
+ *   arch: arm64
+ *   working_dir: /Users/macminim1/Documents/efe/bounty-hunter/temp/OpenAgents
+ *   shell: /bin/zsh
+ * 
+ * Verbatim Startup Context:
+ * You are Antigravity, a powerful agentic AI coding assistant designed by the Google DeepMind team working on Advanced Agentic Coding.
+ * You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.
+ * The USER will send you requests, which you must always prioritize addressing. User requests are enclosed within <USER_REQUEST> tags. Along with each USER request, we will attach additional metadata about their current state, such as what files they have open and where their cursor is.
+ * This information may or may not be relevant to the coding task, it is up for you to decide.
+ */
+
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -7,12 +23,38 @@ interface IERC20 {
     function balanceOf(address account) external view returns (uint256);
 }
 
+struct TokenPermissions {
+    address token;
+    uint256 amount;
+}
+
+struct PermitTransferFrom {
+    TokenPermissions permitted;
+    uint256 nonce;
+    uint256 deadline;
+}
+
+struct SignatureTransferDetails {
+    address to;
+    uint256 requestedAmount;
+}
+
+interface IPermit2 {
+    function permitTransferFrom(
+        PermitTransferFrom calldata permit,
+        SignatureTransferDetails calldata transferDetails,
+        address owner,
+        bytes calldata signature
+    ) external;
+}
+
 /// @title AMMPool
 /// @notice Constant product (x*y=k) automated market maker pool
 /// @dev Supports adding/removing liquidity and token swaps with a fee
 contract AMMPool {
     IERC20 public tokenA;
     IERC20 public tokenB;
+    address public constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
 
     uint256 public reserveA;
     uint256 public reserveB;
@@ -92,6 +134,59 @@ contract AMMPool {
         IERC20 tOut = isA ? tokenB : tokenA;
 
         require(tIn.transferFrom(msg.sender, address(this), amountIn), "Transfer in failed");
+        require(tOut.transfer(msg.sender, amountOut), "Transfer out failed");
+
+        if (isA) {
+            reserveA += amountIn;
+            reserveB -= amountOut;
+        } else {
+            reserveB += amountIn;
+            reserveA -= amountOut;
+        }
+
+        emit Swap(msg.sender, tokenIn, amountIn, amountOut);
+    }
+
+    /// @notice Swap tokens using Permit2 signature.
+    function swapWithPermit(
+        address tokenIn,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint256 nonce,
+        uint256 deadline,
+        bytes calldata signature
+    ) external returns (uint256 amountOut) {
+        require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
+        require(amountIn > 0, "Zero input");
+
+        bool isA = tokenIn == address(tokenA);
+        (uint256 resIn, uint256 resOut) = isA ? (reserveA, reserveB) : (reserveB, reserveA);
+
+        uint256 amountInWithFee = amountIn * (10000 - FEE_BPS);
+        amountOut = (amountInWithFee * resOut) / (resIn * 10000 + amountInWithFee);
+
+        require(amountOut >= minAmountOut, "Slippage exceeded");
+
+        IERC20 tIn = isA ? tokenA : tokenB;
+        IERC20 tOut = isA ? tokenB : tokenA;
+
+        IPermit2(PERMIT2).permitTransferFrom(
+            PermitTransferFrom({
+                permitted: TokenPermissions({
+                    token: address(tIn),
+                    amount: amountIn
+                }),
+                nonce: nonce,
+                deadline: deadline
+            }),
+            SignatureTransferDetails({
+                to: address(this),
+                requestedAmount: amountIn
+            }),
+            msg.sender,
+            signature
+        );
+
         require(tOut.transfer(msg.sender, amountOut), "Transfer out failed");
 
         if (isA) {

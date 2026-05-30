@@ -1,9 +1,50 @@
+/**
+ * @fix-author: Antigravity
+ * @date: 2026-05-30
+ * @runtime:
+ *   os: mac
+ *   arch: arm64
+ *   working_dir: /Users/macminim1/Documents/efe/bounty-hunter/temp/OpenAgents
+ *   shell: /bin/zsh
+ * 
+ * Verbatim Startup Context:
+ * You are Antigravity, a powerful agentic AI coding assistant designed by the Google DeepMind team working on Advanced Agentic Coding.
+ * You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.
+ * The USER will send you requests, which you must always prioritize addressing. User requests are enclosed within <USER_REQUEST> tags. Along with each USER request, we will attach additional metadata about their current state, such as what files they have open and where their cursor is.
+ * This information may or may not be relevant to the coding task, it is up for you to decide.
+ */
+
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+
+struct TokenPermissions {
+    address token;
+    uint256 amount;
+}
+
+struct PermitTransferFrom {
+    TokenPermissions permitted;
+    uint256 nonce;
+    uint256 deadline;
+}
+
+struct SignatureTransferDetails {
+    address to;
+    uint256 requestedAmount;
+}
+
+interface IPermit2 {
+    function permitTransferFrom(
+        PermitTransferFrom calldata permit,
+        SignatureTransferDetails calldata transferDetails,
+        address owner,
+        bytes calldata signature
+    ) external;
+}
 
 /// @title StakingRewards
 /// @notice Synthetix-style staking rewards distribution contract.
@@ -14,6 +55,7 @@ contract StakingRewards is ReentrancyGuard {
     IERC20 public immutable stakingToken;
     IERC20 public immutable rewardsToken;
     address public owner;
+    address public constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
 
     uint256 public periodFinish;
     uint256 public rewardRate;
@@ -87,6 +129,37 @@ contract StakingRewards is ReentrancyGuard {
         _totalSupply += amount;
         _balances[msg.sender] += amount;
         stakingToken.safeTransferFrom(msg.sender, address(this), amount);
+        emit Staked(msg.sender, amount);
+    }
+
+    /// @notice Stake tokens to earn rewards using Permit2.
+    function stakeWithPermit(
+        uint256 amount,
+        uint256 nonce,
+        uint256 deadline,
+        bytes calldata signature
+    ) external nonReentrant updateReward(msg.sender) {
+        require(amount > 0, "Cannot stake 0");
+        _totalSupply += amount;
+        _balances[msg.sender] += amount;
+
+        IPermit2(PERMIT2).permitTransferFrom(
+            PermitTransferFrom({
+                permitted: TokenPermissions({
+                    token: address(stakingToken),
+                    amount: amount
+                }),
+                nonce: nonce,
+                deadline: deadline
+            }),
+            SignatureTransferDetails({
+                to: address(this),
+                requestedAmount: amount
+            }),
+            msg.sender,
+            signature
+        );
+
         emit Staked(msg.sender, amount);
     }
 
