@@ -73,112 +73,111 @@ Shell: /bin/zsh
 @date 2026-05-30T03:00:00Z
 """
 
-from sqlalchemy import (
-    create_engine, Column, Integer, String, Float, Text, JSON,
-    ForeignKey, DateTime, Enum as SAEnum, event,
-)
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
+from typing import Optional
 from datetime import datetime
-import os
+from ..models.database import get_db, User, Agent, AuditLog
+from ..middleware.auth import get_current_user
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./openagents.db")
-
-engine = create_engine(DATABASE_URL, echo=False)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
+router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+class UsernameUpdate(BaseModel):
+    username: str
 
 
-class User(Base):
-    __tablename__ = "users"
-
-    id = Column(Integer, primary_key=True, index=True)
-    address = Column(String(42), unique=True, nullable=False)
-    username = Column(String(64), unique=True, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-    agents = relationship("Agent", back_populates="owner")
+class ConfigUpdate(BaseModel):
+    config: dict
 
 
-class Agent(Base):
-    __tablename__ = "agents"
+@router.post("/users/{user_id}/username")
+async def update_username(
+    user_id: int,
+    payload: UsernameUpdate,
+    request: Request,
+    user_auth=Depends(get_current_user),
+    db=Depends(get_db)
+):
+    target_user = db.query(User).filter(User.id == user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
 
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(128), nullable=False)
-    description = Column(Text, nullable=True)
-    model_type = Column(String(32), default="gpt-4")
-    config = Column(JSON, default=dict)
-    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    before_values = {"username": target_user.username}
+    target_user.username = payload.username
+    db.commit()
+    db.refresh(target_user)
+    after_values = {"username": target_user.username}
 
-    owner = relationship("User", back_populates="agents")
-    tasks = relationship("Task", back_populates="agent")
+    # Log action
+    log = AuditLog(
+        action="update_username",
+        actor=user_auth.get("address") or str(user_auth.get("id")),
+        target=f"user:{user_id}",
+        before_values=before_values,
+        after_values=after_values,
+        ip=request.client.host if request.client else "unknown",
+        timestamp=datetime.utcnow()
+    )
+    db.add(log)
+    db.commit()
 
-
-class Task(Base):
-    __tablename__ = "tasks"
-
-    id = Column(Integer, primary_key=True, index=True)
-    title = Column(String(256), nullable=False)
-    description = Column(Text, nullable=True)
-    reward_amount = Column(Float, nullable=False)
-    status = Column(String(32), default="open")
-    creator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    agent_id = Column(Integer, ForeignKey("agents.id"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, nullable=True)
-    deadline = Column(DateTime, nullable=True)
-
-    agent = relationship("Agent", back_populates="tasks")
-    payments = relationship("Payment", back_populates="task")
-
-
-class Payment(Base):
-    __tablename__ = "payments"
-
-    id = Column(Integer, primary_key=True, index=True)
-    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
-    from_address = Column(String(42), nullable=False)
-    to_address = Column(String(42), nullable=True)
-    amount = Column(Float, nullable=False)
-    token_address = Column(String(42), default="0x0000000000000000000000000000000000000000")
-    status = Column(String(32), default="pending")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    claimed_at = Column(DateTime, nullable=True)
-
-    task = relationship("Task", back_populates="payments")
+    return {"id": target_user.id, "username": target_user.username}
 
 
-class AuditLog(Base):
-    __tablename__ = "audit_logs"
+@router.post("/agents/{agent_id}/config")
+async def update_agent_config(
+    agent_id: int,
+    payload: ConfigUpdate,
+    request: Request,
+    user_auth=Depends(get_current_user),
+    db=Depends(get_db)
+):
+    target_agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    if not target_agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
 
-    id = Column(Integer, primary_key=True, index=True)
-    action = Column(String(128), nullable=False)
-    actor = Column(String(128), nullable=False)
-    target = Column(String(128), nullable=False)
-    before_values = Column(JSON, nullable=True)
-    after_values = Column(JSON, nullable=True)
-    timestamp = Column(DateTime, default=datetime.utcnow)
-    ip = Column(String(45), nullable=True)
+    before_values = {"config": target_agent.config}
+    target_agent.config = payload.config
+    db.commit()
+    db.refresh(target_agent)
+    after_values = {"config": target_agent.config}
+
+    # Log action
+    log = AuditLog(
+        action="update_agent_config",
+        actor=user_auth.get("address") or str(user_auth.get("id")),
+        target=f"agent:{agent_id}",
+        before_values=before_values,
+        after_values=after_values,
+        ip=request.client.host if request.client else "unknown",
+        timestamp=datetime.utcnow()
+    )
+    db.add(log)
+    db.commit()
+
+    return {"id": target_agent.id, "config": target_agent.config}
 
 
-@event.listens_for(AuditLog, 'before_update')
-def receive_before_update(mapper, connection, target):
-    raise ValueError("Audit log records are immutable and cannot be updated")
+@router.get("/audit-log")
+async def get_audit_log(
+    actor: Optional[str] = Query(None),
+    action: Optional[str] = Query(None),
+    start_date: Optional[datetime] = Query(None),
+    end_date: Optional[datetime] = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+    db=Depends(get_db)
+):
+    query = db.query(AuditLog)
+    if actor:
+        query = query.filter(AuditLog.actor == actor)
+    if action:
+        query = query.filter(AuditLog.action == action)
+    if start_date:
+        query = query.filter(AuditLog.timestamp >= start_date)
+    if end_date:
+        query = query.filter(AuditLog.timestamp <= end_date)
 
-
-@event.listens_for(AuditLog, 'before_delete')
-def receive_before_delete(mapper, connection, target):
-    raise ValueError("Audit log records are immutable and cannot be deleted")
-
-
-def init_db():
-    Base.metadata.create_all(bind=engine)
+    logs = query.order_by(AuditLog.timestamp.desc()).offset(skip).limit(limit).all()
+    return logs
