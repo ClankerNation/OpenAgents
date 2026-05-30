@@ -1,4 +1,4 @@
 {
   "passed": true,
-  "output": "\n> OpenAgents@0.1.0 test\n> hardhat test\n\n\n\n  MultiTokenStaking\n    ✔ should allow normal deposit and check accounting\n    ✔ should allow emergencyWithdraw, return tokens without rewards, and update accounting\n    ✔ should revert if user has nothing to withdraw\n\n  StakingRewards\n    ✔ should allow staking tokens\n    ✔ should accrue rewards over time\n    ✔ should allow withdrawal\n    ✔ should distribute rewards correctly to multiple stakers\n\n\n  7 passing (724ms)\n\n"
+  "output": "\n> OpenAgents@0.1.0 test\n> hardhat test\n\n\n\n  MultiTokenStaking\n    ✔ should allow normal deposit and check accounting\n    ✔ should allow emergencyWithdraw, return tokens without rewards, and update accounting\n    ✔ should revert if user has nothing to withdraw\n\n  StakingRewards\n    ✔ should allow staking tokens\n    ✔ should accrue rewards over time\n    ✔ should allow withdrawal\n    ✔ should distribute rewards correctly to multiple stakers\n\n\n  7 passing (665ms)\n\n"
 }
