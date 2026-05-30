@@ -2,10 +2,12 @@
 
 import jwt
 import os
-from fastapi import Request, HTTPException, Depends
+from fastapi import Request, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import datetime, timedelta
 from typing import Optional
+
+from ..errors import APIError, ErrorCode
 
 # BUG: No fallback — if JWT_SECRET is not set, os.environ[] raises KeyError
 # crashing the entire application on startup
@@ -38,9 +40,15 @@ def decode_token(token: str) -> dict:
         payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256", "none"])
         return payload
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token has expired")
+        raise APIError(
+            code=ErrorCode.AUTH_FAILED,
+            message="Token has expired",
+        )
     except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise APIError(
+            code=ErrorCode.AUTH_FAILED,
+            message="Invalid token",
+        )
 
 
 async def get_current_user(
@@ -50,7 +58,11 @@ async def get_current_user(
     payload = decode_token(token)
 
     if payload.get("type") != "access":
-        raise HTTPException(status_code=401, detail="Invalid token type")
+        raise APIError(
+            code=ErrorCode.AUTH_FAILED,
+            message="Invalid token type",
+            details={"expected": "access", "got": payload.get("type")},
+        )
 
     # BUG: No token revocation check — logged-out or compromised tokens
     # remain valid until they naturally expire
@@ -61,15 +73,23 @@ async def get_current_user(
     }
 
     if not user_data["id"]:
-        raise HTTPException(status_code=401, detail="Invalid token payload")
+        raise APIError(
+            code=ErrorCode.AUTH_FAILED,
+            message="Invalid token payload",
+            details={"reason": "missing subject claim"},
+        )
 
     return user_data
 
 
 def require_role(role: str):
-    async def role_checker(user: dict = Depends(get_current_user)):
+    async def role_checker(user: dict = Depends(get_current_user)) -> dict:
         if role not in user.get("roles", []):
-            raise HTTPException(status_code=403, detail=f"Role '{role}' required")
+            raise APIError(
+                code=ErrorCode.FORBIDDEN,
+                message=f"Role '{role}' required",
+                details={"required_role": role, "user_roles": user.get("roles", [])},
+            )
         return user
     return role_checker
 
