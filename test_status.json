@@ -1,0 +1,4 @@
+{
+  "passed": true,
+  "output": "\n> OpenAgents@0.1.0 test\n> npx hardhat test test/OpenAgentsSDK.test.js\n\n\n\n  OpenAgentsSDK Contract Deployment\n    ✔ should deploy contract successfully with args and wait for confirmation\n\n\n  1 passing (382ms)\n\n"
+}
