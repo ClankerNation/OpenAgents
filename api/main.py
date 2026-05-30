@@ -1,13 +1,25 @@
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+from .middleware.errors import (
+    AppHTTPException, ErrorCode,
+    app_exception_handler, http_exception_handler,
+    validation_exception_handler, general_exception_handler,
+)
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+app.add_exception_handler(AppHTTPException, app_exception_handler)
+app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(Exception, general_exception_handler)
 
 
 class AgentResponse(BaseModel):
@@ -39,7 +51,6 @@ class LeaderboardEntry(BaseModel):
     success_rate: float
 
 
-# In-memory store (placeholder for DB)
 agents_cache: dict = {}
 tasks_cache: dict = {}
 
@@ -61,7 +72,7 @@ async def list_agents(
 @app.get("/agents/{agent_id}", response_model=AgentResponse)
 async def get_agent(agent_id: str):
     if agent_id not in agents_cache:
-        raise HTTPException(status_code=404, detail="Agent not found")
+        raise AppHTTPException(ErrorCode.NOT_FOUND, "Agent not found")
     return agents_cache[agent_id]
 
 
@@ -80,7 +91,7 @@ async def list_tasks(
 @app.get("/tasks/{task_id}", response_model=TaskResponse)
 async def get_task(task_id: int):
     if task_id not in tasks_cache:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise AppHTTPException(ErrorCode.NOT_FOUND, "Task not found")
     return tasks_cache[task_id]
 
 
