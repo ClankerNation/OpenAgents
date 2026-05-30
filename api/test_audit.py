@@ -73,28 +73,104 @@ Shell: /bin/zsh
 @date 2026-05-30T03:00:00Z
 """
 
-from fastapi import FastAPI
-from .models.database import init_db
-from .routes import agents, payments, tasks, admin
+import os
+os.environ["JWT_SECRET"] = "test_secret"
 
-app = FastAPI(
-    title="OpenAgents API",
-    description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
-    version="0.1.0",
-)
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from api.main import app
+from api.models.database import Base, get_db, User, Agent, AuditLog
+from api.middleware.auth import get_current_user
 
-# Initialize database
-init_db()
+# Test database
+SQLALCHEMY_DATABASE_URL = "sqlite:///./test_audit.db"
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Include routers
-app.include_router(agents.router)
-app.include_router(payments.router)
-app.include_router(tasks.router)
-app.include_router(admin.router)
+def override_get_db():
+    db = TestingSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
+# Mock current user dependency
+mock_user = {"id": 1, "address": "0x1234567890123456789012345678901234567890", "roles": ["admin"]}
+def override_get_current_user():
+    return mock_user
 
-@app.get("/health")
-async def health():
-    return {
-        "status": "ok"
-    }
+app.dependency_overrides[get_db] = override_get_db
+app.dependency_overrides[get_current_user] = override_get_current_user
+
+client = TestClient(app)
+
+@pytest.fixture(autouse=True)
+def setup_db():
+    Base.metadata.create_all(bind=engine)
+    db = TestingSessionLocal()
+    # Seed a user and an agent for testing updates
+    u = User(id=1, address="0x1234567890123456789012345678901234567890", username="test_user")
+    a = Agent(id=1, name="test_agent", config={}, owner_id=1)
+    db.add(u)
+    db.add(a)
+    db.commit()
+    yield
+    db.close()
+    Base.metadata.drop_all(bind=engine)
+
+def test_admin_action_creates_audit_record():
+    # Update username
+    response = client.post("/admin/users/1/username", json={"username": "new_username"})
+    assert response.status_code == 200
+    assert response.json()["username"] == "new_username"
+
+    # Query audit logs
+    logs_res = client.get("/admin/audit-log")
+    assert logs_res.status_code == 200
+    logs = logs_res.json()
+    assert len(logs) == 1
+    assert logs[0]["action"] == "update_username"
+    assert logs[0]["actor"] == mock_user["address"]
+    assert logs[0]["target"] == "user:1"
+    assert logs[0]["before_values"] == {"username": "test_user"}
+    assert logs[0]["after_values"] == {"username": "new_username"}
+
+def test_audit_logs_query_filters():
+    # Trigger log 1
+    client.post("/admin/users/1/username", json={"username": "user_a"})
+    # Trigger log 2
+    client.post("/admin/agents/1/config", json={"config": {"key": "val"}})
+
+    # Query filter by action
+    res = client.get("/admin/audit-log?action=update_agent_config")
+    assert res.status_code == 200
+    logs = res.json()
+    assert len(logs) == 1
+    assert logs[0]["action"] == "update_agent_config"
+
+    # Query filter by actor
+    res2 = client.get(f"/admin/audit-log?actor={mock_user['address']}")
+    assert res2.status_code == 200
+    assert len(res2.json()) == 2
+
+def test_audit_log_immutability():
+    client.post("/admin/users/1/username", json={"username": "user_b"})
+
+    db = TestingSessionLocal()
+    log = db.query(AuditLog).first()
+    assert log is not None
+
+    # Try updating
+    with pytest.raises(ValueError, match="immutable"):
+        log.action = "malicious_change"
+        db.commit()
+
+    db.rollback()
+
+    # Try deleting
+    with pytest.raises(ValueError, match="immutable"):
+        db.delete(log)
+        db.commit()
+    db.close()
