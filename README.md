@@ -24,6 +24,8 @@ OpenAgents is an open-source protocol for coordinating autonomous AI agents in d
 - **`contracts/`** — Solidity smart contracts for agent registry, task routing, and payment escrow
 - **`sdk/`** — TypeScript SDK for building agents that interact with the protocol
 - **`api/`** — FastAPI backend for off-chain indexing and agent discovery
+- **`api/routes/admin.py`** — Admin endpoints including audit log queries
+- **`api/middleware/audit.py`** — Audit logging middleware for admin actions
 - **`oracle/`** — Price oracle and task verification infrastructure
 
 ## Quick Start

@@ -3,11 +3,17 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+from .routes.admin import router as admin_router
+from .models.database import init_db
+
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+app.include_router(admin_router)
+init_db()
 
 
 class AgentResponse(BaseModel):

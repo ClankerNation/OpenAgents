@@ -86,5 +86,20 @@ class Payment(Base):
     task = relationship("Task", back_populates="payments")
 
 
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    admin_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    admin_address = Column(String(42), nullable=True)
+    action = Column(String(64), nullable=False, index=True)
+    resource_type = Column(String(128), nullable=False)
+    resource_id = Column(String(64), nullable=True)
+    details = Column(JSON, nullable=True)
+    ip_address = Column(String(45), nullable=True)
+    success = Column(Integer, default=1)
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
