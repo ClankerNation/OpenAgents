@@ -52,7 +52,7 @@
         "working_dir": "/Users/macminim1/Documents/efe/bounty-hunter/temp/OpenAgents",
         "shell": "/bin/zsh"
       },
-      "contribution": "Implemented off-chain admin audit logging, immutable database constraints, audit log queries API, and integration tests"
+      "contribution": "Added flash loan liquidation integration into LendingPool.sol, supporting 0.09% fee, mock price oracle, and verified with test suite"
     }
   ]
 }
