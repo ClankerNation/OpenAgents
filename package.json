@@ -4,7 +4,7 @@
   "description": "Decentralized AI Agent Orchestration Protocol",
   "scripts": {
     "compile": "hardhat compile",
-    "test": "./venv/bin/pytest api/test_cors.py api/test_ratelimit.py",
+    "test": "./venv/bin/pytest api/test_cors.py api/test_ratelimit.py api/test_payments.py",
     "deploy:sepolia": "hardhat run scripts/deploy.js --network sepolia",
     "deploy:base": "hardhat run scripts/deploy.js --network base"
   },

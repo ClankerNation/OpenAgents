@@ -76,6 +76,7 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 from api.middleware.ratelimit import RateLimitMiddleware, RateLimitConfig
+from api.routes.payments import router as payments_router
 
 app = FastAPI(
     title="OpenAgents API",
@@ -112,6 +113,8 @@ app.add_middleware(
     RateLimitMiddleware,
     config=RateLimitConfig()
 )
+
+app.include_router(payments_router)
 
 
 class AgentResponse(BaseModel):

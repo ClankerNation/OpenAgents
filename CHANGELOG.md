@@ -5,8 +5,11 @@ All notable changes to the OpenAgents API project will be documented in this fil
 ## [Unreleased]
 
 ### Added
-- Added `RateLimitMiddleware` to FastAPI app in `api/main.py`.
-- Created comprehensive integration test suite `api/test_ratelimit.py` to verify anonymous, authenticated, and premium tier limits, headers, and 429 response behaviors.
+- Added `release_time` column (DateTime, nullable, default datetime.utcnow) and `expired_at` computed property to the `Payment` database model in `api/models/database.py`.
+- Implemented `POST /payments/process-expired` endpoint in `api/routes/payments.py` to identify and refund expired escrowed payments, along with a verbatim `@contributor-info` NatSpec block.
+- Registered the payments router in `api/main.py` using `app.include_router(payments_router)`.
+- Created comprehensive integration test suite `api/test_payments.py` verifying escrow deposit, claim, and process-expired auto-refund flows.
+- Updated `package.json` to include `api/test_payments.py` in the npm test script.
 - Added `@contributor-info` NatSpec header block to `api/middleware/ratelimit.py`.
 
 ### Changed
