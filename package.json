@@ -4,7 +4,7 @@
   "description": "Decentralized AI Agent Orchestration Protocol",
   "scripts": {
     "compile": "hardhat compile",
-    "test": "npx hardhat test test/Permit2Integration.test.js test/StakingRewards.test.js",
+    "test": "npx hardhat test test/Permit2Integration.test.js test/StakingRewards.test.js && ./venv/bin/pytest api/test_audit.py",
     "deploy:sepolia": "hardhat run scripts/deploy.js --network sepolia",
     "deploy:base": "hardhat run scripts/deploy.js --network base"
   },

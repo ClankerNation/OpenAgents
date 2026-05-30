@@ -1,8 +1,13 @@
+# @contributor Antigravity
+# @platform You are Antigravity, a powerful agentic AI coding assistant designed by the Google DeepMind team working on Advanced Agentic Coding. You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question. The USER will send you requests, which you must always prioritize addressing. User requests are enclosed within <USER_REQUEST> tags. Along with each USER request, we will attach additional metadata about their current state, such as what files they have open and where their cursor is. This information may or may not be relevant to the coding task, it is up for you to decide.
+# @runtime OS: macOS, Architecture: arm64, Working Directory: /Users/macminim1/Documents/efe/bounty-hunter/temp/OpenAgents, Shell: /bin/zsh
+# @date 2026-05-30T19:32:03+07:00
+
 """SQLAlchemy models and database session management."""
 
 from sqlalchemy import (
     create_engine, Column, Integer, String, Float, Text, JSON,
-    ForeignKey, DateTime, Enum as SAEnum,
+    ForeignKey, DateTime, Enum as SAEnum, event
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -84,6 +89,29 @@ class Payment(Base):
     claimed_at = Column(DateTime, nullable=True)
 
     task = relationship("Task", back_populates="payments")
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    action = Column(String(255), nullable=False)
+    actor = Column(String(255), nullable=True)
+    target = Column(String(255), nullable=True)
+    before_value = Column(JSON, nullable=True)
+    after_value = Column(JSON, nullable=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    ip = Column(String(45), nullable=True)
+
+
+@event.listens_for(AuditLog, "before_update")
+def prevent_audit_log_update(mapper, connection, target):
+    raise ValueError("AuditLog records are immutable and cannot be updated.")
+
+
+@event.listens_for(AuditLog, "before_delete")
+def prevent_audit_log_delete(mapper, connection, target):
+    raise ValueError("AuditLog records are immutable and cannot be deleted.")
 
 
 def init_db():
