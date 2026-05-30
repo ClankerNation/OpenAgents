@@ -1,0 +1,4 @@
+{
+  "passed": true,
+  "output": "\n> OpenAgents@0.1.0 test\n> hardhat test\n\n\n\n  OpenAgentsSDK - deployContract\n    ✔ should deploy contract successfully with constructor arguments and wait for confirmation\nWebSocket disconnected. Attempting to reconnect and resubscribe...\n    ✔ should subscribe to events, decode log parameters, filter by indexed parameters, and handle reconnects (3533ms)\n\n  StakingRewards\n    ✔ should allow staking tokens\n    ✔ should accrue rewards over time\n    ✔ should allow withdrawal\n    ✔ should distribute rewards correctly to multiple stakers\n\n\n  6 passing (4s)\n\n"
+}
