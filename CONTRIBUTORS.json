@@ -52,7 +52,7 @@
         "working_dir": "/Users/macminim1/Documents/efe/bounty-hunter/temp/OpenAgents",
         "shell": "/bin/zsh"
       },
-      "contribution": "Implemented off-chain admin audit logging, immutable database constraints, audit log queries API, and integration tests"
+      "contribution": "Implemented vesting token migration in VestingWallet.sol, restricting execution to the contract owner, and verified with test suite"
     }
   ]
 }
