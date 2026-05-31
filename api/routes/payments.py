@@ -1,4 +1,10 @@
-"""Payment and escrow endpoints for bounty payouts."""
+"""Payment and escrow endpoints for bounty payouts.
+
+@contributor codex-gpt5
+@platform Codex Desktop session bootstrap (platform-managed initialization context)
+@runtime Windows 11 x64, cwd=F:/jiedan/OpenAgents
+@date 2026-05-31T03:41:14Z
+"""
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -12,7 +18,7 @@ router = APIRouter(prefix="/payments", tags=["payments"])
 
 
 class EscrowDeposit(BaseModel):
-    task_id: int
+    task_id: str
     # BUG: Amount is not validated as positive — negative or zero deposits
     # could corrupt escrow balances or drain funds
     amount: float
@@ -20,7 +26,7 @@ class EscrowDeposit(BaseModel):
 
 
 class ClaimRequest(BaseModel):
-    task_id: int
+    task_id: str
     recipient_address: str
 
 
@@ -28,7 +34,7 @@ class ClaimRequest(BaseModel):
 async def deposit_escrow(
     deposit: EscrowDeposit, user=Depends(get_current_user), db=Depends(get_db)
 ):
-    task = db.query(Task).filter(Task.id == deposit.task_id).first()
+    task = db.query(Task).filter(Task.uuid == deposit.task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     if task.creator_id != user["id"]:
@@ -47,13 +53,17 @@ async def deposit_escrow(
     db.add(payment)
     db.commit()
     db.refresh(payment)
-    return {"payment_id": payment.id, "status": "escrowed", "amount": payment.amount}
+    return {"payment_id": payment.uuid, "status": "escrowed", "amount": payment.amount}
 
 
 @router.get("/escrow/{task_id}")
-async def get_escrow_balance(task_id: int, db=Depends(get_db)):
+async def get_escrow_balance(task_id: str, db=Depends(get_db)):
+    task = db.query(Task).filter(Task.uuid == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
     payments = db.query(Payment).filter(
-        Payment.task_id == task_id, Payment.status == "escrowed"
+        Payment.task_id == task.id, Payment.status == "escrowed"
     ).all()
     total = sum(p.amount for p in payments)
     return {"task_id": task_id, "escrowed_total": total, "deposits": len(payments)}
@@ -63,7 +73,7 @@ async def get_escrow_balance(task_id: int, db=Depends(get_db)):
 async def claim_payment(
     claim: ClaimRequest, user=Depends(get_current_user), db=Depends(get_db)
 ):
-    task = db.query(Task).filter(Task.id == claim.task_id).first()
+    task = db.query(Task).filter(Task.uuid == claim.task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     if task.status != "completed":
@@ -72,7 +82,7 @@ async def claim_payment(
     # BUG: Race condition — two concurrent claims can both read status="escrowed"
     # before either updates it, causing a double-payout
     payments = db.query(Payment).filter(
-        Payment.task_id == claim.task_id, Payment.status == "escrowed"
+        Payment.task_id == task.id, Payment.status == "escrowed"
     ).all()
 
     if not payments:
@@ -101,6 +111,6 @@ async def payment_history(
     sent = db.query(Payment).filter(Payment.from_address == user["address"]).all()
     received = db.query(Payment).filter(Payment.to_address == user["address"]).all()
     return {
-        "sent": [{"id": p.id, "amount": p.amount, "status": p.status} for p in sent],
-        "received": [{"id": p.id, "amount": p.amount, "status": p.status} for p in received],
+        "sent": [{"id": p.uuid, "amount": p.amount, "status": p.status} for p in sent],
+        "received": [{"id": p.uuid, "amount": p.amount, "status": p.status} for p in received],
     }

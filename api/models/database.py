@@ -1,4 +1,10 @@
-"""SQLAlchemy models and database session management."""
+"""SQLAlchemy models and database session management.
+
+@contributor codex-gpt5
+@platform Codex Desktop session bootstrap (platform-managed initialization context)
+@runtime Windows 11 x64, cwd=F:/jiedan/OpenAgents
+@date 2026-05-31T03:41:14Z
+"""
 
 from sqlalchemy import (
     create_engine, Column, Integer, String, Float, Text, JSON,
@@ -7,6 +13,7 @@ from sqlalchemy import (
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
+from uuid import uuid4
 import os
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./openagents.db")
@@ -27,7 +34,8 @@ def get_db():
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    uuid = Column(String(36), unique=True, nullable=False, default=lambda: str(uuid4()), index=True)
     address = Column(String(42), unique=True, nullable=False)
     username = Column(String(64), unique=True, nullable=True)
     # BUG: No index on address — wallet lookups on every auth request do full table scans
@@ -39,7 +47,8 @@ class User(Base):
 class Agent(Base):
     __tablename__ = "agents"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    uuid = Column(String(36), unique=True, nullable=False, default=lambda: str(uuid4()), index=True)
     name = Column(String(128), nullable=False)
     description = Column(Text, nullable=True)
     model_type = Column(String(32), default="gpt-4")
@@ -55,7 +64,8 @@ class Agent(Base):
 class Task(Base):
     __tablename__ = "tasks"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    uuid = Column(String(36), unique=True, nullable=False, default=lambda: str(uuid4()), index=True)
     title = Column(String(256), nullable=False)
     description = Column(Text, nullable=True)
     reward_amount = Column(Float, nullable=False)
@@ -73,7 +83,8 @@ class Task(Base):
 class Payment(Base):
     __tablename__ = "payments"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    uuid = Column(String(36), unique=True, nullable=False, default=lambda: str(uuid4()), index=True)
     task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
     from_address = Column(String(42), nullable=False)
     to_address = Column(String(42), nullable=True)

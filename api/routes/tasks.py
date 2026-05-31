@@ -1,11 +1,17 @@
-"""Task management endpoints for bounty assignments."""
+"""Task management endpoints for bounty assignments.
+
+@contributor codex-gpt5
+@platform Codex Desktop session bootstrap (platform-managed initialization context)
+@runtime Windows 11 x64, cwd=F:/jiedan/OpenAgents
+@date 2026-05-31T03:41:14Z
+"""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
-from ..models.database import get_db, Task
+from ..models.database import get_db, Task, User, Agent
 from ..middleware.auth import get_current_user
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -13,11 +19,25 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 VALID_STATUSES = {"open", "assigned", "in_progress", "review", "completed", "cancelled"}
 
 
+def _serialize_task(task: Task) -> dict:
+    return {
+        "id": task.uuid,
+        "title": task.title,
+        "description": task.description,
+        "reward_amount": task.reward_amount,
+        "status": task.status,
+        "agent_id": task.agent.uuid if task.agent else None,
+        "created_at": task.created_at,
+        "updated_at": task.updated_at,
+        "deadline": task.deadline,
+    }
+
+
 class TaskCreate(BaseModel):
     title: str
     description: str
     reward_amount: float
-    agent_id: Optional[int] = None
+    agent_id: Optional[str] = None
     deadline: Optional[datetime] = None
 
 
@@ -27,12 +47,19 @@ class TaskStatusUpdate(BaseModel):
 
 @router.post("/")
 async def create_task(task: TaskCreate, user=Depends(get_current_user), db=Depends(get_db)):
+    agent_internal_id = None
+    if task.agent_id:
+        agent = db.query(Agent).filter(Agent.uuid == task.agent_id).first()
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        agent_internal_id = agent.id
+
     new_task = Task(
         title=task.title,
         description=task.description,
         reward_amount=task.reward_amount,
         creator_id=user["id"],
-        agent_id=task.agent_id,
+        agent_id=agent_internal_id,
         status="open",
         created_at=datetime.utcnow(),
         deadline=task.deadline,
@@ -40,7 +67,7 @@ async def create_task(task: TaskCreate, user=Depends(get_current_user), db=Depen
     db.add(new_task)
     db.commit()
     db.refresh(new_task)
-    return {"id": new_task.id, "status": new_task.status}
+    return {"id": new_task.uuid, "status": new_task.status}
 
 
 @router.get("/")
@@ -57,26 +84,27 @@ async def list_tasks(
     if status:
         query = query.filter(Task.status == status)
     if creator:
-        query = query.filter(Task.creator_id == creator)
-    return query.order_by(Task.created_at.desc()).offset(skip).limit(limit).all()
+        query = query.join(User, Task.creator_id == User.id).filter(User.uuid == creator)
+    tasks = query.order_by(Task.created_at.desc()).offset(skip).limit(limit).all()
+    return [_serialize_task(task) for task in tasks]
 
 
 @router.get("/{task_id}")
-async def get_task(task_id: int, db=Depends(get_db)):
-    task = db.query(Task).filter(Task.id == task_id).first()
+async def get_task(task_id: str, db=Depends(get_db)):
+    task = db.query(Task).filter(Task.uuid == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    return task
+    return _serialize_task(task)
 
 
 @router.patch("/{task_id}/status")
 async def update_task_status(
-    task_id: int,
+    task_id: str,
     update: TaskStatusUpdate,
     user=Depends(get_current_user),
     db=Depends(get_db),
 ):
-    task = db.query(Task).filter(Task.id == task_id).first()
+    task = db.query(Task).filter(Task.uuid == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
@@ -88,12 +116,13 @@ async def update_task_status(
     task.status = update.status
     task.updated_at = datetime.utcnow()
     db.commit()
-    return {"id": task.id, "status": task.status}
+    db.refresh(task)
+    return {"id": task.uuid, "status": task.status}
 
 
 @router.delete("/{task_id}")
-async def cancel_task(task_id: int, user=Depends(get_current_user), db=Depends(get_db)):
-    task = db.query(Task).filter(Task.id == task_id).first()
+async def cancel_task(task_id: str, user=Depends(get_current_user), db=Depends(get_db)):
+    task = db.query(Task).filter(Task.uuid == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     if task.creator_id != user["id"]:
@@ -102,4 +131,4 @@ async def cancel_task(task_id: int, user=Depends(get_current_user), db=Depends(g
         raise HTTPException(status_code=400, detail="Cannot cancel an active task")
     task.status = "cancelled"
     db.commit()
-    return {"id": task.id, "status": "cancelled"}
+    return {"id": task.uuid, "status": "cancelled"}

@@ -1,14 +1,32 @@
-"""Agent CRUD endpoints for the OpenAgents platform."""
+"""Agent CRUD endpoints for the OpenAgents platform.
+
+@contributor codex-gpt5
+@platform Codex Desktop session bootstrap (platform-managed initialization context)
+@runtime Windows 11 x64, cwd=F:/jiedan/OpenAgents
+@date 2026-05-31T03:41:14Z
+"""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
-from ..models.database import get_db, Agent
+from ..models.database import get_db, Agent, User
 from ..middleware.auth import get_current_user
 
 router = APIRouter(prefix="/agents", tags=["agents"])
+
+
+def _serialize_agent(agent: Agent) -> dict:
+    return {
+        "id": agent.uuid,
+        "name": agent.name,
+        "description": agent.description,
+        "model_type": agent.model_type,
+        "config": agent.config,
+        "owner": agent.owner.uuid if agent.owner else None,
+        "created_at": agent.created_at,
+    }
 
 
 class AgentCreate(BaseModel):
@@ -37,7 +55,7 @@ async def create_agent(agent: AgentCreate, user=Depends(get_current_user), db=De
     db.add(new_agent)
     db.commit()
     db.refresh(new_agent)
-    return {"id": new_agent.id, "name": new_agent.name, "owner": user["address"]}
+    return {"id": new_agent.uuid, "name": new_agent.name, "owner": user["address"]}
 
 
 @router.get("/")
@@ -49,24 +67,24 @@ async def list_agents(
 ):
     query = db.query(Agent)
     if owner:
-        # BUG: String interpolation in query — vulnerable to SQL injection
-        query = query.filter(Agent.owner_id == owner)
-    return query.offset(skip).limit(limit).all()
+        query = query.join(User, Agent.owner_id == User.id).filter(User.uuid == owner)
+    agents = query.offset(skip).limit(limit).all()
+    return [_serialize_agent(agent) for agent in agents]
 
 
 @router.get("/{agent_id}")
-async def get_agent(agent_id: int, db=Depends(get_db)):
-    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+async def get_agent(agent_id: str, db=Depends(get_db)):
+    agent = db.query(Agent).filter(Agent.uuid == agent_id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    return agent
+    return _serialize_agent(agent)
 
 
 @router.put("/{agent_id}")
 async def update_agent(
-    agent_id: int, update: AgentUpdate, user=Depends(get_current_user), db=Depends(get_db)
+    agent_id: str, update: AgentUpdate, user=Depends(get_current_user), db=Depends(get_db)
 ):
-    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    agent = db.query(Agent).filter(Agent.uuid == agent_id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     if agent.owner_id != user["id"]:
@@ -74,15 +92,17 @@ async def update_agent(
     for field, value in update.dict(exclude_unset=True).items():
         setattr(agent, field, value)
     db.commit()
-    return agent
+    db.refresh(agent)
+    return _serialize_agent(agent)
 
 
 # BUG: No authentication — anyone can delete any agent
 @router.delete("/{agent_id}")
-async def delete_agent(agent_id: int, db=Depends(get_db)):
-    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+async def delete_agent(agent_id: str, db=Depends(get_db)):
+    agent = db.query(Agent).filter(Agent.uuid == agent_id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+    deleted_uuid = agent.uuid
     db.delete(agent)
     db.commit()
-    return {"deleted": True}
+    return {"deleted": True, "id": deleted_uuid}
