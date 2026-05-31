@@ -9,6 +9,13 @@ app = FastAPI(
     version="0.1.0",
 )
 
+try:
+    from .routes.admin import router as admin_router
+except ImportError:  # pragma: no cover
+    from routes.admin import router as admin_router
+
+app.include_router(admin_router)
+
 
 class AgentResponse(BaseModel):
     agent_id: str
