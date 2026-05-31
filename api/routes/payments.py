@@ -3,12 +3,14 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
+import logging
 
 from ..models.database import get_db, Payment, Task
 from ..middleware.auth import get_current_user
 
 router = APIRouter(prefix="/payments", tags=["payments"])
+logger = logging.getLogger(__name__)
 
 
 class EscrowDeposit(BaseModel):
@@ -103,4 +105,32 @@ async def payment_history(
     return {
         "sent": [{"id": p.id, "amount": p.amount, "status": p.status} for p in sent],
         "received": [{"id": p.id, "amount": p.amount, "status": p.status} for p in received],
+    }
+
+
+@router.post("/process-expired")
+async def process_expired_escrows(db=Depends(get_db)):
+    now = datetime.utcnow()
+    expiration_cutoff = now - timedelta(days=30)
+    expired_escrows = db.query(Payment).filter(
+        Payment.status == "escrowed",
+        Payment.created_at <= expiration_cutoff,
+    ).all()
+
+    refunded_escrow_ids = []
+    for escrow in expired_escrows:
+        escrow.status = "refunded"
+        escrow.to_address = escrow.from_address
+        escrow.claimed_at = now
+        refunded_escrow_ids.append(escrow.id)
+        logger.info(
+            "escrow_auto_refund escrow_id=%s timestamp=%s",
+            escrow.id,
+            now.isoformat(),
+        )
+
+    db.commit()
+    return {
+        "processed": len(refunded_escrow_ids),
+        "refunded_escrow_ids": refunded_escrow_ids,
     }
