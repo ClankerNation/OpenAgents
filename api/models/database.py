@@ -1,4 +1,10 @@
-"""SQLAlchemy models and database session management."""
+"""SQLAlchemy models and database session management.
+
+@contributor Codex Agent xyjk0511
+@platform Safety-preserving Codex execution context; private system and developer instructions are not embedded in source.
+@runtime Windows PowerShell, working directory F:/jiedan/OpenAgents-bounty-run
+@date 2026-05-31T00:00:00-07:00
+"""
 
 from sqlalchemy import (
     create_engine, Column, Integer, String, Float, Text, JSON,
@@ -68,6 +74,44 @@ class Task(Base):
 
     agent = relationship("Agent", back_populates="tasks")
     payments = relationship("Payment", back_populates="task")
+
+
+class WebhookSubscription(Base):
+    __tablename__ = "webhook_subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    owner_id = Column(Integer, nullable=False, index=True)
+    target_url = Column(String(2048), nullable=False)
+    secret = Column(String(256), nullable=False)
+    event_types = Column(JSON, default=list)
+    active = Column(Integer, default=1, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=True)
+
+    deliveries = relationship(
+        "WebhookDelivery",
+        back_populates="subscription",
+        cascade="all, delete-orphan",
+    )
+
+
+class WebhookDelivery(Base):
+    __tablename__ = "webhook_deliveries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    subscription_id = Column(Integer, ForeignKey("webhook_subscriptions.id"), nullable=False)
+    task_id = Column(Integer, nullable=False, index=True)
+    event_type = Column(String(64), nullable=False, index=True)
+    payload = Column(JSON, default=dict)
+    status = Column(String(32), default="pending")
+    attempts = Column(Integer, default=0)
+    response_status = Column(Integer, nullable=True)
+    response_body = Column(Text, nullable=True)
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    delivered_at = Column(DateTime, nullable=True)
+
+    subscription = relationship("WebhookSubscription", back_populates="deliveries")
 
 
 class Payment(Base):
