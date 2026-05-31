@@ -1,10 +1,25 @@
-import { Wallet } from "./wallet";
-import { keccak256 } from "../utils/crypto";
+/**
+ * @contributor Codex Agent xyjk0511
+ * @platform Safety-preserving Codex execution context; private system and developer instructions are not embedded in source.
+ * @runtime Microsoft Windows 10.0.22631, X64, redacted local paths, shell PowerShell 7.6.2
+ * @date 2026-05-31T00:00:00-07:00
+ */
+
+export interface SessionWallet {
+  address: string;
+  sendTransaction(tx: {
+    to: string;
+    value: bigint;
+    data: string;
+    gasLimit: bigint;
+  }): Promise<string>;
+}
 
 export interface SessionConfig {
-  wallet: Wallet;
+  wallet: SessionWallet;
   apiBaseUrl: string;
   autoRefresh?: boolean;
+  expirySkewSeconds?: number;
 }
 
 export interface SessionToken {
@@ -15,9 +30,10 @@ export interface SessionToken {
 }
 
 export class SessionManager {
-  private wallet: Wallet;
+  private wallet: SessionWallet;
   private apiBaseUrl: string;
   private autoRefresh: boolean;
+  private expirySkewSeconds: number;
   private currentToken: SessionToken | null = null;
   private refreshPromise: Promise<SessionToken> | null = null;
 
@@ -25,25 +41,11 @@ export class SessionManager {
     this.wallet = config.wallet;
     this.apiBaseUrl = config.apiBaseUrl;
     this.autoRefresh = config.autoRefresh ?? true;
-    this.loadStoredSession();
-  }
-
-  private loadStoredSession(): void {
-    // BUG: Storing tokens in localStorage is vulnerable to XSS attacks —
-    // any injected script can steal the session token
-    if (typeof window !== "undefined" && window.localStorage) {
-      const stored = localStorage.getItem(`session_${this.wallet.address}`);
-      if (stored) {
-        this.currentToken = JSON.parse(stored);
-      }
-    }
+    this.expirySkewSeconds = config.expirySkewSeconds ?? 30;
   }
 
   private persistSession(token: SessionToken): void {
     this.currentToken = token;
-    if (typeof window !== "undefined" && window.localStorage) {
-      localStorage.setItem(`session_${this.wallet.address}`, JSON.stringify(token));
-    }
   }
 
   async authenticate(): Promise<SessionToken> {
@@ -74,18 +76,32 @@ export class SessionManager {
   }
 
   async getToken(): Promise<string> {
-    // BUG: No expiry check — returns the cached token even if it has expired,
-    // causing 401 errors on subsequent API calls
-    if (this.currentToken) {
+    if (!this.currentToken) {
+      const session = await this.authenticate();
+      return session.token;
+    }
+
+    if (!this.isExpired(this.currentToken)) {
       return this.currentToken.token;
     }
-    const session = await this.authenticate();
+
+    const session = this.autoRefresh ? await this.refresh() : await this.authenticate();
     return session.token;
   }
 
   async refresh(): Promise<SessionToken> {
-    // BUG: Race condition — multiple concurrent callers can trigger parallel
-    // refresh requests, and only the last one's token survives
+    if (this.refreshPromise) {
+      return this.refreshPromise;
+    }
+
+    this.refreshPromise = this.performRefresh().finally(() => {
+      this.refreshPromise = null;
+    });
+
+    return this.refreshPromise;
+  }
+
+  private async performRefresh(): Promise<SessionToken> {
     if (!this.currentToken?.refreshToken) {
       return this.authenticate();
     }
@@ -108,12 +124,14 @@ export class SessionManager {
 
   logout(): void {
     this.currentToken = null;
-    if (typeof window !== "undefined" && window.localStorage) {
-      localStorage.removeItem(`session_${this.wallet.address}`);
-    }
   }
 
   isAuthenticated(): boolean {
-    return this.currentToken !== null;
+    return this.currentToken !== null && !this.isExpired(this.currentToken);
+  }
+
+  private isExpired(token: SessionToken): boolean {
+    const now = Math.floor(Date.now() / 1000);
+    return token.expiresAt <= now + this.expirySkewSeconds;
   }
 }
