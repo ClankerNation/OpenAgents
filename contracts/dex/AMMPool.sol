@@ -7,6 +7,12 @@ interface IERC20 {
     function balanceOf(address account) external view returns (uint256);
 }
 
+interface IPermit2 {
+    function permitTransferFrom(address from, address to, uint256 amount, uint256 deadline, bytes calldata sig) external;
+}
+
+address constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
+
 /// @title AMMPool
 /// @notice Constant product (x*y=k) automated market maker pool
 /// @dev Supports adding/removing liquidity and token swaps with a fee
@@ -52,6 +58,30 @@ contract AMMPool {
         liquidity[msg.sender] += lpTokens;
         totalLiquidity += lpTokens;
 
+        emit LiquidityAdded(msg.sender, amountA, amountB, lpTokens);
+    }
+
+    /// @notice Add liquidity using Permit2 signature for gasless token approval.
+    /// @param amountA Amount of token A to supply.
+    /// @param amountB Amount of token B to supply.
+    /// @param deadline Permit2 deadline timestamp.
+    /// @param signatureA Permit2 signature for token A.
+    /// @param signatureB Permit2 signature for token B.
+    function addLiquidityWithPermit2(uint256 amountA, uint256 amountB, uint256 deadline, bytes calldata signatureA, bytes calldata signatureB) external returns (uint256 lpTokens) {
+        require(amountA > 0 && amountB > 0, "Zero amounts");
+        IPermit2(PERMIT2).permitTransferFrom(msg.sender, address(this), amountA, deadline, signatureA);
+        IPermit2(PERMIT2).permitTransferFrom(msg.sender, address(this), amountB, deadline, signatureB);
+        if (totalLiquidity == 0) {
+            lpTokens = _sqrt(amountA * amountB);
+        } else {
+            uint256 lpA = (amountA * totalLiquidity) / reserveA;
+            uint256 lpB = (amountB * totalLiquidity) / reserveB;
+            lpTokens = lpA < lpB ? lpA : lpB;
+        }
+        reserveA += amountA;
+        reserveB += amountB;
+        liquidity[msg.sender] += lpTokens;
+        totalLiquidity += lpTokens;
         emit LiquidityAdded(msg.sender, amountA, amountB, lpTokens);
     }
 
