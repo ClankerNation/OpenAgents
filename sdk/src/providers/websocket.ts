@@ -11,16 +11,26 @@ interface PendingRequest {
   reject: (reason: Error) => void;
 }
 
+interface SubscriptionState {
+  localId: string;
+  remoteId: string | null;
+  params: unknown[];
+  callback: (data: unknown) => void;
+  active: boolean;
+}
+
 export class WebSocketProvider extends EventEmitter {
   private url: string;
   private ws: WebSocket | null = null;
   private requestId = 0;
   private pendingRequests = new Map<number, PendingRequest>();
-  private subscriptions = new Map<string, (data: unknown) => void>();
+  private subscriptions = new Map<string, SubscriptionState>();
+  private remoteToLocal = new Map<string, string>();
   private reconnectInterval: number;
   private maxReconnectAttempts: number;
   private reconnectCount = 0;
   private isConnected = false;
+  private shouldReconnect = true;
 
   constructor(config: WsProviderConfig) {
     super();
@@ -30,36 +40,46 @@ export class WebSocketProvider extends EventEmitter {
   }
 
   async connect(): Promise<void> {
+    this.shouldReconnect = true;
     return new Promise((resolve, reject) => {
       this.ws = new WebSocket(this.url);
 
       this.ws.onopen = () => {
         this.isConnected = true;
         this.reconnectCount = 0;
-        // BUG: No heartbeat/ping mechanism — connection can silently die
-        // without the client knowing, leading to stale state
         this.emit("connected");
+        this.restoreSubscriptions().catch((err) => {
+          this.emit("error", err);
+        });
         resolve();
       };
 
       this.ws.onmessage = (event) => {
         const data = JSON.parse(event.data as string);
-        if (data.id && this.pendingRequests.has(data.id)) {
+        if (data.id !== undefined && this.pendingRequests.has(data.id)) {
           const pending = this.pendingRequests.get(data.id)!;
           this.pendingRequests.delete(data.id);
           data.error ? pending.reject(new Error(data.error.message)) : pending.resolve(data.result);
         } else if (data.method === "eth_subscription") {
-          const subId = data.params?.subscription;
-          this.subscriptions.get(subId)?.(data.params.result);
+          const remoteId = data.params?.subscription as string | undefined;
+          if (!remoteId) {
+            return;
+          }
+          const localId = this.remoteToLocal.get(remoteId);
+          if (!localId) {
+            return;
+          }
+          const sub = this.subscriptions.get(localId);
+          sub?.callback(data.params.result);
         }
       };
 
       this.ws.onclose = () => {
         this.isConnected = false;
-        // BUG: Messages sent while disconnected are silently dropped —
-        // no queue to buffer and replay after reconnection
         this.emit("disconnected");
-        this.attemptReconnect();
+        if (this.shouldReconnect) {
+          this.attemptReconnect();
+        }
       };
 
       this.ws.onerror = (err) => {
@@ -70,16 +90,37 @@ export class WebSocketProvider extends EventEmitter {
   }
 
   private attemptReconnect(): void {
+    if (!this.shouldReconnect) {
+      return;
+    }
     if (this.reconnectCount >= this.maxReconnectAttempts) {
       this.emit("maxReconnectsReached");
       return;
     }
     this.reconnectCount++;
     setTimeout(() => {
-      // BUG: Reconnect does not resubscribe to previous subscriptions —
-      // all active eth_subscribe listeners are silently lost
+      if (!this.shouldReconnect) {
+        return;
+      }
       this.connect().catch(() => this.attemptReconnect());
     }, this.reconnectInterval);
+  }
+
+  private async restoreSubscriptions(): Promise<void> {
+    const activeSubscriptions = Array.from(this.subscriptions.values()).filter(
+      (entry) => entry.active
+    );
+    for (const entry of activeSubscriptions) {
+      const remoteId = (await this.send(
+        "eth_subscribe",
+        entry.params
+      )) as string;
+      if (entry.remoteId) {
+        this.remoteToLocal.delete(entry.remoteId);
+      }
+      entry.remoteId = remoteId;
+      this.remoteToLocal.set(remoteId, entry.localId);
+    }
   }
 
   async send(method: string, params: unknown[] = []): Promise<unknown> {
@@ -94,23 +135,54 @@ export class WebSocketProvider extends EventEmitter {
   }
 
   async subscribe(
-    event: string,
+    eventOrParams: string | unknown[],
     callback: (data: unknown) => void
   ): Promise<string> {
-    const subId = (await this.send("eth_subscribe", [event])) as string;
-    this.subscriptions.set(subId, callback);
-    return subId;
+    const params = Array.isArray(eventOrParams)
+      ? eventOrParams
+      : [eventOrParams];
+    const remoteId = (await this.send("eth_subscribe", params)) as string;
+    const localId = `local-${this.requestId}-${this.subscriptions.size + 1}`;
+    const state: SubscriptionState = {
+      localId,
+      remoteId,
+      params,
+      callback,
+      active: true,
+    };
+    this.subscriptions.set(localId, state);
+    this.remoteToLocal.set(remoteId, localId);
+    return localId;
   }
 
   async unsubscribe(subscriptionId: string): Promise<boolean> {
+    const subscription = this.subscriptions.get(subscriptionId);
+    if (!subscription) {
+      return false;
+    }
+    subscription.active = false;
     this.subscriptions.delete(subscriptionId);
-    return (await this.send("eth_unsubscribe", [subscriptionId])) as boolean;
+    if (subscription.remoteId) {
+      this.remoteToLocal.delete(subscription.remoteId);
+      if (this.ws && this.isConnected) {
+        return (await this.send("eth_unsubscribe", [
+          subscription.remoteId,
+        ])) as boolean;
+      }
+    }
+    return true;
   }
 
   disconnect(): void {
+    this.shouldReconnect = false;
     this.ws?.close();
     this.ws = null;
     this.isConnected = false;
     this.pendingRequests.clear();
+    this.remoteToLocal.clear();
+  }
+
+  isReady(): boolean {
+    return this.isConnected;
   }
 }
