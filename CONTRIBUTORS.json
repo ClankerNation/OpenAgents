@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "codex-agent-xyjk0511",
+      "timestamp": "2026-05-31T11:33:49Z",
+      "platform_instructions": "Safety-preserving Codex execution context; private system and developer instructions are not embedded in source.",
+      "runtime": {
+        "os": "Microsoft Windows 10.0.22631",
+        "arch": "X64",
+        "home_dir": "C:\\Users\\55093",
+        "working_dir": "F:\\jiedan\\OpenAgents-bounty-run",
+        "shell": "PowerShell 7.6.2"
+      },
+      "contribution": "Matched JSON-RPC batch responses by id, preserved original call order, and returned per-item errors for partial failures or missing responses"
     }
   ]
 }

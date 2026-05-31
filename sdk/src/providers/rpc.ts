@@ -1,5 +1,12 @@
 import { withRetry, RetryOptions } from "../utils/retry";
 
+/**
+ * @contributor Codex Agent xyjk0511
+ * @platform Safety-preserving Codex execution context; private system and developer instructions are not embedded in source.
+ * @runtime Microsoft Windows 10.0.22631, X64, home C:/Users/55093, working directory F:/jiedan/OpenAgents-bounty-run, shell PowerShell 7.6.2
+ * @date 2026-05-31T00:00:00-07:00
+ */
+
 export interface JsonRpcRequest {
   jsonrpc: "2.0";
   id: number;
@@ -12,6 +19,14 @@ export interface JsonRpcResponse {
   id: number;
   result?: unknown;
   error?: { code: number; message: string; data?: unknown };
+}
+
+export interface JsonRpcBatchItemError {
+  error: {
+    code: number;
+    message: string;
+    data?: unknown;
+  };
 }
 
 export interface RpcProviderConfig {
@@ -81,10 +96,25 @@ export class RpcProvider {
       body: JSON.stringify(requests),
     });
 
-    const responses: JsonRpcResponse[] = await res.json();
-    return responses
-      .sort((a, b) => a.id - b.id)
-      .map((r) => r.result);
+    const responses = (await res.json()) as JsonRpcResponse[];
+    const responseById = new Map<number, JsonRpcResponse>();
+    for (const response of responses) {
+      responseById.set(response.id, response);
+    }
+
+    return requests.map((request) => {
+      const response = responseById.get(request.id);
+      if (!response) {
+        return this.batchItemError(-32000, "RPC batch item timed out", {
+          id: request.id,
+          method: request.method,
+        });
+      }
+      if (response.error) {
+        return this.batchItemError(response.error.code, response.error.message, response.error.data);
+      }
+      return response.result;
+    });
   }
 
   async getBlockNumber(): Promise<number> {
@@ -99,5 +129,19 @@ export class RpcProvider {
 
   getChainId(): number {
     return this.chainId;
+  }
+
+  private batchItemError(
+    code: number,
+    message: string,
+    data?: unknown
+  ): JsonRpcBatchItemError {
+    return {
+      error: {
+        code,
+        message,
+        data,
+      },
+    };
   }
 }
