@@ -1,13 +1,29 @@
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+from api.middleware.error_handler import (
+    RequestIDMiddleware,
+    http_exception_handler,
+    validation_exception_handler,
+    generic_exception_handler,
+)
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+# Add request ID middleware
+app.add_middleware(RequestIDMiddleware)
+
+# Register exception handlers
+app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(Exception, generic_exception_handler)
 
 
 class AgentResponse(BaseModel):
