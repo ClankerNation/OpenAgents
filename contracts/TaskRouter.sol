@@ -21,15 +21,79 @@ contract TaskRouter {
     mapping(uint256 => Task) public tasks;
     uint256 public taskCount;
     uint256 public platformFee; // basis points
+    mapping(address => uint256) public stakedBalances;
+    mapping(address => uint256) public nonces;
+
+    address private _relayedAgent;
+    bool private _relayActive;
 
     event TaskCreated(uint256 indexed taskId, address indexed creator, uint256 reward);
     event TaskAssigned(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskCompleted(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskDisputed(uint256 indexed taskId);
+    event StakeDeposited(address indexed agent, uint256 amount);
+    event StakeWithdrawn(address indexed agent, uint256 amount);
+    event RelayedExecution(address indexed relayer, address indexed agent, bytes4 selector, uint256 reimbursement);
 
     constructor(address _registry, uint256 _platformFee) {
         registry = AgentRegistry(_registry);
         platformFee = _platformFee;
+    }
+
+    function depositStake() external payable {
+        require(msg.value > 0, "Stake required");
+        stakedBalances[msg.sender] += msg.value;
+        emit StakeDeposited(msg.sender, msg.value);
+    }
+
+    function withdrawStake(uint256 amount) external {
+        require(amount > 0, "Amount required");
+        require(stakedBalances[msg.sender] >= amount, "Insufficient stake");
+        stakedBalances[msg.sender] -= amount;
+
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, "Withdraw failed");
+        emit StakeWithdrawn(msg.sender, amount);
+    }
+
+    function executeOnBehalf(address agent, bytes calldata callData, bytes calldata signature) external returns (bytes memory) {
+        require(agent != address(0), "Invalid agent");
+        require(!_relayActive, "Relay busy");
+        require(callData.length >= 4, "Invalid calldata");
+
+        uint256 nonce = nonces[agent];
+        bytes32 digest = _toEthSignedMessageHash(
+            keccak256(abi.encode(address(this), block.chainid, agent, nonce, keccak256(callData)))
+        );
+        require(_recoverSigner(digest, signature) == agent, "Invalid signature");
+
+        nonces[agent] = nonce + 1;
+
+        uint256 startGas = gasleft();
+        _relayActive = true;
+        _relayedAgent = agent;
+
+        (bool success, bytes memory returnData) = address(this).call(callData);
+
+        _relayActive = false;
+        _relayedAgent = address(0);
+        if (!success) {
+            assembly {
+                revert(add(returnData, 32), mload(returnData))
+            }
+        }
+
+        uint256 gasUsed = startGas - gasleft() + 45000;
+        uint256 reimbursement = gasUsed * tx.gasprice;
+        require(stakedBalances[agent] >= reimbursement, "Insufficient stake for gas");
+
+        stakedBalances[agent] -= reimbursement;
+        (bool reimbursed, ) = msg.sender.call{value: reimbursement}("");
+        require(reimbursed, "Reimbursement failed");
+
+        bytes4 selector = _functionSelector(callData);
+        emit RelayedExecution(msg.sender, agent, selector, reimbursement);
+        return returnData;
     }
 
     function createTask(string calldata description, uint256 deadline) external payable returns (uint256) {
@@ -52,13 +116,14 @@ contract TaskRouter {
     }
 
     function assignTask(uint256 taskId, bytes32 agentId) external {
+        address actor = _taskActor();
         Task storage task = tasks[taskId];
         require(task.status == TaskStatus.Open, "Not open");
         require(block.timestamp < task.deadline, "Deadline passed");
 
         AgentRegistry.Agent memory agent = registry.getAgent(agentId);
         require(agent.active, "Agent not active");
-        require(agent.owner == msg.sender, "Not agent owner");
+        require(agent.owner == actor, "Not agent owner");
 
         task.assignedAgent = agentId;
         task.status = TaskStatus.Assigned;
@@ -67,11 +132,12 @@ contract TaskRouter {
     }
 
     function completeTask(uint256 taskId, bytes calldata result) external {
+        address actor = _taskActor();
         Task storage task = tasks[taskId];
         require(task.status == TaskStatus.Assigned, "Not assigned");
 
         AgentRegistry.Agent memory agent = registry.getAgent(task.assignedAgent);
-        require(agent.owner == msg.sender, "Not assigned agent owner");
+        require(agent.owner == actor, "Not assigned agent owner");
 
         task.result = result;
         task.status = TaskStatus.Completed;
@@ -79,7 +145,7 @@ contract TaskRouter {
         uint256 fee = task.reward * platformFee / 10000;
         uint256 payout = task.reward - fee;
 
-        (bool success, ) = msg.sender.call{value: payout}("");
+        (bool success, ) = actor.call{value: payout}("");
         require(success, "Payout failed");
 
         emit TaskCompleted(taskId, task.assignedAgent);
@@ -103,5 +169,43 @@ contract TaskRouter {
 
         task.status = TaskStatus.Disputed;
         emit TaskDisputed(taskId);
+    }
+
+    function _taskActor() internal view returns (address) {
+        if (msg.sender == address(this)) {
+            require(_relayActive, "Relay context missing");
+            return _relayedAgent;
+        }
+        return msg.sender;
+    }
+
+    function _toEthSignedMessageHash(bytes32 hash) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", hash));
+    }
+
+    function _recoverSigner(bytes32 digest, bytes calldata signature) internal pure returns (address) {
+        require(signature.length == 65, "Invalid signature length");
+
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        assembly {
+            r := calldataload(signature.offset)
+            s := calldataload(add(signature.offset, 32))
+            v := byte(0, calldataload(add(signature.offset, 64)))
+        }
+
+        if (v < 27) {
+            v += 27;
+        }
+        require(v == 27 || v == 28, "Invalid signature v");
+
+        return ecrecover(digest, v, r, s);
+    }
+
+    function _functionSelector(bytes calldata data) internal pure returns (bytes4 selector) {
+        assembly {
+            selector := calldataload(data.offset)
+        }
     }
 }
