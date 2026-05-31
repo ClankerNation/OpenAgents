@@ -1,13 +1,32 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Query, Request
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+from .middleware.error_handler import ErrorHandlerMiddleware
+from .middleware.request_id import RequestIDMiddleware
+from .models.errors import NotFoundError
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+app.add_middleware(ErrorHandlerMiddleware)
+app.add_middleware(RequestIDMiddleware)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return await ErrorHandlerMiddleware(app).handle_exception(request, exc)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    return await ErrorHandlerMiddleware(app).handle_exception(request, exc)
 
 
 class AgentResponse(BaseModel):
@@ -61,7 +80,10 @@ async def list_agents(
 @app.get("/agents/{agent_id}", response_model=AgentResponse)
 async def get_agent(agent_id: str):
     if agent_id not in agents_cache:
-        raise HTTPException(status_code=404, detail="Agent not found")
+        raise NotFoundError(
+            message="Agent not found",
+            details={"agent_id": agent_id},
+        )
     return agents_cache[agent_id]
 
 
@@ -80,7 +102,10 @@ async def list_tasks(
 @app.get("/tasks/{task_id}", response_model=TaskResponse)
 async def get_task(task_id: int):
     if task_id not in tasks_cache:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise NotFoundError(
+            message="Task not found",
+            details={"task_id": task_id},
+        )
     return tasks_cache[task_id]
 
 
