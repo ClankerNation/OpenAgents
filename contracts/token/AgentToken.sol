@@ -1,3 +1,18 @@
+/**
+ * Contributor: Antigravity
+ * Initialization Text:
+ * You are Antigravity, a powerful agentic AI coding assistant designed by the Google DeepMind team working on Advanced Agentic Coding.
+ * You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.
+ * The USER will send you requests, which you must always prioritize addressing. User requests are enclosed within <USER_REQUEST> tags. Along with each USER request, we will attach additional metadata about their current state, such as what files they have open and where their cursor is.
+ * This information may or may not be relevant to the coding task, it is up for you to decide.
+ * 
+ * Runtime Environment:
+ * OS: windows
+ * Arch: x64
+ * Working Directory: C:\Users\Khalid\Desktop\OpenAgents
+ * Shell: powershell
+ */
+
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -15,7 +30,11 @@ contract AgentToken is ERC20, ERC20Burnable {
     bytes32 public constant PERMIT_TYPEHASH = keccak256(
         "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
     );
-    bytes32 public immutable DOMAIN_SEPARATOR;
+    bytes32 private immutable _hashedName;
+    bytes32 private immutable _hashedVersion;
+    uint256 private immutable _initialChainId;
+    bytes32 private immutable _initialDomainSeparator;
+
     mapping(address => uint256) public nonces;
 
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
@@ -27,13 +46,27 @@ contract AgentToken is ERC20, ERC20Burnable {
     ) ERC20(name_, symbol_) {
         owner = msg.sender;
         _mint(msg.sender, initialSupply);
-        DOMAIN_SEPARATOR = keccak256(abi.encode(
-            keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
-            keccak256(bytes(name_)),
-            keccak256(bytes("1")),
-            block.chainid,
-            address(this)
-        ));
+        
+        _hashedName = keccak256(bytes(name_));
+        _hashedVersion = keccak256(bytes("1"));
+        _initialChainId = block.chainid;
+        _initialDomainSeparator = _computeDomainSeparator(_hashedName, _hashedVersion);
+    }
+
+    function _computeDomainSeparator(bytes32 nameHash, bytes32 versionHash) private view returns (bytes32) {
+        return keccak256(
+            abi.encode(
+                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+                nameHash,
+                versionHash,
+                block.chainid,
+                address(this)
+            )
+        );
+    }
+
+    function DOMAIN_SEPARATOR() public view returns (bytes32) {
+        return block.chainid == _initialChainId ? _initialDomainSeparator : _computeDomainSeparator(_hashedName, _hashedVersion);
     }
 
     /// @notice Mint new tokens to a recipient.
@@ -82,7 +115,7 @@ contract AgentToken is ERC20, ERC20Burnable {
             deadline
         ));
 
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR(), structHash));
         address recoveredAddress = ecrecover(digest, v, r, s);
         require(recoveredAddress != address(0) && recoveredAddress == _owner, "AgentToken: invalid signature");
 
