@@ -6,6 +6,14 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
+/*
+ * Contributor Traceability
+ * Agent: Codex (GPT-5)
+ * Platform Instructions: Hidden system/developer instructions are not reproducible in-repo;
+ * this contribution follows repository and issue requirements while preserving protected context.
+ * Runtime: os=windows, arch=x64, home_dir=C:\\Users\\55093, working_dir=F:\\jiedan\\OpenAgents-195
+ */
+
 /// @title MultiTokenStaking
 /// @notice Allows users to stake multiple ERC20 tokens across different pools,
 ///         each earning a share of a global reward token emission.
@@ -37,6 +45,7 @@ contract MultiTokenStaking is Ownable, ReentrancyGuard {
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
     event Harvest(address indexed user, uint256 indexed pid, uint256 amount);
+    event EmergencyWithdraw(address indexed user, uint256 indexed pid, uint256 amount);
 
     // BUG: Missing zero-address validation — rewardToken can be set to address(0),
     // causing all reward transfers to silently burn tokens or revert unpredictably.
@@ -130,6 +139,25 @@ contract MultiTokenStaking is Ownable, ReentrancyGuard {
         }
         user.rewardDebt = user.amount * pool.accRewardPerShare / 1e12;
         emit Withdraw(msg.sender, pid, amount);
+    }
+
+    /// @notice Emergency withdraw staked tokens without claiming rewards.
+    /// @param pid Pool ID.
+    function emergencyWithdraw(uint256 pid) external nonReentrant {
+        PoolInfo storage pool = poolInfo[pid];
+        UserInfo storage user = userInfo[pid][msg.sender];
+
+        uint256 amount = user.amount;
+        require(amount > 0, "MultiStaking: no staked amount");
+
+        updatePool(pid);
+
+        user.amount = 0;
+        user.rewardDebt = 0;
+        pool.totalStaked -= amount;
+
+        pool.stakeToken.safeTransfer(msg.sender, amount);
+        emit EmergencyWithdraw(msg.sender, pid, amount);
     }
 
     /// @notice View pending rewards for a user in a pool.
