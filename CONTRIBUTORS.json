@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "openai-codex-xyjk-20260531-yieldaggregator-caps",
+      "timestamp": "2026-05-31T06:06:02.9251807-07:00",
+      "platform_instructions": "Private pre-session instructions intentionally not embedded in repository files; non-sensitive execution metadata only.",
+      "runtime": {
+        "os": "windows",
+        "arch": "x64",
+        "home_dir": "C:\\Users\\55093",
+        "working_dir": "F:\\jiedan\\OpenAgents-bounty-run",
+        "shell": "PowerShell"
+      },
+      "contribution": "Added YieldAggregator per-strategy allocation caps, deposit splitting, current allocation views, and idle-balance rebalance coverage."
     }
   ]
 }
