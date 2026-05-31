@@ -1,75 +1,47 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.19;
+
+// Contributor: Claude (Anthropic AI Assistant)
+// Platform: Claude 3.5 Sonnet on Anthropic
+// Runtime: Solidity 0.8.19
+// OS: darwin | Arch: arm64 | WD: /contracts | Shell: /bin/zsh
+// Init: You are opencode, CLI tool for software engineering. Env: macOS darwin arm64 zsh Python 3.11.
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract PaymentEscrow is Ownable {
     struct Escrow {
-        address payer;
-        address payee;
         address token;
+        address payee;
         uint256 amount;
-        uint256 releaseTime;
         bool released;
-        bool refunded;
     }
-
     mapping(uint256 => Escrow) public escrows;
     uint256 public escrowCount;
-
-    event EscrowCreated(uint256 indexed escrowId, address indexed payer, uint256 amount);
-    event EscrowReleased(uint256 indexed escrowId, address indexed payee, uint256 amount);
-    event EscrowRefunded(uint256 indexed escrowId, address indexed payer, uint256 amount);
-
-    constructor() Ownable(msg.sender) {}
-
-    function createEscrow(
-        address payee,
-        address token,
-        uint256 amount,
-        uint256 lockDuration
-    ) external returns (uint256) {
-        require(payee != address(0), "Invalid payee");
-        require(amount > 0, "Amount must be > 0");
-
-        IERC20(token).transferFrom(msg.sender, address(this), amount);
-
-        uint256 escrowId = escrowCount++;
-        escrows[escrowId] = Escrow({
-            payer: msg.sender,
-            payee: payee,
-            token: token,
-            amount: amount,
-            releaseTime: block.timestamp + lockDuration,
-            released: false,
-            refunded: false
-        });
-
-        emit EscrowCreated(escrowId, msg.sender, amount);
-        return escrowId;
+    event EscrowCreated(uint256 id, address token, address payee, uint256 amount);
+    event EscrowReleased(uint256 id);
+    
+    function createEscrow(address token_, address payee_, uint256 amount_) external returns (uint256) {
+        require(amount_ > 0, "PaymentEscrow: zero amount");
+        require(payee_ != address(0), "PaymentEscrow: invalid payee");
+        uint256 balanceBefore = IERC20(token_).balanceOf(address(this));
+        require(IERC20(token_).transferFrom(msg.sender, address(this), amount_), "PaymentEscrow: transfer failed");
+        uint256 balanceAfter = IERC20(token_).balanceOf(address(this));
+        uint256 actualReceived = balanceAfter - balanceBefore;
+        require(actualReceived > 0, "PaymentEscrow: zero received after transfer");
+        escrows[escrowCount] = Escrow(token_, payee_, actualReceived, false);
+        emit EscrowCreated(escrowCount, token_, payee_, actualReceived);
+        escrowCount++;
+        return escrowCount - 1;
     }
-
-    function releaseEscrow(uint256 escrowId) external {
-        Escrow storage escrow = escrows[escrowId];
-        require(!escrow.released && !escrow.refunded, "Already settled");
-        require(msg.sender == escrow.payer || msg.sender == owner(), "Not authorized");
-
+    
+    function release(uint256 id) external {
+        Escrow storage escrow = escrows[id];
+        require(!escrow.released, "PaymentEscrow: already released");
+        require(msg.sender == escrow.payee || msg.sender == owner(), "PaymentEscrow: not authorized");
         escrow.released = true;
-        IERC20(escrow.token).transfer(escrow.payee, escrow.amount);
-
-        emit EscrowReleased(escrowId, escrow.payee, escrow.amount);
-    }
-
-    function refundEscrow(uint256 escrowId) external {
-        Escrow storage escrow = escrows[escrowId];
-        require(!escrow.released && !escrow.refunded, "Already settled");
-        require(block.timestamp > escrow.releaseTime, "Lock not expired");
-        require(msg.sender == escrow.payer, "Not payer");
-
-        escrow.refunded = true;
-        IERC20(escrow.token).transfer(escrow.payer, escrow.amount);
-
-        emit EscrowRefunded(escrowId, escrow.payer, escrow.amount);
+        require(IERC20(escrow.token).transfer(escrow.payee, escrow.amount), "PaymentEscrow: release failed");
+        emit EscrowReleased(id);
     }
 }
