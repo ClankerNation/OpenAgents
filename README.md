@@ -42,6 +42,27 @@ npx hardhat test
 cd api && pip install -r requirements.txt && uvicorn main:app
 ```
 
+## API Error Codes
+
+Structured API errors use this schema:
+
+```json
+{
+  "code": "VALIDATION_ERROR",
+  "message": "Request validation failed",
+  "details": {},
+  "request_id": "a2f9d580-4e56-4d6d-9c73-46986b8c84de"
+}
+```
+
+Supported error codes:
+
+- `VALIDATION_ERROR` — invalid input or request validation failure
+- `NOT_FOUND` — requested resource does not exist
+- `AUTH_FAILED` — authentication or authorization failure
+- `RATE_LIMITED` — request rejected by API rate limiting
+- `INTERNAL_ERROR` — unexpected server error
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.

@@ -1,13 +1,87 @@
-from fastapi import FastAPI, HTTPException, Query
+from uuid import uuid4
+
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+from .error_responses import (
+    INTERNAL_ERROR,
+    VALIDATION_ERROR,
+    make_error_payload,
+    map_status_to_code,
+)
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+
+@app.middleware("http")
+async def attach_request_id(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID") or str(uuid4())
+    request.state.request_id = request_id
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    field_errors = []
+    for error in exc.errors():
+        loc = error.get("loc", [])
+        field = ".".join(str(part) for part in loc if part != "body")
+        field_errors.append(
+            {
+                "field": field or "request",
+                "message": error.get("msg", "Invalid value"),
+                "type": error.get("type", "validation_error"),
+            }
+        )
+    return JSONResponse(
+        status_code=422,
+        content=make_error_payload(
+            code=VALIDATION_ERROR,
+            message="Request validation failed",
+            details={"fields": field_errors},
+            request=request,
+        ),
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    code = map_status_to_code(exc.status_code)
+    detail = exc.detail
+    details = detail if isinstance(detail, dict) else {"reason": detail}
+    message = detail if isinstance(detail, str) else "Request failed"
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=make_error_payload(
+            code=code,
+            message=message,
+            details=details,
+            request=request,
+        ),
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, _: Exception):
+    return JSONResponse(
+        status_code=500,
+        content=make_error_payload(
+            code=INTERNAL_ERROR,
+            message="Internal server error",
+            details={"reason": "Unhandled exception"},
+            request=request,
+        ),
+    )
 
 
 class AgentResponse(BaseModel):
