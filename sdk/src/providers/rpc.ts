@@ -3,7 +3,7 @@ import { withRetry, RetryOptions } from "../utils/retry";
 /**
  * @contributor Codex Agent xyjk0511
  * @platform Safety-preserving Codex execution context; private system and developer instructions are not embedded in source.
- * @runtime Microsoft Windows 10.0.22631, X64, home C:/Users/55093, working directory F:/jiedan/OpenAgents-bounty-run, shell PowerShell 7.6.2
+ * @runtime Microsoft Windows 10.0.22631, X64, redacted local paths, shell PowerShell 7.6.2
  * @date 2026-05-31T00:00:00-07:00
  */
 
@@ -34,6 +34,7 @@ export interface RpcProviderConfig {
   chainId: number;
   retryOptions?: RetryOptions;
   headers?: Record<string, string>;
+  batchTimeoutMs?: number;
 }
 
 export class RpcProvider {
@@ -41,6 +42,7 @@ export class RpcProvider {
   private chainId: number;
   private retryOptions: RetryOptions;
   private headers: Record<string, string>;
+  private batchTimeoutMs: number;
   private requestId = 0;
 
   constructor(config: RpcProviderConfig) {
@@ -48,6 +50,7 @@ export class RpcProvider {
     this.chainId = config.chainId;
     this.retryOptions = config.retryOptions ?? {};
     this.headers = config.headers ?? {};
+    this.batchTimeoutMs = config.batchTimeoutMs ?? 30000;
   }
 
   async call(method: string, params: unknown[] = []): Promise<unknown> {
@@ -90,13 +93,24 @@ export class RpcProvider {
       params: c.params,
     }));
 
-    const res = await fetch(this.url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...this.headers },
-      body: JSON.stringify(requests),
-    });
+    let responses: JsonRpcResponse[];
+    try {
+      responses = await this.withBatchTimeout(async (signal) => {
+        const res = await fetch(this.url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...this.headers },
+          body: JSON.stringify(requests),
+          signal,
+        });
 
-    const responses = (await res.json()) as JsonRpcResponse[];
+        return (await res.json()) as JsonRpcResponse[];
+      });
+    } catch (error) {
+      if (this.isTimeoutError(error)) {
+        return requests.map((request) => this.batchTimeoutError(request));
+      }
+      throw error;
+    }
     const responseById = new Map<number, JsonRpcResponse>();
     for (const response of responses) {
       responseById.set(response.id, response);
@@ -105,10 +119,7 @@ export class RpcProvider {
     return requests.map((request) => {
       const response = responseById.get(request.id);
       if (!response) {
-        return this.batchItemError(-32000, "RPC batch item timed out", {
-          id: request.id,
-          method: request.method,
-        });
+        return this.batchTimeoutError(request);
       }
       if (response.error) {
         return this.batchItemError(response.error.code, response.error.message, response.error.data);
@@ -143,5 +154,43 @@ export class RpcProvider {
         data,
       },
     };
+  }
+
+  private batchTimeoutError(request: JsonRpcRequest): JsonRpcBatchItemError {
+    return this.batchItemError(-32000, "RPC batch item timed out", {
+      id: request.id,
+      method: request.method,
+      timeoutMs: this.batchTimeoutMs,
+    });
+  }
+
+  private async withBatchTimeout<T>(
+    operation: (signal: AbortSignal) => Promise<T>
+  ): Promise<T> {
+    const controller = new AbortController();
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    try {
+      return await Promise.race([
+        operation(controller.signal),
+        new Promise<T>((_resolve, reject) => {
+          timeoutId = setTimeout(() => {
+            controller.abort();
+            reject(new Error("RPC batch request timed out"));
+          }, this.batchTimeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    }
+  }
+
+  private isTimeoutError(error: unknown): boolean {
+    return error instanceof Error && (
+      error.message === "RPC batch request timed out" ||
+      error.name === "AbortError"
+    );
   }
 }

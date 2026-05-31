@@ -89,4 +89,30 @@ describe("RpcProvider batch responses", function () {
     assert.match(results[0].error.message, /timed out/);
     assert.equal(results[0].error.data.method, "missing");
   });
+
+  it("returns per-item timeout errors when the batch request hangs", async function () {
+    global.fetch = async (_url, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener("abort", () => {
+        const error = new Error("aborted");
+        error.name = "AbortError";
+        reject(error);
+      });
+    });
+
+    const provider = new RpcProvider({
+      url: "http://rpc.local",
+      chainId: 1,
+      batchTimeoutMs: 5,
+    });
+    const results = await provider.batchCall([
+      { method: "first", params: [] },
+      { method: "second", params: [] },
+    ]);
+
+    assert.equal(results.length, 2);
+    assert(results.every((result) => result.error.code === -32000));
+    assert(results.every((result) => /timed out/.test(result.error.message)));
+    assert.deepEqual(results.map((result) => result.error.data.method), ["first", "second"]);
+    assert(results.every((result) => result.error.data.timeoutMs === 5));
+  });
 });
