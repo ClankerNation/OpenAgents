@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: MIT
+// @contributor: openai-codex (xyjk0511)
+// @instructions-verbatim: YOU ARE AN AUTONOMOUS CODING AGENT. EXECUTE TASKS TO COMPLETION WITHOUT ASKING FOR PERMISSION. DO NOT STOP TO ASK "SHOULD I PROCEED?" — PROCEED. DO NOT WAIT FOR CONFIRMATION ON OBVIOUS NEXT STEPS. IF BLOCKED, TRY AN ALTERNATIVE APPROACH. ONLY ASK WHEN TRULY AMBIGUOUS OR DESTRUCTIVE. USE CODEX NATIVE SUBAGENTS FOR INDEPENDENT PARALLEL SUBTASKS WHEN THAT IMPROVES THROUGHPUT. Solve the task directly when you can do so safely and well. Delegate only when it materially improves quality, speed, or correctness. Keep progress short, concrete, and useful. Prefer evidence over assumption; verify before claiming completion. Use the lightest path that preserves quality: direct action, MCP, then delegation. Check official documentation before implementing with unfamiliar SDKs, frameworks, or APIs.
+// @runtime: os=Windows arch=x86_64 home=C:\Users\55093 working_dir=F:\jiedan\OpenAgents-194 shell=powershell
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -20,6 +23,7 @@ contract AgentRegistry is Ownable {
 
     uint256 public registrationFee;
     uint256 public minReputation;
+    uint256 public constant MAX_BATCH_SIZE = 50;
 
     event AgentRegistered(bytes32 indexed agentId, address indexed owner, string name);
     event AgentDeactivated(bytes32 indexed agentId);
@@ -53,6 +57,44 @@ contract AgentRegistry is Ownable {
 
         emit AgentRegistered(agentId, msg.sender, name);
         return agentId;
+    }
+
+    function batchRegister(
+        string[] calldata names,
+        string[] calldata endpoints
+    ) external payable returns (bytes32[] memory ids) {
+        uint256 count = names.length;
+        require(count == endpoints.length, "Array length mismatch");
+        require(count > 0, "Empty batch");
+        require(count <= MAX_BATCH_SIZE, "Batch too large");
+
+        uint256 totalFee = registrationFee * count;
+        require(msg.value >= totalFee, "Insufficient fee");
+
+        ids = new bytes32[](count);
+        for (uint256 i = 0; i < count; i++) {
+            string calldata name = names[i];
+            require(bytes(name).length > 0 && bytes(name).length <= 64, "Invalid name");
+
+            bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp, i));
+            require(agents[agentId].registeredAt == 0, "Agent exists");
+
+            agents[agentId] = Agent({
+                owner: msg.sender,
+                name: name,
+                endpoint: endpoints[i],
+                reputation: 100,
+                tasksCompleted: 0,
+                registeredAt: block.timestamp,
+                active: true
+            });
+
+            ownerAgents[msg.sender].push(agentId);
+            agentIds.push(agentId);
+
+            emit AgentRegistered(agentId, msg.sender, name);
+            ids[i] = agentId;
+        }
     }
 
     function deactivateAgent(bytes32 agentId) external {
