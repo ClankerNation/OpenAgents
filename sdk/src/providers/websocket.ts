@@ -1,9 +1,17 @@
 import { EventEmitter } from "events";
 
+/**
+ * @contributor Codex Agent xyjk0511
+ * @platform Safety-preserving Codex execution context; private system and developer instructions are not embedded in source.
+ * @runtime Microsoft Windows 10.0.22631, X64, redacted local paths, shell PowerShell 7.6.2
+ * @date 2026-05-31T00:00:00-07:00
+ */
+
 export interface WsProviderConfig {
   url: string;
   reconnectIntervalMs?: number;
   maxReconnectAttempts?: number;
+  listenerWarningThreshold?: number;
 }
 
 interface PendingRequest {
@@ -19,6 +27,7 @@ export class WebSocketProvider extends EventEmitter {
   private subscriptions = new Map<string, (data: unknown) => void>();
   private reconnectInterval: number;
   private maxReconnectAttempts: number;
+  private listenerWarningThreshold: number;
   private reconnectCount = 0;
   private isConnected = false;
 
@@ -27,13 +36,17 @@ export class WebSocketProvider extends EventEmitter {
     this.url = config.url;
     this.reconnectInterval = config.reconnectIntervalMs ?? 3000;
     this.maxReconnectAttempts = config.maxReconnectAttempts ?? 10;
+    this.listenerWarningThreshold = config.listenerWarningThreshold ?? 10;
   }
 
   async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.ws = new WebSocket(this.url);
+      this.cleanupSocket(this.ws);
+      const socket = new WebSocket(this.url);
+      this.ws = socket;
 
-      this.ws.onopen = () => {
+      socket.onopen = () => {
+        if (socket !== this.ws) return;
         this.isConnected = true;
         this.reconnectCount = 0;
         // BUG: No heartbeat/ping mechanism — connection can silently die
@@ -42,7 +55,8 @@ export class WebSocketProvider extends EventEmitter {
         resolve();
       };
 
-      this.ws.onmessage = (event) => {
+      socket.onmessage = (event) => {
+        if (socket !== this.ws) return;
         const data = JSON.parse(event.data as string);
         if (data.id && this.pendingRequests.has(data.id)) {
           const pending = this.pendingRequests.get(data.id)!;
@@ -54,7 +68,8 @@ export class WebSocketProvider extends EventEmitter {
         }
       };
 
-      this.ws.onclose = () => {
+      socket.onclose = () => {
+        if (socket !== this.ws) return;
         this.isConnected = false;
         // BUG: Messages sent while disconnected are silently dropped —
         // no queue to buffer and replay after reconnection
@@ -62,10 +77,13 @@ export class WebSocketProvider extends EventEmitter {
         this.attemptReconnect();
       };
 
-      this.ws.onerror = (err) => {
+      socket.onerror = (err) => {
+        if (socket !== this.ws) return;
         if (!this.isConnected) reject(new Error("WebSocket connection failed"));
         this.emit("error", err);
       };
+
+      this.warnIfExcessiveListeners(socket);
     });
   }
 
@@ -108,9 +126,36 @@ export class WebSocketProvider extends EventEmitter {
   }
 
   disconnect(): void {
+    this.cleanupSocket(this.ws);
     this.ws?.close();
     this.ws = null;
     this.isConnected = false;
     this.pendingRequests.clear();
+  }
+
+  private cleanupSocket(socket: WebSocket | null): void {
+    if (!socket) return;
+
+    const maybeNodeSocket = socket as WebSocket & {
+      removeAllListeners?: () => void;
+    };
+    maybeNodeSocket.removeAllListeners?.();
+
+    socket.onopen = null;
+    socket.onmessage = null;
+    socket.onclose = null;
+    socket.onerror = null;
+  }
+
+  private warnIfExcessiveListeners(socket: WebSocket): void {
+    const maybeNodeSocket = socket as WebSocket & {
+      listenerCount?: (event: string) => number;
+    };
+    const count = maybeNodeSocket.listenerCount?.("message") ?? 1;
+    if (count > this.listenerWarningThreshold) {
+      console.warn(
+        `WebSocketProvider message listener count ${count} exceeds threshold ${this.listenerWarningThreshold}`
+      );
+    }
   }
 }
