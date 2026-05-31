@@ -19,6 +19,23 @@ contract InterestRateModel {
     address public admin;
 
     event RateParamsUpdated(uint256 baseRate, uint256 multiplier, uint256 jumpMultiplier, uint256 kink);
+    event RateParametersUpdated(
+        uint256 oldBaseRate,
+        uint256 newBaseRate,
+        uint256 oldMultiplier,
+        uint256 newMultiplier,
+        uint256 oldJumpMultiplier,
+        uint256 newJumpMultiplier,
+        uint256 oldKink,
+        uint256 newKink
+    );
+
+    struct RateParameters {
+        uint256 baseRate;
+        uint256 multiplier;
+        uint256 jumpMultiplier;
+        uint256 kink;
+    }
 
     modifier onlyAdmin() {
         require(msg.sender == admin, "Not admin");
@@ -44,11 +61,36 @@ contract InterestRateModel {
         uint256 _jumpMultiplier,
         uint256 _kink
     ) external onlyAdmin {
+        uint256 oldBaseRate = baseRate;
+        uint256 oldMultiplier = multiplier;
+        uint256 oldJumpMultiplier = jumpMultiplier;
+        uint256 oldKink = kink;
+
         baseRate = _baseRate;
         multiplier = _multiplier;
         jumpMultiplier = _jumpMultiplier;
         kink = _kink;
+
         emit RateParamsUpdated(_baseRate, _multiplier, _jumpMultiplier, _kink);
+        emit RateParametersUpdated(
+            oldBaseRate,
+            _baseRate,
+            oldMultiplier,
+            _multiplier,
+            oldJumpMultiplier,
+            _jumpMultiplier,
+            oldKink,
+            _kink
+        );
+    }
+
+    function getParameters() external view returns (RateParameters memory params) {
+        params = RateParameters({
+            baseRate: baseRate,
+            multiplier: multiplier,
+            jumpMultiplier: jumpMultiplier,
+            kink: kink
+        });
     }
 
     function getUtilization(uint256 totalBorrowed, uint256 totalDeposits) public pure returns (uint256) {
