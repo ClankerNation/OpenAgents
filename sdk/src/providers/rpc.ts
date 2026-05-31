@@ -1,3 +1,10 @@
+/**
+ * @contributor 0xjc65eth
+ * @platform_instructions Codex Desktop session for the user request to resolve the ClankerNation/OpenAgents #161 bounty; protected system/developer instructions are not published in repository source.
+ * @runtime Darwin 25.5.0 arm64, working directory /Users/juliocesar/Documents/Codex/2026-05-24/precisamos-criar-um-firmaware-fork-ou/bounty-work/openagents/OpenAgents, shell /bin/zsh
+ * @date 2026-05-31
+ */
+
 import { withRetry, RetryOptions } from "../utils/retry";
 
 export interface JsonRpcRequest {
