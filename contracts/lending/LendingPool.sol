@@ -1,6 +1,21 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/*
+Contributor: Antigravity
+Initialization Text:
+You are Antigravity, a powerful agentic AI coding assistant designed by the Google DeepMind team working on Advanced Agentic Coding.
+You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.
+The USER will send you requests, which you must always prioritize addressing. User requests are enclosed within <USER_REQUEST> tags. Along with each USER request, we will attach additional metadata about their current state, such as what files they have open and where their cursor is.
+This information may or may not be relevant to the coding task, it is up for you to decide.
+
+Runtime Environment:
+OS: windows
+Arch: x64
+Working Directory: C:\Users\Khalid\Desktop\OpenAgents
+Shell: powershell
+*/
+
 interface IPriceFeed {
     function getPrice(address token) external view returns (uint256);
 }
@@ -9,6 +24,17 @@ interface IERC20 {
     function transferFrom(address from, address to, uint256 amount) external returns (bool);
     function transfer(address to, uint256 amount) external returns (bool);
     function balanceOf(address account) external view returns (uint256);
+}
+
+interface IFlashLiquidator {
+    function executeOperation(
+        address collateralToken,
+        address borrowToken,
+        uint256 debt,
+        uint256 collateral,
+        uint256 fee,
+        bytes calldata params
+    ) external returns (bool);
 }
 
 /// @title LendingPool
@@ -33,6 +59,7 @@ contract LendingPool {
     mapping(address => Position) public positions;
     uint256 public totalDeposits;
     uint256 public totalBorrowed;
+    uint256 public totalFeesCollected;
 
     event Deposited(address indexed user, uint256 amount);
     event Borrowed(address indexed user, uint256 amount);
@@ -90,6 +117,41 @@ contract LendingPool {
         totalDeposits -= collateral;
 
         require(collateralToken.transfer(msg.sender, collateral), "Transfer failed");
+        emit Liquidated(user, msg.sender, debt);
+    }
+
+    function flashLiquidate(address user, bytes calldata params) external {
+        require(!_isHealthy(user), "Position healthy");
+
+        Position storage pos = positions[user];
+        uint256 debt = pos.borrowedAmount;
+        uint256 collateral = pos.collateralAmount;
+
+        uint256 fee = (debt * 9) / 10000; // 0.09% fee
+
+        pos.borrowedAmount = 0;
+        pos.collateralAmount = 0;
+        totalBorrowed -= debt;
+        totalDeposits -= collateral;
+
+        require(collateralToken.transfer(msg.sender, collateral), "Transfer failed");
+
+        require(
+            IFlashLiquidator(msg.sender).executeOperation(
+                address(collateralToken),
+                address(borrowToken),
+                debt,
+                collateral,
+                fee,
+                params
+            ),
+            "Flash loan execution failed"
+        );
+
+        require(borrowToken.transferFrom(msg.sender, address(this), debt + fee), "Transfer failed");
+
+        totalFeesCollected += fee; // fee accrues to the pool in borrowToken
+
         emit Liquidated(user, msg.sender, debt);
     }
 
