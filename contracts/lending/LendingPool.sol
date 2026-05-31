@@ -11,6 +11,12 @@ interface IERC20 {
     function balanceOf(address account) external view returns (uint256);
 }
 
+interface IPermit2 {
+    function permitTransferFrom(address from, address to, uint256 amount, uint256 deadline, bytes calldata sig) external;
+}
+
+address constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
+
 /// @title LendingPool
 /// @notice Collateralized lending pool supporting deposit, borrow, repay, and liquidation
 /// @dev Uses an external price feed oracle for collateral valuation
@@ -48,6 +54,14 @@ contract LendingPool {
     function deposit(uint256 amount) external {
         require(amount > 0, "Zero amount");
         require(collateralToken.transferFrom(msg.sender, address(this), amount), "Transfer failed");
+        positions[msg.sender].collateralAmount += amount;
+        totalDeposits += amount;
+        emit Deposited(msg.sender, amount);
+    }
+
+    function depositWithPermit2(uint256 amount, uint256 deadline, bytes calldata signature) external {
+        require(amount > 0, "Zero amount");
+        IPermit2(PERMIT2).permitTransferFrom(msg.sender, address(this), amount, deadline, signature);
         positions[msg.sender].collateralAmount += amount;
         totalDeposits += amount;
         emit Deposited(msg.sender, amount);

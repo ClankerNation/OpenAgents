@@ -4,6 +4,19 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+
+interface IPermit2 {
+    function permitTransferFrom(
+        address from,
+        address to,
+        uint256 amount,
+        uint256 deadline,
+        bytes calldata sig
+    ) external;
+}
+
+address constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
 
 /// @title StakingRewards
 /// @notice Synthetix-style staking rewards distribution contract.
@@ -87,6 +100,18 @@ contract StakingRewards is ReentrancyGuard {
         _totalSupply += amount;
         _balances[msg.sender] += amount;
         stakingToken.safeTransferFrom(msg.sender, address(this), amount);
+        emit Staked(msg.sender, amount);
+    }
+
+    /// @notice Stake tokens using Permit2 signature for gasless approval.
+    /// @param amount Amount of staking token to deposit.
+    /// @param deadline Permit2 deadline timestamp.
+    /// @param signature Permit2 signature for approval.
+    function stakeWithPermit2(uint256 amount, uint256 deadline, bytes calldata signature) external nonReentrant updateReward(msg.sender) {
+        require(amount > 0, "Cannot stake 0");
+        IPermit2(PERMIT2).permitTransferFrom(msg.sender, address(this), amount, deadline, signature);
+        _totalSupply += amount;
+        _balances[msg.sender] += amount;
         emit Staked(msg.sender, amount);
     }
 
