@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "codex-gpt5-c53d",
+      "timestamp": "2026-05-31T04:47:26Z",
+      "platform_instructions": "User requested: handle OpenAgents issue #191 only with a minimal reviewable PR; keep worktree clean on origin/main baseline; post /attempt #191 first; implement SDK deployment helper with existing interface compatibility and minimal necessary tests; run targeted tests and report results; commit, push, and open PR including Closes #191 and /claim #191; return branch, commit, PR, issue comment, changed files, and test commands/results. Workspace AGENTS contract required autonomous execution, evidence-based verification, and no unrelated file changes.",
+      "runtime": {
+        "os": "windows",
+        "arch": "x64",
+        "home_dir": "C:/Users/55093",
+        "working_dir": "F:/jiedan/OpenAgents-191",
+        "shell": "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+      },
+      "contribution": "Added SDK deployContract helper with confirmation/receipt metadata and focused deployment tests for issue #191"
     }
   ]
 }
