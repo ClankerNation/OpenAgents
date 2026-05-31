@@ -42,6 +42,7 @@ class Agent(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(128), nullable=False)
     description = Column(Text, nullable=True)
+    endpoint = Column(String(512), nullable=False)
     model_type = Column(String(32), default="gpt-4")
     config = Column(JSON, default=dict)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
