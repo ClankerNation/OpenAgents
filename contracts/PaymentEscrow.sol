@@ -33,20 +33,24 @@ contract PaymentEscrow is Ownable {
         require(payee != address(0), "Invalid payee");
         require(amount > 0, "Amount must be > 0");
 
-        IERC20(token).transferFrom(msg.sender, address(this), amount);
+        IERC20 erc20 = IERC20(token);
+        uint256 balanceBefore = erc20.balanceOf(address(this));
+        require(erc20.transferFrom(msg.sender, address(this), amount), "Transfer failed");
+        uint256 receivedAmount = erc20.balanceOf(address(this)) - balanceBefore;
+        require(receivedAmount > 0, "Amount must be > 0");
 
         uint256 escrowId = escrowCount++;
         escrows[escrowId] = Escrow({
             payer: msg.sender,
             payee: payee,
             token: token,
-            amount: amount,
+            amount: receivedAmount,
             releaseTime: block.timestamp + lockDuration,
             released: false,
             refunded: false
         });
 
-        emit EscrowCreated(escrowId, msg.sender, amount);
+        emit EscrowCreated(escrowId, msg.sender, receivedAmount);
         return escrowId;
     }
 
