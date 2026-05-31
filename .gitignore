@@ -1,5 +1,10 @@
 # Dependencies
 node_modules/
+package-lock.json
+
+# Solc artifacts
+*.bin
+*.abi
 
 # Environment
 .env
@@ -30,6 +35,13 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+
+# Database
+*.db
 
 # Deployment
 deployments/localhost/
