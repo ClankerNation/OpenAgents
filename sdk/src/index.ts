@@ -1,3 +1,9 @@
+/**
+ * @fix-author codex-xyjk0511
+ * @fix-date 2026-05-31
+ * @platform-init User request: evaluate and implement issue #148 deploy helper in OpenAgents SDK.
+ * @runtime os=windows arch=x64 working_dir=F:\jiedan\OpenAgents shell=powershell
+ */
 import { ethers } from "ethers";
 
 export interface AgentConfig {
@@ -9,10 +15,17 @@ export interface AgentConfig {
   routerAddress: string;
 }
 
+export interface DeploymentReceipt {
+  address: string;
+  txHash: string;
+  gasUsed: bigint;
+}
+
 export class OpenAgentsSDK {
   private provider: ethers.JsonRpcProvider;
   private signer: ethers.Wallet;
   private config: AgentConfig;
+  private lastDeploymentReceipt: DeploymentReceipt | null = null;
 
   constructor(config: AgentConfig) {
     this.config = config;
@@ -87,5 +100,38 @@ export class OpenAgentsSDK {
     }
 
     return openTasks;
+  }
+
+  async deployContract(
+    abi: any[],
+    bytecode: string,
+    args: any[] = [],
+    confirmations = 1
+  ): Promise<ethers.BaseContract> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const contract = await factory.deploy(...args);
+
+    const deploymentTx = contract.deploymentTransaction();
+    if (!deploymentTx) {
+      throw new Error("Missing deployment transaction");
+    }
+
+    const receipt = await deploymentTx.wait(confirmations);
+    if (!receipt) {
+      throw new Error("Missing deployment receipt");
+    }
+
+    const address = await contract.getAddress();
+    this.lastDeploymentReceipt = {
+      address,
+      txHash: deploymentTx.hash,
+      gasUsed: receipt.gasUsed,
+    };
+
+    return contract;
+  }
+
+  getLastDeploymentReceipt(): DeploymentReceipt | null {
+    return this.lastDeploymentReceipt;
   }
 }
