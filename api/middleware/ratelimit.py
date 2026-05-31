@@ -4,8 +4,12 @@ import time
 from collections import defaultdict
 from fastapi import Request, HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import JSONResponse
 from typing import Dict, Tuple
+
+try:
+    from .error_handler import build_error_response
+except ImportError:  # Allows `cd api && uvicorn main:app`.
+    from middleware.error_handler import build_error_response
 
 
 class RateLimitConfig:
@@ -65,12 +69,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         is_limited, value = self._is_rate_limited(client_ip)
 
         if is_limited:
-            return JSONResponse(
+            return build_error_response(
                 status_code=429,
-                content={
-                    "error": "Rate limit exceeded",
+                code="RATE_LIMIT_EXCEEDED",
+                message="Rate limit exceeded",
+                details={
                     "retry_after": value,
                 },
+                request_id=getattr(request.state, "request_id", None),
                 headers={"Retry-After": str(value)},
             )
 

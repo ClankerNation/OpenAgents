@@ -1,13 +1,40 @@
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+try:
+    from .middleware.error_handler import (
+        api_error_handler,
+        http_error_handler,
+        unhandled_error_handler,
+        validation_error_handler,
+    )
+    from .middleware.request_id import RequestIDMiddleware
+    from .models.errors import APIError, NotFoundError
+except ImportError:  # Allows `cd api && uvicorn main:app`.
+    from middleware.error_handler import (
+        api_error_handler,
+        http_error_handler,
+        unhandled_error_handler,
+        validation_error_handler,
+    )
+    from middleware.request_id import RequestIDMiddleware
+    from models.errors import APIError, NotFoundError
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+app.add_middleware(RequestIDMiddleware)
+app.add_exception_handler(APIError, api_error_handler)
+app.add_exception_handler(HTTPException, http_error_handler)
+app.add_exception_handler(StarletteHTTPException, http_error_handler)
+app.add_exception_handler(RequestValidationError, validation_error_handler)
+app.add_exception_handler(Exception, unhandled_error_handler)
 
 
 class AgentResponse(BaseModel):
@@ -47,9 +74,9 @@ tasks_cache: dict = {}
 @app.get("/agents", response_model=list[AgentResponse])
 async def list_agents(
     active_only: bool = Query(True),
-    min_reputation: int = Query(0),
-    limit: int = Query(50, le=100),
-    offset: int = Query(0),
+    min_reputation: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
 ):
     results = list(agents_cache.values())
     if active_only:
@@ -61,15 +88,15 @@ async def list_agents(
 @app.get("/agents/{agent_id}", response_model=AgentResponse)
 async def get_agent(agent_id: str):
     if agent_id not in agents_cache:
-        raise HTTPException(status_code=404, detail="Agent not found")
+        raise NotFoundError("Agent not found", {"agent_id": agent_id})
     return agents_cache[agent_id]
 
 
 @app.get("/tasks", response_model=list[TaskResponse])
 async def list_tasks(
     status: Optional[str] = Query(None),
-    limit: int = Query(50, le=100),
-    offset: int = Query(0),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
 ):
     results = list(tasks_cache.values())
     if status:
@@ -80,12 +107,12 @@ async def list_tasks(
 @app.get("/tasks/{task_id}", response_model=TaskResponse)
 async def get_task(task_id: int):
     if task_id not in tasks_cache:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise NotFoundError("Task not found", {"task_id": task_id})
     return tasks_cache[task_id]
 
 
 @app.get("/leaderboard", response_model=list[LeaderboardEntry])
-async def leaderboard(limit: int = Query(20, le=50)):
+async def leaderboard(limit: int = Query(20, ge=1, le=50)):
     entries = []
     for agent in agents_cache.values():
         completed = agent.get("tasks_completed", 0)
