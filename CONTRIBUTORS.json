@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "codex-gpt5-55093",
+      "timestamp": "2026-05-31T05:47:09Z",
+      "platform_instructions": "Codex session with system/developer/user instructions for OpenAgents issue #188 minimal websocket endpoint fix and targeted tests.",
+      "runtime": {
+        "os": "windows",
+        "arch": "x64",
+        "home_dir": "C:\\Users\\55093",
+        "working_dir": "F:\\jiedan\\OpenAgents-188",
+        "shell": "powershell"
+      },
+      "contribution": "Added task websocket endpoint with subscription filtering, heartbeat, disconnect cleanup, and minimal API websocket tests for issue #188"
     }
   ]
 }
