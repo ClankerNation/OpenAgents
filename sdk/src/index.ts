@@ -1,3 +1,9 @@
+/**
+ * @fix-author codex-xyjk0511
+ * @fix-date 2026-05-31
+ * @platform-init User request: complete issue #148 by adding SDK contract deployment helpers.
+ * @runtime os=windows arch=x64 working_dir=F:\jiedan\OpenAgents-bounty-run shell=powershell
+ */
 import { ethers } from "ethers";
 
 export interface AgentConfig {
@@ -7,6 +13,21 @@ export interface AgentConfig {
   rpcUrl: string;
   registryAddress: string;
   routerAddress: string;
+}
+
+export interface DeploymentReceipt {
+  address: string;
+  txHash: string;
+  gasUsed: bigint;
+}
+
+export interface DeploymentResult {
+  contract: ethers.BaseContract;
+  receipt: DeploymentReceipt;
+}
+
+export interface DeploymentOptions {
+  confirmations?: number;
 }
 
 export class OpenAgentsSDK {
@@ -87,5 +108,36 @@ export class OpenAgentsSDK {
     }
 
     return openTasks;
+  }
+
+  async deployContract(
+    abi: ethers.InterfaceAbi,
+    bytecode: string,
+    args: unknown[] = [],
+    options: DeploymentOptions = {}
+  ): Promise<DeploymentResult> {
+    const confirmations = options.confirmations ?? 1;
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const contract = await factory.deploy(...args);
+    const deploymentTx = contract.deploymentTransaction();
+
+    if (!deploymentTx) {
+      throw new Error("Contract deployment did not create a transaction");
+    }
+
+    const txReceipt = await deploymentTx.wait(confirmations);
+    if (!txReceipt) {
+      throw new Error("Contract deployment transaction was not mined");
+    }
+
+    const address = await contract.getAddress();
+    return {
+      contract,
+      receipt: {
+        address,
+        txHash: deploymentTx.hash,
+        gasUsed: txReceipt.gasUsed,
+      },
+    };
   }
 }
