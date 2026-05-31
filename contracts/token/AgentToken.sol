@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/*
+ * @contributor Codex Agent xyjk0511
+ * @platform Safety-preserving Codex execution context; private system and developer instructions are not embedded in source.
+ * @runtime Microsoft Windows 10.0.22631, X64, redacted local paths, shell PowerShell 7.6.2
+ * @date 2026-05-31T00:00:00-07:00
+ */
+
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 
@@ -15,7 +22,14 @@ contract AgentToken is ERC20, ERC20Burnable {
     bytes32 public constant PERMIT_TYPEHASH = keccak256(
         "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
     );
-    bytes32 public immutable DOMAIN_SEPARATOR;
+    bytes32 private constant EIP712_DOMAIN_TYPEHASH = keccak256(
+        "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
+    );
+    bytes32 private constant VERSION_HASH = keccak256(bytes("1"));
+    bytes32 private immutable _hashedName;
+    bytes32 private immutable _cachedDomainSeparator;
+    uint256 private immutable _cachedChainId;
+    address private immutable _cachedThis;
     mapping(address => uint256) public nonces;
 
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
@@ -27,13 +41,10 @@ contract AgentToken is ERC20, ERC20Burnable {
     ) ERC20(name_, symbol_) {
         owner = msg.sender;
         _mint(msg.sender, initialSupply);
-        DOMAIN_SEPARATOR = keccak256(abi.encode(
-            keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
-            keccak256(bytes(name_)),
-            keccak256(bytes("1")),
-            block.chainid,
-            address(this)
-        ));
+        _hashedName = keccak256(bytes(name_));
+        _cachedChainId = block.chainid;
+        _cachedThis = address(this);
+        _cachedDomainSeparator = _buildDomainSeparator(_hashedName, block.chainid, address(this));
     }
 
     /// @notice Mint new tokens to a recipient.
@@ -82,10 +93,32 @@ contract AgentToken is ERC20, ERC20Burnable {
             deadline
         ));
 
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR(), structHash));
         address recoveredAddress = ecrecover(digest, v, r, s);
         require(recoveredAddress != address(0) && recoveredAddress == _owner, "AgentToken: invalid signature");
 
         _approve(_owner, spender, value);
+    }
+
+    function DOMAIN_SEPARATOR() public view returns (bytes32) {
+        if (block.chainid == _cachedChainId && address(this) == _cachedThis) {
+            return _cachedDomainSeparator;
+        }
+
+        return _buildDomainSeparator(_hashedName, block.chainid, address(this));
+    }
+
+    function _buildDomainSeparator(
+        bytes32 hashedName,
+        uint256 chainId,
+        address verifyingContract
+    ) private pure returns (bytes32) {
+        return keccak256(abi.encode(
+            EIP712_DOMAIN_TYPEHASH,
+            hashedName,
+            VERSION_HASH,
+            chainId,
+            verifyingContract
+        ));
     }
 }
