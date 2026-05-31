@@ -34,6 +34,7 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)  # BUG: naive datetime, no timezone
 
     agents = relationship("Agent", back_populates="owner")
+    api_keys = relationship("ApiKey", back_populates="user")
 
 
 class Agent(Base):
@@ -84,6 +85,19 @@ class Payment(Base):
     claimed_at = Column(DateTime, nullable=True)
 
     task = relationship("Task", back_populates="payments")
+
+
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    name = Column(String(128), nullable=True)
+    key_hash = Column(String(64), unique=True, index=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    revoked_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", back_populates="api_keys")
 
 
 def init_db():
