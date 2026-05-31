@@ -45,3 +45,16 @@ cd api && pip install -r requirements.txt && uvicorn main:app
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## API Error Contract
+
+All API error responses follow:
+
+```json
+{
+  "code": "VALIDATION_ERROR|NOT_FOUND|AUTH_FAILED|RATE_LIMITED|INTERNAL_ERROR",
+  "message": "string",
+  "details": {},
+  "request_id": "string"
+}
+```
