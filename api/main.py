@@ -67,8 +67,8 @@ tasks_cache: dict = {}
 async def list_agents(
     active_only: bool = Query(True),
     min_reputation: int = Query(0),
-    limit: int = Query(50, le=100),
-    offset: int = Query(0),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
 ):
     results = list(agents_cache.values())
     if active_only:
@@ -90,8 +90,8 @@ async def get_agent(agent_id: str):
 @app.get("/tasks", response_model=list[TaskResponse])
 async def list_tasks(
     status: Optional[str] = Query(None),
-    limit: int = Query(50, le=100),
-    offset: int = Query(0),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
 ):
     results = list(tasks_cache.values())
     if status:
@@ -110,7 +110,7 @@ async def get_task(task_id: int):
 
 
 @app.get("/leaderboard", response_model=list[LeaderboardEntry])
-async def leaderboard(limit: int = Query(20, le=50)):
+async def leaderboard(limit: int = Query(20, ge=1, le=50)):
     entries = []
     for agent in agents_cache.values():
         completed = agent.get("tasks_completed", 0)
