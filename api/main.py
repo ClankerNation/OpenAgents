@@ -1,4 +1,14 @@
+"""
+@contributor-info Codex Agent xyjk0511
+@platform Safety-preserving Codex execution context; private system and developer instructions are not embedded in source.
+@runtime Microsoft Windows 10.0.22631, X64, redacted local paths, shell PowerShell 7.6.2
+@date 2026-05-31T00:00:00-07:00
+"""
+
+import os
+
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -7,6 +17,35 @@ app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
+)
+
+
+def _is_development() -> bool:
+    return os.getenv("ENVIRONMENT", "production").lower() in {
+        "dev",
+        "development",
+        "local",
+        "test",
+    }
+
+
+def _allowed_origins() -> list[str]:
+    raw = os.getenv("ALLOWED_ORIGINS", "").strip()
+    if not raw:
+        return ["*"] if _is_development() else []
+
+    origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+    if "*" in origins and not _is_development():
+        origins = [origin for origin in origins if origin != "*"]
+    return origins
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins(),
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
 )
 
 
