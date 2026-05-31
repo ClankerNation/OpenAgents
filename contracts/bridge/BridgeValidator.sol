@@ -1,11 +1,21 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/**
+ * @contributor Codex Agent xyjk0511
+ * @platform Safety-preserving Codex execution context; private system and developer instructions are not embedded in source.
+ * @runtime Microsoft Windows 10.0.22631, X64, redacted local paths, shell PowerShell 7.6.2
+ * @date 2026-05-31T00:00:00-07:00
+ */
+
 /// @title BridgeValidator
 /// @notice Manages the validator set for a cross-chain bridge protocol.
 /// @dev Validators are assigned weights; consensus requires a threshold of total weight.
 ///      Supports adding, removing, and updating validator weights.
 contract BridgeValidator {
+    uint256 public constant MIN_ACTIVE_VALIDATORS = 3;
+    uint256 public constant MAX_TOTAL_WEIGHT = type(uint128).max;
+
     struct Validator {
         bool isActive;
         uint128 weight;
@@ -15,6 +25,7 @@ contract BridgeValidator {
     address public owner;
     uint256 public totalWeight;
     uint256 public threshold;
+    uint256 public activeValidatorCount;
     address[] public validatorList;
     mapping(address => Validator) public validators;
 
@@ -28,11 +39,6 @@ contract BridgeValidator {
         _;
     }
 
-    modifier onlyValidator() {
-        require(validators[msg.sender].isActive, "BridgeValidator: not validator");
-        _;
-    }
-
     constructor(uint256 _threshold) {
         owner = msg.sender;
         threshold = _threshold;
@@ -41,39 +47,23 @@ contract BridgeValidator {
     /// @notice Add a new validator with a given weight.
     /// @param validator Address of the new validator.
     /// @param weight Voting weight assigned to the validator.
-    // BUG: Validators can add themselves — the onlyValidator modifier allows any
-    // existing validator to add new validators (including themselves again with
-    // more weight), bypassing owner governance over the validator set.
-    function addValidator(address validator, uint128 weight) external onlyValidator {
-        require(!validators[validator].isActive, "BridgeValidator: already active");
-        require(weight > 0, "BridgeValidator: zero weight");
-
-        validators[validator] = Validator({
-            isActive: true,
-            weight: weight,
-            addedAt: block.timestamp
-        });
-
-        // BUG: Weight overflow — totalWeight is uint256 but weight is uint128.
-        // However, repeated additions without removals can push totalWeight past
-        // the point where threshold checks become meaningless (totalWeight wraps
-        // or becomes so large that threshold ratio breaks).
-        totalWeight += weight;
-        validatorList.push(validator);
-
-        emit ValidatorAdded(validator, weight);
+    function addValidator(address validator, uint128 weight) external onlyOwner {
+        _addValidator(validator, weight);
     }
 
     /// @notice Remove a validator from the active set.
     /// @param validator Address to remove.
-    // BUG: No minimum validator count check — validators can be removed until the
-    // set is empty, bricking the bridge since no one can sign transactions.
     function removeValidator(address validator) external onlyOwner {
         require(validators[validator].isActive, "BridgeValidator: not active");
+        require(
+            activeValidatorCount > MIN_ACTIVE_VALIDATORS,
+            "BridgeValidator: minimum validators"
+        );
 
         totalWeight -= validators[validator].weight;
         validators[validator].isActive = false;
         validators[validator].weight = 0;
+        activeValidatorCount--;
 
         emit ValidatorRemoved(validator);
     }
@@ -86,7 +76,9 @@ contract BridgeValidator {
         require(newWeight > 0, "BridgeValidator: zero weight");
 
         uint128 oldWeight = validators[validator].weight;
-        totalWeight = totalWeight - oldWeight + newWeight;
+        uint256 updatedTotalWeight = totalWeight - oldWeight + newWeight;
+        require(updatedTotalWeight <= MAX_TOTAL_WEIGHT, "BridgeValidator: total weight overflow");
+        totalWeight = updatedTotalWeight;
         validators[validator].weight = newWeight;
 
         emit ValidatorWeightUpdated(validator, oldWeight, newWeight);
@@ -124,10 +116,25 @@ contract BridgeValidator {
     /// @param weight Initial weight.
     function bootstrap(address validator, uint128 weight) external onlyOwner {
         require(validatorList.length == 0, "BridgeValidator: already bootstrapped");
+        _addValidator(validator, weight);
+    }
+
+    function _addValidator(address validator, uint128 weight) internal {
+        require(validator != address(0), "BridgeValidator: zero validator");
+        require(!validators[validator].isActive, "BridgeValidator: already active");
         require(weight > 0, "BridgeValidator: zero weight");
-        validators[validator] = Validator({ isActive: true, weight: weight, addedAt: block.timestamp });
+        require(totalWeight + weight <= MAX_TOTAL_WEIGHT, "BridgeValidator: total weight overflow");
+
+        validators[validator] = Validator({
+            isActive: true,
+            weight: weight,
+            addedAt: block.timestamp
+        });
+
         totalWeight += weight;
+        activeValidatorCount++;
         validatorList.push(validator);
+
         emit ValidatorAdded(validator, weight);
     }
 }
