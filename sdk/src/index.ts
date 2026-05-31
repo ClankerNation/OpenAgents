@@ -9,15 +9,32 @@ export interface AgentConfig {
   routerAddress: string;
 }
 
+export interface DeployContractOptions {
+  confirmations?: number;
+  overrides?: ethers.Overrides;
+}
+
+export interface DeployContractResult {
+  contract: ethers.BaseContract;
+  address: string;
+  txHash: string;
+  gasUsed: bigint;
+  receipt: ethers.TransactionReceipt;
+}
+
 export class OpenAgentsSDK {
-  private provider: ethers.JsonRpcProvider;
-  private signer: ethers.Wallet;
+  private provider: ethers.Provider;
+  private signer: ethers.Signer;
   private config: AgentConfig;
 
-  constructor(config: AgentConfig) {
+  constructor(
+    config: AgentConfig,
+    runtime?: { provider?: ethers.Provider; signer?: ethers.Signer }
+  ) {
     this.config = config;
-    this.provider = new ethers.JsonRpcProvider(config.rpcUrl);
-    this.signer = new ethers.Wallet(config.privateKey, this.provider);
+    this.provider = runtime?.provider ?? new ethers.JsonRpcProvider(config.rpcUrl);
+    this.signer =
+      runtime?.signer ?? new ethers.Wallet(config.privateKey, this.provider);
   }
 
   async registerAgent(): Promise<string> {
@@ -58,6 +75,41 @@ export class OpenAgentsSDK {
       ethers.toUtf8Bytes(result)
     );
     await tx.wait();
+  }
+
+  async deployContract(
+    abi: ethers.InterfaceAbi,
+    bytecode: ethers.BytesLike,
+    args: unknown[] = [],
+    options: DeployContractOptions = {}
+  ): Promise<DeployContractResult> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const deploymentArgs = [...args];
+
+    if (options.overrides) {
+      deploymentArgs.push(options.overrides);
+    }
+
+    const contract = await factory.deploy(...deploymentArgs);
+    await contract.waitForDeployment();
+
+    const deploymentTx = contract.deploymentTransaction();
+    if (!deploymentTx) {
+      throw new Error("Deployment transaction not found");
+    }
+
+    const receipt = await deploymentTx.wait(options.confirmations ?? 1);
+    if (!receipt) {
+      throw new Error("Deployment receipt not found");
+    }
+
+    return {
+      contract,
+      address: await contract.getAddress(),
+      txHash: deploymentTx.hash,
+      gasUsed: receipt.gasUsed,
+      receipt,
+    };
   }
 
   async getOpenTasks(): Promise<any[]> {
