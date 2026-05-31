@@ -1,22 +1,18 @@
 const { expect } = require("chai");
 const { ethers, network } = require("hardhat");
 
-describe("AgentToken Domain Separator Replay Protection", function () {
+describe("AgentToken Domain Separator", function () {
     let agentToken;
-    let owner;
+    let owner, spender;
 
     const initialChainId = 31337; // Hardhat default
-    const newChainId = 12345;
 
     beforeEach(async function () {
-        [owner] = await ethers.getSigners();
+        [owner, spender] = await ethers.getSigners();
 
         const AgentToken = await ethers.getContractFactory("AgentToken");
-        // name, symbol, initialSupply
         agentToken = await AgentToken.deploy("Agent Token", "AGT", ethers.parseEther("1000000"));
-    });
-
-    after(async function() {
+        await agentToken.waitForDeployment();
     });
 
     it("should dynamically compute the domain separator", async function () {
@@ -41,7 +37,6 @@ describe("AgentToken Domain Separator Replay Protection", function () {
     });
 
     it("should successfully execute a permit using the dynamic domain separator", async function () {
-        const [owner, spender] = await ethers.getSigners();
         const value = ethers.parseEther("100");
         const nonce = await agentToken.nonces(owner.address);
         const deadline = ethers.MaxUint256;
