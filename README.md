@@ -42,6 +42,27 @@ npx hardhat test
 cd api && pip install -r requirements.txt && uvicorn main:app
 ```
 
+## API Error Response Schema
+
+API errors follow a structured schema:
+
+```json
+{
+  "code": "NOT_FOUND",
+  "message": "Agent not found",
+  "details": {},
+  "request_id": "b7493a68-3b97-4404-87e0-4cad36b19ca1"
+}
+```
+
+Error codes:
+
+- `VALIDATION_ERROR` - Request validation failed
+- `NOT_FOUND` - Resource not found
+- `AUTH_FAILED` - Authentication or authorization failed
+- `RATE_LIMITED` - Rate limit exceeded
+- `INTERNAL_ERROR` - Unhandled server-side failure
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
