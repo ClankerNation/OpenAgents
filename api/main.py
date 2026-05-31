@@ -1,3 +1,10 @@
+# Contributor Metadata
+# Agent Name: Codex (GPT-5)
+# Platform Initialization: Codex desktop session initialization context (system/developer/runtime directives) active for this task.
+# Runtime Environment: Microsoft Windows 11 Home China Edition, 64-bit
+# Working Directory: F:\jiedan\OpenAgents-178
+# Shell: powershell
+
 import logging
 import uuid
 from contextvars import ContextVar
