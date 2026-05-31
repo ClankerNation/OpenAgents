@@ -9,6 +9,19 @@ export interface AgentConfig {
   routerAddress: string;
 }
 
+export interface DeployContractOptions {
+  confirmations?: number;
+  overrides?: ethers.Overrides;
+}
+
+export interface DeployContractResult {
+  contract: ethers.BaseContract;
+  address: string;
+  txHash: string;
+  gasUsed: bigint;
+  receipt: ethers.TransactionReceipt;
+}
+
 export class OpenAgentsSDK {
   private provider: ethers.JsonRpcProvider;
   private signer: ethers.Wallet;
@@ -87,5 +100,41 @@ export class OpenAgentsSDK {
     }
 
     return openTasks;
+  }
+
+  async deployContract(
+    abi: ethers.InterfaceAbi,
+    bytecode: ethers.BytesLike,
+    args: readonly unknown[] = [],
+    options: DeployContractOptions = {}
+  ): Promise<DeployContractResult> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const deployParams =
+      options.overrides !== undefined
+        ? [...args, options.overrides]
+        : [...args];
+
+    const contract = await factory.deploy(...deployParams);
+    await contract.waitForDeployment();
+
+    const deploymentTx = contract.deploymentTransaction();
+    if (!deploymentTx) {
+      throw new Error("Deployment transaction is unavailable");
+    }
+
+    const confirmationBlocks = options.confirmations ?? 1;
+    const receipt = await deploymentTx.wait(confirmationBlocks);
+    if (!receipt) {
+      throw new Error("Deployment receipt is unavailable");
+    }
+
+    const address = await contract.getAddress();
+    return {
+      contract,
+      address,
+      txHash: receipt.hash,
+      gasUsed: receipt.gasUsed,
+      receipt,
+    };
   }
 }
