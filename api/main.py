@@ -1,13 +1,63 @@
+import logging
+import uuid
+from contextvars import ContextVar
+from datetime import datetime
+from typing import Optional
+
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
-from typing import Optional
-from datetime import datetime
+
+request_id_ctx_var: ContextVar[str] = ContextVar("request_id", default="-")
+
+
+class RequestIdFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = request_id_ctx_var.get()
+        return True
+
+
+def _configure_request_id_logging() -> None:
+    request_id_filter = RequestIdFilter()
+    root_logger = logging.getLogger()
+    root_logger.addFilter(request_id_filter)
+    for handler in root_logger.handlers:
+        handler.addFilter(request_id_filter)
+
+    for logger_name in ("uvicorn", "uvicorn.access", "uvicorn.error"):
+        named_logger = logging.getLogger(logger_name)
+        named_logger.addFilter(request_id_filter)
+        for handler in named_logger.handlers:
+            handler.addFilter(request_id_filter)
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+_configure_request_id_logging()
+logger = logging.getLogger("openagents.api")
+
+
+@app.middleware("http")
+async def request_id_middleware(request, call_next):
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    token = request_id_ctx_var.set(request_id)
+    request.state.request_id = request_id
+    try:
+        response = await call_next(request)
+    finally:
+        request_id_ctx_var.reset(token)
+
+    response.headers["X-Request-ID"] = request_id
+    logger.info(
+        "request completed request_id=%s method=%s path=%s status=%s",
+        request_id,
+        request.method,
+        request.url.path,
+        response.status_code,
+    )
+    return response
 
 
 class AgentResponse(BaseModel):
