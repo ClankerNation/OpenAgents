@@ -1,6 +1,6 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from pydantic import BaseModel
-from typing import Optional
+from typing import Any, Optional
 from datetime import datetime
 
 app = FastAPI(
@@ -39,9 +39,61 @@ class LeaderboardEntry(BaseModel):
     success_rate: float
 
 
+class AdminSettingUpdate(BaseModel):
+    value: Any
+
+
+class AdminUserRoleUpdate(BaseModel):
+    role: str
+
+
+class AuditLog(BaseModel):
+    id: int
+    action: str
+    actor: str
+    target: str
+    before: Optional[Any] = None
+    after: Optional[Any] = None
+    timestamp: datetime
+    ip: str
+
+
 # In-memory store (placeholder for DB)
 agents_cache: dict = {}
 tasks_cache: dict = {}
+admin_settings: dict[str, Any] = {}
+admin_users: dict[str, dict[str, Any]] = {}
+audit_logs: list[AuditLog] = []
+_audit_log_seq = 0
+
+
+def _next_audit_id() -> int:
+    global _audit_log_seq
+    _audit_log_seq += 1
+    return _audit_log_seq
+
+
+def _request_ip(request: Request) -> str:
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def _append_audit_log(
+    *, action: str, actor: str, target: str, before: Any, after: Any, ip: str
+) -> AuditLog:
+    log = AuditLog(
+        id=_next_audit_id(),
+        action=action,
+        actor=actor,
+        target=target,
+        before=before,
+        after=after,
+        timestamp=datetime.utcnow(),
+        ip=ip,
+    )
+    audit_logs.append(log)
+    return log
 
 
 @app.get("/agents", response_model=list[AgentResponse])
@@ -110,3 +162,66 @@ async def health():
         "tasks_indexed": len(tasks_cache),
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+
+@app.put("/admin/settings/{setting_key}")
+async def update_admin_setting(
+    setting_key: str,
+    update: AdminSettingUpdate,
+    request: Request,
+    actor: str = Header(..., alias="X-Admin-Actor"),
+):
+    before_value = admin_settings.get(setting_key)
+    admin_settings[setting_key] = update.value
+    _append_audit_log(
+        action="settings.update",
+        actor=actor,
+        target=f"settings:{setting_key}",
+        before=before_value,
+        after=update.value,
+        ip=_request_ip(request),
+    )
+    return {"setting": setting_key, "value": update.value}
+
+
+@app.put("/admin/users/{user_id}/role")
+async def update_admin_user_role(
+    user_id: str,
+    update: AdminUserRoleUpdate,
+    request: Request,
+    actor: str = Header(..., alias="X-Admin-Actor"),
+):
+    previous = admin_users.get(user_id)
+    before_value = dict(previous) if previous else None
+    updated_user = {"user_id": user_id, "role": update.role}
+    admin_users[user_id] = updated_user
+    _append_audit_log(
+        action="user.role.update",
+        actor=actor,
+        target=f"user:{user_id}",
+        before=before_value,
+        after=updated_user,
+        ip=_request_ip(request),
+    )
+    return updated_user
+
+
+@app.get("/admin/audit-log", response_model=list[AuditLog])
+async def list_admin_audit_logs(
+    actor: Optional[str] = Query(None),
+    action: Optional[str] = Query(None),
+    start_date: Optional[datetime] = Query(None),
+    end_date: Optional[datetime] = Query(None),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    results = audit_logs
+    if actor:
+        results = [log for log in results if log.actor == actor]
+    if action:
+        results = [log for log in results if log.action == action]
+    if start_date:
+        results = [log for log in results if log.timestamp >= start_date]
+    if end_date:
+        results = [log for log in results if log.timestamp <= end_date]
+    return results[offset : offset + limit]
