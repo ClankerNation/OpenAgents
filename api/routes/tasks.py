@@ -7,10 +7,11 @@ from datetime import datetime
 
 from ..models.database import get_db, Task
 from ..middleware.auth import get_current_user
+from ..services.webhooks import notify_task_state_change
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
-VALID_STATUSES = {"open", "assigned", "in_progress", "review", "completed", "cancelled"}
+VALID_STATUSES = {"open", "assigned", "in_progress", "review", "completed", "cancelled", "disputed"}
 
 
 class TaskCreate(BaseModel):
@@ -40,6 +41,7 @@ async def create_task(task: TaskCreate, user=Depends(get_current_user), db=Depen
     db.add(new_task)
     db.commit()
     db.refresh(new_task)
+    await notify_task_state_change(db, new_task, "created")
     return {"id": new_task.id, "status": new_task.status}
 
 
@@ -76,6 +78,9 @@ async def update_task_status(
     user=Depends(get_current_user),
     db=Depends(get_db),
 ):
+    if update.status not in VALID_STATUSES:
+        raise HTTPException(status_code=400, detail="Invalid status")
+
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -88,6 +93,8 @@ async def update_task_status(
     task.status = update.status
     task.updated_at = datetime.utcnow()
     db.commit()
+    if update.status in {"assigned", "completed", "disputed"}:
+        await notify_task_state_change(db, task, update.status)
     return {"id": task.id, "status": task.status}
 
 

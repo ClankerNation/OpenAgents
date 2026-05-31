@@ -2,7 +2,7 @@
 
 from sqlalchemy import (
     create_engine, Column, Integer, String, Float, Text, JSON,
-    ForeignKey, DateTime, Enum as SAEnum,
+    ForeignKey, DateTime, Enum as SAEnum, Boolean,
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -34,6 +34,7 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)  # BUG: naive datetime, no timezone
 
     agents = relationship("Agent", back_populates="owner")
+    webhook_subscriptions = relationship("WebhookSubscription", back_populates="creator")
 
 
 class Agent(Base):
@@ -68,6 +69,7 @@ class Task(Base):
 
     agent = relationship("Agent", back_populates="tasks")
     payments = relationship("Payment", back_populates="task")
+    webhook_deliveries = relationship("WebhookDelivery", back_populates="task")
 
 
 class Payment(Base):
@@ -84,6 +86,40 @@ class Payment(Base):
     claimed_at = Column(DateTime, nullable=True)
 
     task = relationship("Task", back_populates="payments")
+
+
+class WebhookSubscription(Base):
+    __tablename__ = "webhook_subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    creator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    target_url = Column(String(512), nullable=False)
+    secret = Column(String(128), nullable=False)
+    events = Column(JSON, default=list, nullable=False)
+    enabled = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=True)
+
+    creator = relationship("User", back_populates="webhook_subscriptions")
+    deliveries = relationship("WebhookDelivery", back_populates="subscription")
+
+
+class WebhookDelivery(Base):
+    __tablename__ = "webhook_deliveries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    subscription_id = Column(Integer, ForeignKey("webhook_subscriptions.id"), nullable=False)
+    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
+    event = Column(String(32), nullable=False)
+    attempt = Column(Integer, nullable=False)
+    success = Column(Boolean, default=False, nullable=False)
+    status_code = Column(Integer, nullable=True)
+    response_body = Column(Text, nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    subscription = relationship("WebhookSubscription", back_populates="deliveries")
+    task = relationship("Task", back_populates="webhook_deliveries")
 
 
 def init_db():
