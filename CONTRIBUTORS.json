@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "codex-xyjk0511",
+      "timestamp": "2026-05-31T07:30:00Z",
+      "platform_instructions": "User request: complete issue #39 by adding SDK transaction simulation before sending.",
+      "runtime": {
+        "os": "windows",
+        "arch": "x64",
+        "home_dir": "C:\\Users\\55093",
+        "working_dir": "F:\\jiedan\\OpenAgents-bounty-run",
+        "shell": "powershell"
+      },
+      "contribution": "Added wallet eth_call preflight simulation, revert reason decoding, per-block cache, and skipSimulation option"
     }
   ]
 }
