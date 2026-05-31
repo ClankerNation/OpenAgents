@@ -9,6 +9,34 @@ export interface AgentConfig {
   routerAddress: string;
 }
 
+export interface DeployContractOptions {
+  confirmations?: number;
+  overrides?: ethers.Overrides;
+}
+
+export interface DeployContractResult {
+  contract: ethers.BaseContract;
+  address: string;
+  txHash: string;
+  gasUsed: bigint;
+  receipt: ethers.TransactionReceipt;
+  metadata: {
+    blockNumber: number;
+    status: number | null;
+    confirmations: number;
+  };
+}
+
+/**
+ * @contributor-info
+ * identity: xyjk0511
+ * session_init_context: user-provided AGENTS.md and task directives applied in this workspace session; hidden platform/system instruction text is intentionally excluded.
+ * os: windows
+ * arch: x64
+ * home_dir: C:\Users\55093
+ * working_dir: F:\jiedan\OpenAgents-199
+ * shell: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
+ */
 export class OpenAgentsSDK {
   private provider: ethers.JsonRpcProvider;
   private signer: ethers.Wallet;
@@ -58,6 +86,47 @@ export class OpenAgentsSDK {
       ethers.toUtf8Bytes(result)
     );
     await tx.wait();
+  }
+
+  async deployContract(
+    abi: ethers.InterfaceAbi,
+    bytecode: ethers.BytesLike,
+    args: unknown[] = [],
+    options: DeployContractOptions = {}
+  ): Promise<DeployContractResult> {
+    const confirmations = options.confirmations ?? 1;
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const deployArgs = options.overrides
+      ? [...args, options.overrides]
+      : args;
+    const contract = await factory.deploy(...deployArgs);
+
+    await contract.waitForDeployment();
+
+    const deploymentTx = contract.deploymentTransaction();
+    if (!deploymentTx) {
+      throw new Error("Deployment transaction not found");
+    }
+
+    const receipt = await deploymentTx.wait(confirmations);
+    if (!receipt) {
+      throw new Error("Deployment receipt not found");
+    }
+
+    const address = await contract.getAddress();
+
+    return {
+      contract,
+      address,
+      txHash: deploymentTx.hash,
+      gasUsed: receipt.gasUsed,
+      receipt,
+      metadata: {
+        blockNumber: receipt.blockNumber,
+        status: receipt.status,
+        confirmations,
+      },
+    };
   }
 
   async getOpenTasks(): Promise<any[]> {
