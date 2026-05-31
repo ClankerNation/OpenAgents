@@ -1,3 +1,13 @@
+# @fix-author
+# name: codex-c53d
+# date: 2026-05-31
+# platform_instructions: redacted (contains confidential system/developer preamble)
+# @runtime
+# os: windows
+# arch: x64
+# working_dir: F:/jiedan/OpenAgents-192-c53d
+# shell: powershell
+
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import Any, Optional
