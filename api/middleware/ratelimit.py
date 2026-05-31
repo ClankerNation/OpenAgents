@@ -1,6 +1,7 @@
 """Rate limiting middleware for the OpenAgents API."""
 
 import time
+import hashlib
 from collections import defaultdict
 from fastapi import Request, HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -12,10 +13,16 @@ class RateLimitConfig:
     def __init__(
         self,
         requests_per_window: int = 100,
+        jwt_requests_per_window: int = 100,
+        api_key_requests_per_window: int = 300,
+        anonymous_requests_per_window: int = 60,
         window_seconds: int = 60,
         burst_limit: int = 20,
     ):
         self.requests_per_window = requests_per_window
+        self.jwt_requests_per_window = jwt_requests_per_window
+        self.api_key_requests_per_window = api_key_requests_per_window
+        self.anonymous_requests_per_window = anonymous_requests_per_window
         self.window_seconds = window_seconds
         self.burst_limit = burst_limit
 
@@ -57,12 +64,28 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         remaining = self.config.requests_per_window - count - 1
         return False, remaining
 
+    def _resolve_bucket(self, request: Request, client_ip: str) -> Tuple[str, int]:
+        api_key = request.headers.get("X-API-Key")
+        if api_key:
+            key_digest = hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:16]
+            return f"api_key:{key_digest}", self.config.api_key_requests_per_window
+
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            return f"jwt:{client_ip}", self.config.jwt_requests_per_window
+
+        return f"anon:{client_ip}", self.config.anonymous_requests_per_window
+
     async def dispatch(self, request: Request, call_next):
         if request.url.path.startswith("/health"):
             return await call_next(request)
 
         client_ip = self._get_client_ip(request)
-        is_limited, value = self._is_rate_limited(client_ip)
+        bucket, bucket_limit = self._resolve_bucket(request, client_ip)
+        original_limit = self.config.requests_per_window
+        self.config.requests_per_window = bucket_limit
+        is_limited, value = self._is_rate_limited(bucket)
+        self.config.requests_per_window = original_limit
 
         if is_limited:
             return JSONResponse(
@@ -76,7 +99,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         response = await call_next(request)
         response.headers["X-RateLimit-Remaining"] = str(value)
-        response.headers["X-RateLimit-Limit"] = str(self.config.requests_per_window)
+        response.headers["X-RateLimit-Limit"] = str(bucket_limit)
         return response
 
 
