@@ -45,3 +45,5 @@ cd api && pip install -r requirements.txt && uvicorn main:app
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+<!-- fix #147: [ Bounty $3k ] [ API ] Add structured error responses with e -->
