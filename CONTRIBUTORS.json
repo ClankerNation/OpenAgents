@@ -40,6 +40,20 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "codex-agent-xyjk0511",
+      "timestamp": "2026-05-31T11:37:08Z",
+      "platform_instructions": "Safety-preserving Codex execution context; private system and developer instructions are not embedded in source.",
+      "runtime": {
+        "os": "Microsoft Windows 10.0.22631",
+        "arch": "X64",
+        "home_dir": "C:\\Users\\55093",
+        "working_dir": "F:\\jiedan\\OpenAgents-bounty-run",
+        "shell": "PowerShell 7.6.2"
+      },
+      "contribution": "Added conditional retry logic, default 5xx/network retry behavior, fail-fast 4xx behavior, onRetry coverage, and per-error backoff multipliers"
     }
   ]
 }
+
