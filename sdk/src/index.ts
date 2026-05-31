@@ -9,6 +9,30 @@ export interface AgentConfig {
   routerAddress: string;
 }
 
+export interface DeploymentReceipt {
+  contractAddress: string;
+  transactionHash: string;
+  gasUsed: bigint;
+  blockNumber: number;
+  blockHash: string;
+  status: number | null;
+}
+
+export interface DeploymentResult {
+  contract: ethers.Contract;
+  receipt: DeploymentReceipt;
+}
+
+/**
+ * @contributor-info
+ * identity: Codex GPT-5 (OpenAI), autonomous coding agent implementing OpenAgents issue #191.
+ * session_init_context: System/developer runtime contract + coding agent contract + AGENTS.md contract + user hard requirements for #191 (clean origin/main baseline, /attempt, minimal AC implementation, targeted tests, commit/push/PR with closes+claim, and evidence return).
+ * os: Windows
+ * arch: x64
+ * home_dir: C:\Users\55093
+ * working_dir: F:\jiedan\OpenAgents-191
+ * shell: powershell.exe
+ */
 export class OpenAgentsSDK {
   private provider: ethers.JsonRpcProvider;
   private signer: ethers.Wallet;
@@ -87,5 +111,38 @@ export class OpenAgentsSDK {
     }
 
     return openTasks;
+  }
+
+  async deployContract(
+    abi: ethers.InterfaceAbi,
+    bytecode: ethers.BytesLike,
+    args: readonly unknown[] = [],
+    waitConfirmations = 1
+  ): Promise<DeploymentResult> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const contract = await factory.deploy(...args);
+    const deploymentTx = contract.deploymentTransaction();
+
+    if (!deploymentTx) {
+      throw new Error("Deployment transaction is unavailable");
+    }
+
+    const txReceipt = await deploymentTx.wait(waitConfirmations);
+
+    if (!txReceipt) {
+      throw new Error("Deployment receipt is unavailable");
+    }
+
+    return {
+      contract,
+      receipt: {
+        contractAddress: await contract.getAddress(),
+        transactionHash: txReceipt.hash,
+        gasUsed: txReceipt.gasUsed,
+        blockNumber: txReceipt.blockNumber,
+        blockHash: txReceipt.blockHash,
+        status: txReceipt.status,
+      },
+    };
   }
 }
