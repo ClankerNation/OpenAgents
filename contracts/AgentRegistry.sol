@@ -32,27 +32,22 @@ contract AgentRegistry is Ownable {
 
     function registerAgent(string calldata name, string calldata endpoint) external payable returns (bytes32) {
         require(msg.value >= registrationFee, "Insufficient fee");
-        require(bytes(name).length > 0 && bytes(name).length <= 64, "Invalid name");
+        return _registerAgent(msg.sender, name, endpoint, 0);
+    }
 
-        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp));
+    function batchRegister(string[] calldata names, string[] calldata endpoints) external payable returns (bytes32[] memory) {
+        uint256 count = names.length;
+        require(count == endpoints.length, "Length mismatch");
+        require(count > 0 && count <= 50, "Invalid batch size");
 
-        require(agents[agentId].registeredAt == 0, "Agent exists");
+        uint256 totalFee = registrationFee * count;
+        require(msg.value >= totalFee, "Insufficient fee");
 
-        agents[agentId] = Agent({
-            owner: msg.sender,
-            name: name,
-            endpoint: endpoint,
-            reputation: 100,
-            tasksCompleted: 0,
-            registeredAt: block.timestamp,
-            active: true
-        });
-
-        ownerAgents[msg.sender].push(agentId);
-        agentIds.push(agentId);
-
-        emit AgentRegistered(agentId, msg.sender, name);
-        return agentId;
+        bytes32[] memory registeredIds = new bytes32[](count);
+        for (uint256 i = 0; i < count; i++) {
+            registeredIds[i] = _registerAgent(msg.sender, names[i], endpoints[i], i);
+        }
+        return registeredIds;
     }
 
     function deactivateAgent(bytes32 agentId) external {
@@ -92,5 +87,29 @@ contract AgentRegistry is Ownable {
     function withdrawFees() external onlyOwner {
         (bool success, ) = owner().call{value: address(this).balance}("");
         require(success, "Withdraw failed");
+    }
+
+    function _registerAgent(address agentOwner, string memory name, string memory endpoint, uint256 salt) internal returns (bytes32) {
+        require(bytes(name).length > 0 && bytes(name).length <= 64, "Invalid name");
+
+        bytes32 agentId = keccak256(
+            abi.encodePacked(agentOwner, name, endpoint, block.timestamp, salt, agentIds.length)
+        );
+        require(agents[agentId].registeredAt == 0, "Agent exists");
+
+        agents[agentId] = Agent({
+            owner: agentOwner,
+            name: name,
+            endpoint: endpoint,
+            reputation: 100,
+            tasksCompleted: 0,
+            registeredAt: block.timestamp,
+            active: true
+        });
+
+        ownerAgents[agentOwner].push(agentId);
+        agentIds.push(agentId);
+        emit AgentRegistered(agentId, agentOwner, name);
+        return agentId;
     }
 }
