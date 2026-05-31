@@ -1,6 +1,7 @@
 /**
  * ABI encoding/decoding utilities for EVM-compatible contract interactions.
  */
+import { AbiCoder } from "ethers";
 
 export type AbiType = "uint256" | "address" | "bytes32" | "string" | "bool";
 
@@ -8,6 +9,8 @@ export interface AbiParam {
   type: AbiType;
   value: string | number | bigint | boolean;
 }
+
+const abiCoder = AbiCoder.defaultAbiCoder();
 
 export function encodeUint256(value: bigint | number): string {
   const n = BigInt(value);
@@ -74,6 +77,105 @@ export function decodeAddress(slot: string): string {
 
 export function decodeBool(slot: string): boolean {
   return BigInt("0x" + slot) !== 0n;
+}
+
+function normalizeHex(data: string): string {
+  return data.startsWith("0x") ? data.slice(2) : data;
+}
+
+function getSlotByOffset(data: string, offset: number): string | null {
+  const cleaned = normalizeHex(data);
+  if (cleaned.length === 0) return null;
+
+  // Backward compatibility: older callers often pass slot index (0, 1, 2...)
+  const byWordIndex = offset * 64;
+  if (byWordIndex + 64 <= cleaned.length) {
+    return cleaned.slice(byWordIndex, byWordIndex + 64);
+  }
+
+  // ABI-native behavior: byte offsets.
+  const byByteOffset = offset * 2;
+  if (byByteOffset + 64 <= cleaned.length) {
+    return cleaned.slice(byByteOffset, byByteOffset + 64);
+  }
+
+  if (cleaned.length <= 64) {
+    return cleaned.padStart(64, "0");
+  }
+
+  return null;
+}
+
+function decodeStaticSlot(type: string, slot: string): unknown {
+  switch (type) {
+    case "uint256":
+      return decodeUint256(slot);
+    case "address":
+      return decodeAddress(slot);
+    case "bool":
+      return decodeBool(slot);
+    case "bytes32":
+      return "0x" + slot.padStart(64, "0");
+    default:
+      return undefined;
+  }
+}
+
+function splitTupleTypes(tupleType: string): string[] {
+  const body = tupleType.slice(1, -1).trim();
+  if (!body) return [];
+
+  const result: string[] = [];
+  let start = 0;
+  let depth = 0;
+
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i];
+    if (ch === "(") depth += 1;
+    if (ch === ")") depth -= 1;
+    if (ch === "," && depth === 0) {
+      result.push(body.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  result.push(body.slice(start).trim());
+  return result;
+}
+
+function normalizeDecodedValue(type: string, value: any): any {
+  const trimmedType = type.trim();
+
+  if (trimmedType === "bytes") {
+    const hex = normalizeHex(value);
+    return Buffer.from(hex, "hex");
+  }
+
+  if (trimmedType.endsWith("[]")) {
+    const itemType = trimmedType.slice(0, -2).trim();
+    return Array.from(value, (item) => normalizeDecodedValue(itemType, item));
+  }
+
+  if (trimmedType.startsWith("(") && trimmedType.endsWith(")")) {
+    const tupleTypes = splitTupleTypes(trimmedType);
+    return tupleTypes.map((itemType, index) =>
+      normalizeDecodedValue(itemType, value[index])
+    );
+  }
+
+  return value;
+}
+
+export function decodeParameter(type: string, data: string, offset = 0): unknown {
+  const slot = getSlotByOffset(data, offset);
+  if (slot) {
+    const staticDecoded = decodeStaticSlot(type, slot);
+    if (staticDecoded !== undefined) return staticDecoded;
+  }
+
+  const cleaned = normalizeHex(data);
+  const encoded = "0x" + cleaned;
+  const decoded = abiCoder.decode([type], encoded)[0];
+  return normalizeDecodedValue(type, decoded);
 }
 
 export function functionSelector(signature: string): string {
