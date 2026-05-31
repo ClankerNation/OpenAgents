@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from ..models.database import get_db, Payment, Task
 from ..middleware.auth import get_current_user
@@ -42,6 +42,7 @@ async def deposit_escrow(
         amount=deposit.amount,
         token_address=deposit.token_address,
         status="escrowed",
+        release_time=datetime.utcnow() + timedelta(days=7),
         created_at=datetime.utcnow(),
     )
     db.add(payment)
@@ -104,3 +105,31 @@ async def payment_history(
         "sent": [{"id": p.id, "amount": p.amount, "status": p.status} for p in sent],
         "received": [{"id": p.id, "amount": p.amount, "status": p.status} for p in received],
     }
+
+
+@router.post("/process-expired")
+async def process_expired_escrows(
+    user=Depends(get_current_user),
+    db=Depends(get_db),
+):
+    now = datetime.utcnow()
+    escrows = db.query(Payment).filter(
+        Payment.status == "escrowed",
+        Payment.release_time.isnot(None),
+        Payment.release_time + timedelta(days=30) < now,
+    ).all()
+
+    refunded = []
+    for escrow in escrows:
+        escrow.status = "refunded"
+        escrow.to_address = escrow.from_address
+        escrow.claimed_at = now
+        refunded.append({
+            "escrow_id": escrow.id,
+            "amount": escrow.amount,
+            "refund_to": escrow.from_address,
+            "refunded_at": now.isoformat(),
+        })
+
+    db.commit()
+    return {"processed": len(refunded), "refunds": refunded}

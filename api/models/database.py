@@ -80,10 +80,19 @@ class Payment(Base):
     amount = Column(Float, nullable=False)
     token_address = Column(String(42), default="0x0000000000000000000000000000000000000000")
     status = Column(String(32), default="pending")
+    release_time = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     claimed_at = Column(DateTime, nullable=True)
 
     task = relationship("Task", back_populates="payments")
+
+    @property
+    def expired_at(self) -> Optional[datetime]:
+        base = self.release_time or self.created_at
+        if base is None:
+            return None
+        from datetime import timedelta
+        return base + timedelta(days=30)
 
 
 def init_db():
