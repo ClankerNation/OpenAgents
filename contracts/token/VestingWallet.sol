@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/**
+ * @contributor Codex Agent xyjk0511
+ * @platform Safety-preserving Codex execution context; private system and developer instructions are not embedded in source.
+ * @runtime Microsoft Windows 10.0.22631, X64, redacted local paths, shell PowerShell 7.6.2
+ * @date 2026-05-31T00:00:00-07:00
+ */
+
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -26,8 +33,6 @@ contract VestingWallet {
     event TokensReleased(address indexed beneficiary, uint256 amount);
     event VestingRevoked(address indexed token, uint256 refund);
 
-    // BUG: No zero-address validation on beneficiary — if beneficiary is set to
-    // address(0), all vested tokens are sent to the zero address (burned) on release.
     constructor(
         address _beneficiary,
         address _token,
@@ -37,6 +42,8 @@ contract VestingWallet {
         uint256 _totalAllocation,
         bool _revocable
     ) {
+        require(_beneficiary != address(0), "Vesting: zero beneficiary");
+        require(_token != address(0), "Vesting: zero token");
         require(_vestingDuration > _cliffDuration, "Vesting: cliff exceeds duration");
         require(_totalAllocation > 0, "Vesting: zero allocation");
 
@@ -53,6 +60,7 @@ contract VestingWallet {
     /// @notice Release vested tokens to the beneficiary.
     function release() external {
         require(msg.sender == beneficiary, "Vesting: not beneficiary");
+        require(!revoked, "Vesting: revoked");
         uint256 vested = vestedAmount();
         uint256 unreleased = vested - released;
         require(unreleased > 0, "Vesting: nothing to release");
@@ -65,17 +73,21 @@ contract VestingWallet {
     /// @notice Calculate the total vested amount at the current timestamp.
     /// @return The total amount of tokens that have vested.
     function vestedAmount() public view returns (uint256) {
-        if (block.timestamp < start + cliffDuration) {
+        if (block.timestamp < start) {
             return 0;
         }
-        if (block.timestamp >= start + vestingDuration) {
+
+        uint256 elapsed = block.timestamp - start;
+        if (elapsed < cliffDuration) {
+            return 0;
+        }
+        if (elapsed >= vestingDuration) {
             return totalAllocation;
         }
-        // BUG: Overflow risk — (totalAllocation * elapsed) can overflow for large
-        // allocations. E.g., if totalAllocation is 1e30 and elapsed is 1e8, the
-        // product exceeds uint256 max. Should use mulDiv or restructure the math.
-        uint256 elapsed = block.timestamp - start;
-        return (totalAllocation * elapsed) / vestingDuration;
+
+        uint256 quotient = totalAllocation / vestingDuration;
+        uint256 remainder = totalAllocation % vestingDuration;
+        return quotient * elapsed + (remainder * elapsed) / vestingDuration;
     }
 
     /// @notice Revoke unvested tokens and return them to the owner.
@@ -85,13 +97,11 @@ contract VestingWallet {
         require(!revoked, "Vesting: already revoked");
 
         revoked = true;
-        uint256 vested = vestedAmount();
-        // BUG: During the cliff period, vestedAmount() returns 0, so refund is
-        // calculated as totalAllocation - 0 = totalAllocation. But tokens may have
-        // already been partially transferred to the contract. The refund should use
-        // the actual token balance, not totalAllocation - vested, as the contract
-        // might not hold the full allocation yet, causing a revert or incorrect refund.
-        uint256 refund = totalAllocation - vested;
+        uint256 refund = totalAllocation - released;
+        uint256 balance = token.balanceOf(address(this));
+        if (refund > balance) {
+            refund = balance;
+        }
 
         token.safeTransfer(owner, refund);
         emit VestingRevoked(address(token), refund);
@@ -99,11 +109,18 @@ contract VestingWallet {
 
     /// @notice Get the releasable (vested but not yet released) token amount.
     function releasable() external view returns (uint256) {
-        return vestedAmount() - released;
+        if (revoked) {
+            return 0;
+        }
+        uint256 vested = vestedAmount();
+        return vested > released ? vested - released : 0;
     }
 
     /// @notice Check if the cliff period has passed.
     function cliffReached() external view returns (bool) {
-        return block.timestamp >= start + cliffDuration;
+        if (block.timestamp < start) {
+            return false;
+        }
+        return block.timestamp - start >= cliffDuration;
     }
 }
