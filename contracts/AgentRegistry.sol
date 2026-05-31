@@ -4,6 +4,8 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract AgentRegistry is Ownable {
+    uint256 public constant MAX_BATCH_SIZE = 50;
+
     struct Agent {
         address owner;
         string name;
@@ -53,6 +55,45 @@ contract AgentRegistry is Ownable {
 
         emit AgentRegistered(agentId, msg.sender, name);
         return agentId;
+    }
+
+    function batchRegister(
+        string[] calldata names,
+        string[] calldata endpoints
+    ) external payable returns (bytes32[] memory registeredIds) {
+        uint256 count = names.length;
+        require(count == endpoints.length, "Length mismatch");
+        require(count > 0 && count <= MAX_BATCH_SIZE, "Invalid batch size");
+
+        uint256 totalFee = registrationFee * count;
+        require(msg.value >= totalFee, "Insufficient fee");
+
+        registeredIds = new bytes32[](count);
+        uint256 timestamp = block.timestamp;
+
+        for (uint256 i = 0; i < count; i++) {
+            string calldata name = names[i];
+            require(bytes(name).length > 0 && bytes(name).length <= 64, "Invalid name");
+
+            bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, timestamp, i));
+            require(agents[agentId].registeredAt == 0, "Agent exists");
+
+            agents[agentId] = Agent({
+                owner: msg.sender,
+                name: name,
+                endpoint: endpoints[i],
+                reputation: 100,
+                tasksCompleted: 0,
+                registeredAt: timestamp,
+                active: true
+            });
+
+            ownerAgents[msg.sender].push(agentId);
+            agentIds.push(agentId);
+            registeredIds[i] = agentId;
+
+            emit AgentRegistered(agentId, msg.sender, name);
+        }
     }
 
     function deactivateAgent(bytes32 agentId) external {
