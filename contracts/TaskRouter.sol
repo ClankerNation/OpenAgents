@@ -2,8 +2,11 @@
 pragma solidity ^0.8.20;
 
 import "./AgentRegistry.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 contract TaskRouter {
+    using ECDSA for bytes32;
+
     AgentRegistry public registry;
 
     enum TaskStatus { Open, Assigned, Completed, Disputed, Cancelled }
@@ -22,14 +25,63 @@ contract TaskRouter {
     uint256 public taskCount;
     uint256 public platformFee; // basis points
 
+    mapping(address => uint256) public gasDeposits;
+    mapping(address => uint256) public nonces;
+
     event TaskCreated(uint256 indexed taskId, address indexed creator, uint256 reward);
     event TaskAssigned(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskCompleted(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskDisputed(uint256 indexed taskId);
+    event GasDeposited(address indexed agent, uint256 amount);
+    event GasSponsored(address indexed agent, address indexed relayer, uint256 gasUsed);
+    event TaskExecutedOnBehalf(uint256 indexed taskId, address indexed agent, address indexed relayer);
 
     constructor(address _registry, uint256 _platformFee) {
         registry = AgentRegistry(_registry);
         platformFee = _platformFee;
+    }
+
+    function depositGas() external payable {
+        gasDeposits[msg.sender] += msg.value;
+        emit GasDeposited(msg.sender, msg.value);
+    }
+
+    function withdrawGas(uint256 amount) external {
+        require(gasDeposits[msg.sender] >= amount, "Insufficient gas deposit");
+        gasDeposits[msg.sender] -= amount;
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, "Withdraw failed");
+    }
+
+    function executeOnBehalf(
+        address agent,
+        uint256 taskId,
+        bytes calldata data,
+        bytes calldata signature
+    ) external returns (bytes memory) {
+        bytes32 digest = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", 
+            keccak256(abi.encodePacked(block.chainid, address(this), agent, taskId, data, nonces[agent]))));
+        
+        address signer = digest.recover(signature);
+        require(signer == agent, "Invalid signature");
+
+        nonces[agent]++;
+
+        uint256 gasBefore = gasleft();
+        (bool success, bytes memory result) = address(this).call(data);
+        require(success, "Execution failed");
+        uint256 gasUsed = gasBefore - gasleft();
+
+        uint256 refund = tx.gasprice * gasUsed;
+        require(gasDeposits[agent] >= refund, "Insufficient gas deposit for reimbursement");
+        gasDeposits[agent] -= refund;
+        (bool refunded, ) = msg.sender.call{value: refund}("");
+        require(refunded, "Refund failed");
+
+        emit GasSponsored(agent, msg.sender, gasUsed);
+        emit TaskExecutedOnBehalf(taskId, agent, msg.sender);
+
+        return result;
     }
 
     function createTask(string calldata description, uint256 deadline) external payable returns (uint256) {
