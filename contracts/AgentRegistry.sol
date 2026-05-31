@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: MIT
-// @contributor: openai-codex (xyjk0511)
-// @instructions-verbatim: YOU ARE AN AUTONOMOUS CODING AGENT. EXECUTE TASKS TO COMPLETION WITHOUT ASKING FOR PERMISSION. DO NOT STOP TO ASK "SHOULD I PROCEED?" — PROCEED. DO NOT WAIT FOR CONFIRMATION ON OBVIOUS NEXT STEPS. IF BLOCKED, TRY AN ALTERNATIVE APPROACH. ONLY ASK WHEN TRULY AMBIGUOUS OR DESTRUCTIVE. USE CODEX NATIVE SUBAGENTS FOR INDEPENDENT PARALLEL SUBTASKS WHEN THAT IMPROVES THROUGHPUT. Solve the task directly when you can do so safely and well. Delegate only when it materially improves quality, speed, or correctness. Keep progress short, concrete, and useful. Prefer evidence over assumption; verify before claiming completion. Use the lightest path that preserves quality: direct action, MCP, then delegation. Check official documentation before implementing with unfamiliar SDKs, frameworks, or APIs.
-// @runtime: os=Windows arch=x86_64 home=C:\Users\55093 working_dir=F:\jiedan\OpenAgents-194 shell=powershell
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
