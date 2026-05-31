@@ -21,6 +21,18 @@ export interface RpcProviderConfig {
   headers?: Record<string, string>;
 }
 
+export class RpcError extends Error {
+  readonly code: number;
+  readonly data?: unknown;
+
+  constructor(code: number, message: string, data?: unknown) {
+    super(`RPC error ${code}: ${message}`);
+    this.name = "RpcError";
+    this.code = code;
+    this.data = data;
+  }
+}
+
 export class RpcProvider {
   private url: string;
   private chainId: number;
@@ -56,7 +68,7 @@ export class RpcProvider {
       // BUG: Error response is not type-checked — json.error could have unexpected
       // shape and json.result is returned even when error is present
       if (json.error) {
-        throw new Error(`RPC error ${json.error.code}: ${json.error.message}`);
+        throw new RpcError(json.error.code, json.error.message, json.error.data);
       }
 
       return json.result;
