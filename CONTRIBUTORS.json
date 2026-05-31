@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "openai-codex-xyjk-20260531-compoundvault-loss",
+      "timestamp": "2026-05-31T05:45:36.7937481-07:00",
+      "platform_instructions": "Private pre-session instructions intentionally not embedded in repository files; non-sensitive execution metadata only.",
+      "runtime": {
+        "os": "windows",
+        "arch": "x64",
+        "home_dir": "C:\\Users\\55093",
+        "working_dir": "F:\\jiedan\\OpenAgents-bounty-run",
+        "shell": "PowerShell"
+      },
+      "contribution": "Handled CompoundVault strategy gains, zero-yield compounds, and strategy losses with totalLoss tracking and StrategyLoss event tests."
     }
   ]
 }

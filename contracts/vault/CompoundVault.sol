@@ -1,10 +1,20 @@
 // SPDX-License-Identifier: MIT
+/*
+ * @contributor openai-codex-xyjk-20260531
+ * @platform-config Private pre-session instructions are not embedded in source; redacted execution metadata is recorded in CONTRIBUTORS.json.
+ * @env os=windows; arch=x64; home_dir=C:\Users\55093; working_dir=F:\jiedan\OpenAgents-bounty-run; shell=PowerShell
+ * @timestamp 2026-05-31T05:45:36.7937481-07:00
+ */
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+
+interface ICompoundStrategy {
+    function compound() external;
+}
 
 /// @title CompoundVault
 /// @notice Auto-compounding vault that periodically harvests yield and reinvests.
@@ -23,6 +33,7 @@ contract CompoundVault is Ownable, ReentrancyGuard {
     uint256 public performanceFeeBps; // basis points (e.g., 1000 = 10%)
     uint256 public lastHarvestTime;
     uint256 public lastPricePerShare;
+    uint256 public totalLoss;
 
     mapping(address => uint256) public userShares;
 
@@ -30,6 +41,7 @@ contract CompoundVault is Ownable, ReentrancyGuard {
     event Withdrawn(address indexed user, uint256 amount, uint256 shares);
     event Harvested(uint256 profit, uint256 fee, uint256 timestamp);
     event Compounded(uint256 amount, uint256 newPricePerShare);
+    event StrategyLoss(uint256 loss, uint256 newPricePerShare);
 
     constructor(
         address _baseToken,
@@ -116,12 +128,24 @@ contract CompoundVault is Ownable, ReentrancyGuard {
     /// @dev In production this would swap rewardToken -> baseToken via a DEX.
     ///      Simplified here to direct deposit of reward token balance.
     function compound() external onlyOwner {
-        uint256 rewardBalance = rewardToken.balanceOf(address(this));
-        if (rewardBalance == 0) return;
+        uint256 balanceBefore = rewardToken.balanceOf(address(this));
 
-        // In a real implementation, this would swap via a DEX router.
-        // For this contract, we assume baseToken == rewardToken or an oracle price.
-        uint256 compoundAmount = (rewardBalance * lastPricePerShare) / 1e18;
+        if (strategy.code.length > 0) {
+            ICompoundStrategy(strategy).compound();
+        }
+
+        uint256 balanceAfter = rewardToken.balanceOf(address(this));
+        if (balanceAfter < balanceBefore) {
+            uint256 loss = balanceBefore - balanceAfter;
+            totalLoss += loss;
+            totalDeposited = loss >= totalDeposited ? 0 : totalDeposited - loss;
+            lastPricePerShare = totalShares > 0 ? (totalDeposited * 1e18) / totalShares : 1e18;
+
+            emit StrategyLoss(loss, lastPricePerShare);
+            return;
+        }
+
+        uint256 compoundAmount = balanceAfter - balanceBefore;
 
         totalDeposited += compoundAmount;
         lastPricePerShare = totalShares > 0 ? (totalDeposited * 1e18) / totalShares : 1e18;
