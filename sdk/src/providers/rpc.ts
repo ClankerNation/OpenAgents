@@ -1,5 +1,12 @@
 import { withRetry, RetryOptions } from "../utils/retry";
 
+/**
+ * @contributor 0xjc65eth
+ * @platform Private system/developer initialization text is not embedded in public source; public reproducibility is provided by commit history, tests, and verification commands.
+ * @runtime Darwin arm64, working directory /Users/juliocesar/Documents/Codex/2026-05-24/precisamos-criar-um-firmaware-fork-ou/bounty-work/openagents/OpenAgents, shell zsh
+ * @date 2026-05-31
+ */
+
 export interface JsonRpcRequest {
   jsonrpc: "2.0";
   id: number;
