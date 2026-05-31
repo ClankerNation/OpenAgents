@@ -9,6 +9,23 @@ export interface AgentConfig {
   routerAddress: string;
 }
 
+export interface DeployContractOptions {
+  confirmationBlocks?: number;
+}
+
+export interface DeploymentReceipt {
+  address: string;
+  txHash: string;
+  gasUsed: bigint;
+  blockNumber: number;
+  status: number;
+}
+
+export interface DeployContractResult {
+  contract: ethers.Contract;
+  receipt: DeploymentReceipt;
+}
+
 export class OpenAgentsSDK {
   private provider: ethers.JsonRpcProvider;
   private signer: ethers.Wallet;
@@ -58,6 +75,38 @@ export class OpenAgentsSDK {
       ethers.toUtf8Bytes(result)
     );
     await tx.wait();
+  }
+
+  async deployContract(
+    abi: ethers.InterfaceAbi,
+    bytecode: ethers.BytesLike,
+    args: readonly unknown[] = [],
+    options: DeployContractOptions = {}
+  ): Promise<DeployContractResult> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const contract = await factory.deploy(...args);
+
+    const deploymentTx = contract.deploymentTransaction();
+    if (!deploymentTx) {
+      throw new Error("Deployment transaction is unavailable");
+    }
+
+    const confirmationBlocks = options.confirmationBlocks ?? 1;
+    const receipt = await deploymentTx.wait(confirmationBlocks);
+    if (!receipt) {
+      throw new Error("Deployment transaction was not mined");
+    }
+
+    return {
+      contract,
+      receipt: {
+        address: await contract.getAddress(),
+        txHash: receipt.hash,
+        gasUsed: receipt.gasUsed,
+        blockNumber: receipt.blockNumber,
+        status: receipt.status ?? 0,
+      },
+    };
   }
 
   async getOpenTasks(): Promise<any[]> {
