@@ -1,3 +1,18 @@
+/**
+ * Contributor: Antigravity
+ * Initialization Text:
+ * You are Antigravity, a powerful agentic AI coding assistant designed by the Google DeepMind team working on Advanced Agentic Coding.
+ * You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.
+ * The USER will send you requests, which you must always prioritize addressing. User requests are enclosed within <USER_REQUEST> tags. Along with each USER request, we will attach additional metadata about their current state, such as what files they have open and where their cursor is.
+ * This information may or may not be relevant to the coding task, it is up for you to decide.
+ * 
+ * Runtime Environment:
+ * OS: windows
+ * Arch: x64
+ * Working Directory: C:\Users\Khalid\Desktop\OpenAgents
+ * Shell: powershell
+ */
+
 import { withRetry, RetryOptions } from "../utils/retry";
 
 export interface JsonRpcRequest {
@@ -82,9 +97,27 @@ export class RpcProvider {
     });
 
     const responses: JsonRpcResponse[] = await res.json();
-    return responses
-      .sort((a, b) => a.id - b.id)
-      .map((r) => r.result);
+    
+    const responseMap = new Map<number, JsonRpcResponse>();
+    for (const response of responses) {
+      if (response && typeof response.id === 'number') {
+        responseMap.set(response.id, response);
+      }
+    }
+
+    return requests.map((req) => {
+      const response = responseMap.get(req.id);
+      
+      if (!response) {
+        return new Error("Request timed out or missing from batch");
+      }
+      
+      if (response.error) {
+        return new Error(`RPC error ${response.error.code}: ${response.error.message}`);
+      }
+      
+      return response.result;
+    });
   }
 
   async getBlockNumber(): Promise<number> {
