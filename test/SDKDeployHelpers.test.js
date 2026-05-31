@@ -85,6 +85,11 @@ describe("OpenAgentsSDK deployContract", () => {
     assert.equal(deployment.address, deployedAddress);
     assert.match(deployment.txHash, /^0x[0-9a-fA-F]{64}$/);
     assert.ok(deployment.gasUsed > 0n);
+    assert.equal(deployment.receipt.contractAddress, deployedAddress);
+    assert.equal(deployment.receipt.transactionHash, deployment.txHash);
+    assert.equal(deployment.receipt.gasUsed, deployment.gasUsed);
+    assert.match(deployment.receipt.blockHash, /^0x[0-9a-fA-F]{64}$/);
+    assert.equal(typeof deployment.receipt.blockNumber, "number");
 
     const deployed = new ethers.Contract(
       deployment.address,
