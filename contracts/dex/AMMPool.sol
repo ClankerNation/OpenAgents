@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "../interfaces/IPermit2.sol";
+
 interface IERC20 {
     function transferFrom(address from, address to, uint256 amount) external returns (bool);
     function transfer(address to, uint256 amount) external returns (bool);
@@ -11,6 +13,8 @@ interface IERC20 {
 /// @notice Constant product (x*y=k) automated market maker pool
 /// @dev Supports adding/removing liquidity and token swaps with a fee
 contract AMMPool {
+    address public constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
+
     IERC20 public tokenA;
     IERC20 public tokenB;
 
@@ -103,6 +107,60 @@ contract AMMPool {
         }
 
         emit Swap(msg.sender, tokenIn, amountIn, amountOut);
+    }
+
+    /// @notice Swap tokens using a Permit2 signature for tokenIn transfer.
+    /// @param owner Address that signed the Permit2 message and pays tokenIn.
+    /// @param tokenIn Input token address (tokenA or tokenB).
+    /// @param amountIn Input amount.
+    /// @param minAmountOut Minimum accepted output amount.
+    /// @param nonce Unordered nonce used in the Permit2 signature.
+    /// @param deadline Expiration timestamp for the Permit2 signature.
+    /// @param signature Permit2 signature payload.
+    function swapWithPermit2(
+        address owner,
+        address tokenIn,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint256 nonce,
+        uint256 deadline,
+        bytes calldata signature
+    ) external returns (uint256 amountOut) {
+        require(owner != address(0), "Invalid owner");
+        require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
+        require(amountIn > 0, "Zero input");
+
+        IPermit2(PERMIT2).permitTransferFrom(
+            IPermit2.PermitTransferFrom({
+                permitted: IPermit2.TokenPermissions({token: tokenIn, amount: amountIn}),
+                nonce: nonce,
+                deadline: deadline
+            }),
+            IPermit2.SignatureTransferDetails({to: address(this), requestedAmount: amountIn}),
+            owner,
+            signature
+        );
+
+        bool isA = tokenIn == address(tokenA);
+        (uint256 resIn, uint256 resOut) = isA ? (reserveA, reserveB) : (reserveB, reserveA);
+
+        uint256 amountInWithFee = amountIn * (10000 - FEE_BPS);
+        amountOut = (amountInWithFee * resOut) / (resIn * 10000 + amountInWithFee);
+
+        require(amountOut >= minAmountOut, "Slippage exceeded");
+
+        IERC20 tOut = isA ? tokenB : tokenA;
+        require(tOut.transfer(owner, amountOut), "Transfer out failed");
+
+        if (isA) {
+            reserveA += amountIn;
+            reserveB -= amountOut;
+        } else {
+            reserveB += amountIn;
+            reserveA -= amountOut;
+        }
+
+        emit Swap(owner, tokenIn, amountIn, amountOut);
     }
 
     function _sqrt(uint256 y) internal pure returns (uint256 z) {

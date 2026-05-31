@@ -4,12 +4,15 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "../interfaces/IPermit2.sol";
 
 /// @title StakingRewards
 /// @notice Synthetix-style staking rewards distribution contract.
 /// @dev Users stake an ERC20 token and earn rewards over a fixed duration.
 contract StakingRewards is ReentrancyGuard {
     using SafeERC20 for IERC20;
+
+    address public constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
 
     IERC20 public immutable stakingToken;
     IERC20 public immutable rewardsToken;
@@ -88,6 +91,38 @@ contract StakingRewards is ReentrancyGuard {
         _balances[msg.sender] += amount;
         stakingToken.safeTransferFrom(msg.sender, address(this), amount);
         emit Staked(msg.sender, amount);
+    }
+
+    /// @notice Stake using a Permit2 signature instead of pre-approving this contract.
+    /// @param staker Address that signed the Permit2 message and provides staking tokens.
+    /// @param amount Amount of tokens to stake.
+    /// @param nonce Unordered nonce used in the Permit2 signature.
+    /// @param deadline Expiration timestamp for the Permit2 signature.
+    /// @param signature Permit2 signature payload.
+    function stakeWithPermit2(
+        address staker,
+        uint256 amount,
+        uint256 nonce,
+        uint256 deadline,
+        bytes calldata signature
+    ) external nonReentrant updateReward(staker) {
+        require(staker != address(0), "Invalid owner");
+        require(amount > 0, "Cannot stake 0");
+
+        IPermit2(PERMIT2).permitTransferFrom(
+            IPermit2.PermitTransferFrom({
+                permitted: IPermit2.TokenPermissions({token: address(stakingToken), amount: amount}),
+                nonce: nonce,
+                deadline: deadline
+            }),
+            IPermit2.SignatureTransferDetails({to: address(this), requestedAmount: amount}),
+            staker,
+            signature
+        );
+
+        _totalSupply += amount;
+        _balances[staker] += amount;
+        emit Staked(staker, amount);
     }
 
     /// @notice Withdraw staked tokens.

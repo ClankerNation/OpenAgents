@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "../interfaces/IPermit2.sol";
+
 interface IPriceFeed {
     function getPrice(address token) external view returns (uint256);
 }
@@ -15,6 +17,8 @@ interface IERC20 {
 /// @notice Collateralized lending pool supporting deposit, borrow, repay, and liquidation
 /// @dev Uses an external price feed oracle for collateral valuation
 contract LendingPool {
+    address public constant PERMIT2 = 0x000000000022D473030F116dDEE9F6B43aC78BA3;
+
     IPriceFeed public oracle;
     IERC20 public collateralToken;
     IERC20 public borrowToken;
@@ -51,6 +55,38 @@ contract LendingPool {
         positions[msg.sender].collateralAmount += amount;
         totalDeposits += amount;
         emit Deposited(msg.sender, amount);
+    }
+
+    /// @notice Deposit collateral using Permit2 signature transfer.
+    /// @param owner Address that signed the Permit2 message and provides collateral.
+    /// @param amount Collateral amount to deposit.
+    /// @param nonce Unordered nonce used in the Permit2 signature.
+    /// @param deadline Expiration timestamp for the Permit2 signature.
+    /// @param signature Permit2 signature payload.
+    function depositWithPermit2(
+        address owner,
+        uint256 amount,
+        uint256 nonce,
+        uint256 deadline,
+        bytes calldata signature
+    ) external {
+        require(owner != address(0), "Invalid owner");
+        require(amount > 0, "Zero amount");
+
+        IPermit2(PERMIT2).permitTransferFrom(
+            IPermit2.PermitTransferFrom({
+                permitted: IPermit2.TokenPermissions({token: address(collateralToken), amount: amount}),
+                nonce: nonce,
+                deadline: deadline
+            }),
+            IPermit2.SignatureTransferDetails({to: address(this), requestedAmount: amount}),
+            owner,
+            signature
+        );
+
+        positions[owner].collateralAmount += amount;
+        totalDeposits += amount;
+        emit Deposited(owner, amount);
     }
 
     function borrow(uint256 amount) external {
