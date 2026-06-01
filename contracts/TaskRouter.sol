@@ -24,8 +24,10 @@ pragma solidity ^0.8.20;
 import "./AgentRegistry.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract TaskRouter {
+contract TaskRouter is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     AgentRegistry public registry;
@@ -53,13 +55,13 @@ contract TaskRouter {
     event TaskCompleted(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskDisputed(uint256 indexed taskId);
 
-    constructor(address _registry, uint256 _platformFee, address _rewardToken) {
+    constructor(address _registry, uint256 _platformFee, address _rewardToken) Ownable(msg.sender) {
         registry = AgentRegistry(_registry);
         platformFee = _platformFee;
         rewardToken = IERC20(_rewardToken);
     }
 
-    function createTask(string calldata description, uint256 deadline, uint256 rewardAmount) external returns (uint256) {
+    function createTask(string calldata description, uint256 deadline, uint256 rewardAmount) external nonReentrant returns (uint256) {
         require(rewardAmount > 0, "Reward required");
         require(deadline > block.timestamp, "Invalid deadline");
 
@@ -96,7 +98,7 @@ contract TaskRouter {
         emit TaskAssigned(taskId, agentId);
     }
 
-    function completeTask(uint256 taskId, bytes calldata result) external {
+    function completeTask(uint256 taskId, bytes calldata result) external nonReentrant {
         Task storage task = tasks[taskId];
         require(task.status == TaskStatus.Assigned, "Not assigned");
 
@@ -115,7 +117,7 @@ contract TaskRouter {
         emit TaskCompleted(taskId, task.assignedAgent);
     }
 
-    function cancelTask(uint256 taskId) external {
+    function cancelTask(uint256 taskId) external nonReentrant {
         Task storage task = tasks[taskId];
         require(task.creator == msg.sender, "Not creator");
         require(task.status == TaskStatus.Open, "Cannot cancel");
@@ -134,7 +136,7 @@ contract TaskRouter {
         emit TaskDisputed(taskId);
     }
 
-    function withdrawFees(address to) external {
+    function withdrawFees(address to) external onlyOwner nonReentrant {
         uint256 amount = accumulatedFees;
         accumulatedFees = 0;
         rewardToken.safeTransfer(to, amount);

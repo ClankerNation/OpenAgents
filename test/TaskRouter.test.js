@@ -54,4 +54,65 @@ describe("TaskRouter", function () {
       taskRouter.connect(agentOwner).completeTask(0, "0x")
     ).to.be.reverted;
   });
+
+  describe("Fee Withdrawal", function () {
+    let taskId;
+    let rewardAmount;
+
+    beforeEach(async function () {
+      await rewardToken.setFailNextTransfer(false);
+      rewardAmount = ethers.parseEther("100");
+      // Approve and create a task
+      await rewardToken.connect(creator).approve(taskRouter.target, rewardAmount);
+      const tx = await taskRouter.connect(creator).createTask("Another task", 1999999999, rewardAmount);
+      const receipt = await tx.wait();
+      
+      const event = receipt.logs.find(log => log.eventName === 'TaskCreated' || (log.fragment && log.fragment.name === 'TaskCreated'));
+      taskId = event.args[0];
+      
+      // Assign the task
+      await taskRouter.connect(agentOwner).assignTask(taskId, agentId);
+    });
+
+    it("should accrue fees correctly upon task completion", async function () {
+      const initialFees = await taskRouter.accumulatedFees();
+      
+      // Ensure the mock token doesn't fail
+      await rewardToken.setFailNextTransfer(false);
+
+      // Complete the task
+      await taskRouter.connect(agentOwner).completeTask(taskId, "0x");
+
+      // Fee is 10% (1000 basis points) of 100 = 10
+      const expectedFee = ethers.parseEther("10");
+      const finalFees = await taskRouter.accumulatedFees();
+
+      expect(finalFees - initialFees).to.equal(expectedFee);
+      taskId++;
+    });
+
+    it("should allow the owner to withdraw fees", async function () {
+      const feesToWithdraw = await taskRouter.accumulatedFees();
+      expect(feesToWithdraw).to.be.gt(0);
+
+      const ownerBalanceBefore = await rewardToken.balanceOf(owner.address);
+
+      // Withdraw fees
+      await taskRouter.connect(owner).withdrawFees(owner.address);
+
+      const ownerBalanceAfter = await rewardToken.balanceOf(owner.address);
+      const remainingFees = await taskRouter.accumulatedFees();
+
+      expect(ownerBalanceAfter - ownerBalanceBefore).to.equal(feesToWithdraw);
+      expect(remainingFees).to.equal(0);
+    });
+
+    it("should revert if a non-owner tries to withdraw fees", async function () {
+      // Creator is not the owner
+      await expect(
+        taskRouter.connect(creator).withdrawFees(creator.address)
+      ).to.be.revertedWithCustomError(taskRouter, "OwnableUnauthorizedAccount")
+       .withArgs(creator.address);
+    });
+  });
 });
