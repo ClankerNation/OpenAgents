@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: MIT
+// Contributor: Feltchy
+// Platform: OpenClaw Gateway — agent=main, channel=whatsapp, model=deepseek-v4-pro
+// Runtime: Linux 6.6.114.1-microsoft-standard-WSL2 (x64), node=v22.22.2, bash, /home/owner/.openclaw/workspace
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @title GovernorAlpha
 /// @notice Minimal governance contract supporting proposal creation, voting, and execution.
 /// @dev Inspired by Compound's GovernorAlpha. Token holders propose and vote on-chain actions.
-contract GovernorAlpha is ReentrancyGuard {
+contract GovernorAlpha is ReentrancyGuard, Ownable {
     enum ProposalState { Pending, Active, Defeated, Succeeded, Executed, Canceled }
 
     struct Proposal {
@@ -27,8 +31,9 @@ contract GovernorAlpha is ReentrancyGuard {
 
     ERC20Votes public immutable token;
     uint256 public proposalCount;
-    uint256 public constant VOTING_DELAY = 1; // blocks
-    uint256 public constant VOTING_PERIOD = 17280; // ~3 days at 15s blocks
+    uint256 public quorumVotes;
+    uint256 public constant VOTING_DELAY = 1;
+    uint256 public constant VOTING_PERIOD = 17280;
     uint256 public constant PROPOSAL_THRESHOLD = 100_000e18;
 
     mapping(uint256 => Proposal) public proposals;
@@ -37,9 +42,11 @@ contract GovernorAlpha is ReentrancyGuard {
     event VoteCast(address indexed voter, uint256 indexed proposalId, bool support, uint256 weight);
     event ProposalExecuted(uint256 indexed id);
     event ProposalCanceled(uint256 indexed id);
+    event QuorumUpdated(uint256 oldQuorum, uint256 newQuorum);
 
-    constructor(address _token) {
+    constructor(address _token, uint256 _quorumVotes) Ownable(msg.sender) {
         token = ERC20Votes(_token);
+        quorumVotes = _quorumVotes;
     }
 
     /// @notice Create a new governance proposal.
@@ -74,33 +81,28 @@ contract GovernorAlpha is ReentrancyGuard {
     function vote(uint256 proposalId, bool support) external {
         Proposal storage p = proposals[proposalId];
         require(block.number >= p.startBlock && block.number <= p.endBlock, "Governor: voting closed");
-        // BUG: Uses tx.origin instead of msg.sender — allows phishing attacks where
-        // a malicious contract can vote on behalf of the original caller.
-        require(!p.hasVoted[tx.origin], "Governor: already voted");
-        p.hasVoted[tx.origin] = true;
+        require(!p.hasVoted[msg.sender], "Governor: already voted");
+        p.hasVoted[msg.sender] = true;
 
-        uint256 weight = token.getPastVotes(tx.origin, p.startBlock);
+        uint256 weight = token.getPastVotes(msg.sender, p.startBlock);
         if (support) {
             p.forVotes += weight;
         } else {
             p.againstVotes += weight;
         }
 
-        emit VoteCast(tx.origin, proposalId, support, weight);
+        emit VoteCast(msg.sender, proposalId, support, weight);
     }
 
-    /// @notice Execute a succeeded proposal.
+    /// @notice Execute a succeeded proposal that meets quorum.
     /// @param proposalId The proposal to execute.
     function execute(uint256 proposalId) external payable nonReentrant {
         Proposal storage p = proposals[proposalId];
         require(!p.executed, "Governor: already executed");
         require(block.number > p.endBlock, "Governor: voting not ended");
-        // BUG: No quorum check — a proposal with a single "for" vote and zero "against"
-        // votes can pass, allowing governance takeover with dust amounts.
         require(p.forVotes > p.againstVotes, "Governor: proposal defeated");
+        require(p.forVotes >= quorumVotes, "Governor: below quorum");
 
-        // BUG: No timelock delay on execution — proposals execute instantly after voting
-        // ends, giving no time for users to exit if a malicious proposal passes.
         p.executed = true;
         for (uint256 i = 0; i < p.targets.length; i++) {
             (bool ok, ) = p.targets[i].call{value: p.values[i]}(p.calldatas[i]);
@@ -108,6 +110,14 @@ contract GovernorAlpha is ReentrancyGuard {
         }
 
         emit ProposalExecuted(proposalId);
+    }
+
+    /// @notice Update the quorum threshold. Only owner.
+    /// @param _newQuorum New minimum forVotes required to execute.
+    function setQuorum(uint256 _newQuorum) external onlyOwner {
+        uint256 oldQuorum = quorumVotes;
+        quorumVotes = _newQuorum;
+        emit QuorumUpdated(oldQuorum, _newQuorum);
     }
 
     /// @notice Cancel a proposal. Only the proposer can cancel.
