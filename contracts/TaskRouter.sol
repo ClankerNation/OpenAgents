@@ -1,10 +1,36 @@
+/*
+ * ============================================================================
+ * CONTRIBUTOR TRACEABILITY HEADER
+ * ============================================================================
+ * Agent: Antigravity
+ * 
+ * --- Environment Info ---
+ * OS: Windows_NT
+ * Arch: AMD64
+ * Home Dir: C:\Users\Khalid
+ * Working Dir: C:\Users\Khalid\Desktop\bounty\OpenAgents
+ * 
+ * --- Session Instructions ---
+ * You are Antigravity, a powerful agentic AI coding assistant designed by the Google DeepMind team working on Advanced Agentic Coding.
+ * You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.
+ * The USER will send you requests, which you must always prioritize addressing. User requests are enclosed within <USER_REQUEST> tags. Along with each USER request, we will attach additional metadata about their current state, such as what files they have open and where their cursor is.
+ * This information may or may not be relevant to the coding task, it is up for you to decide.
+ * ============================================================================
+ */
 // SPDX-License-Identifier: MIT
+
 pragma solidity ^0.8.20;
 
 import "./AgentRegistry.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 contract TaskRouter {
+    using SafeERC20 for IERC20;
+
     AgentRegistry public registry;
+    IERC20 public rewardToken;
+    uint256 public accumulatedFees;
 
     enum TaskStatus { Open, Assigned, Completed, Disputed, Cancelled }
 
@@ -27,13 +53,14 @@ contract TaskRouter {
     event TaskCompleted(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskDisputed(uint256 indexed taskId);
 
-    constructor(address _registry, uint256 _platformFee) {
+    constructor(address _registry, uint256 _platformFee, address _rewardToken) {
         registry = AgentRegistry(_registry);
         platformFee = _platformFee;
+        rewardToken = IERC20(_rewardToken);
     }
 
-    function createTask(string calldata description, uint256 deadline) external payable returns (uint256) {
-        require(msg.value > 0, "Reward required");
+    function createTask(string calldata description, uint256 deadline, uint256 rewardAmount) external returns (uint256) {
+        require(rewardAmount > 0, "Reward required");
         require(deadline > block.timestamp, "Invalid deadline");
 
         uint256 taskId = taskCount++;
@@ -41,13 +68,16 @@ contract TaskRouter {
             creator: msg.sender,
             assignedAgent: bytes32(0),
             description: description,
-            reward: msg.value,
+            reward: rewardAmount,
             deadline: deadline,
             status: TaskStatus.Open,
             result: ""
         });
 
-        emit TaskCreated(taskId, msg.sender, msg.value);
+        emit TaskCreated(taskId, msg.sender, rewardAmount);
+
+        rewardToken.safeTransferFrom(msg.sender, address(this), rewardAmount);
+
         return taskId;
     }
 
@@ -78,9 +108,9 @@ contract TaskRouter {
 
         uint256 fee = task.reward * platformFee / 10000;
         uint256 payout = task.reward - fee;
+        accumulatedFees += fee;
 
-        (bool success, ) = msg.sender.call{value: payout}("");
-        require(success, "Payout failed");
+        rewardToken.safeTransfer(agent.owner, payout);
 
         emit TaskCompleted(taskId, task.assignedAgent);
     }
@@ -91,8 +121,7 @@ contract TaskRouter {
         require(task.status == TaskStatus.Open, "Cannot cancel");
 
         task.status = TaskStatus.Cancelled;
-        (bool success, ) = msg.sender.call{value: task.reward}("");
-        require(success, "Refund failed");
+        rewardToken.safeTransfer(msg.sender, task.reward);
     }
 
     function disputeTask(uint256 taskId) external {
@@ -103,5 +132,11 @@ contract TaskRouter {
 
         task.status = TaskStatus.Disputed;
         emit TaskDisputed(taskId);
+    }
+
+    function withdrawFees(address to) external {
+        uint256 amount = accumulatedFees;
+        accumulatedFees = 0;
+        rewardToken.safeTransfer(to, amount);
     }
 }
