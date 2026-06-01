@@ -1,3 +1,6 @@
+// Contributor: Feltchy
+// Platform: OpenClaw Gateway — agent=main, channel=whatsapp, model=deepseek-v4-pro
+// Runtime: Linux 6.6.114.1-microsoft-standard-WSL2 (x64), node=v22.22.2, bash, /home/owner/.openclaw/workspace
 import { ethers } from "ethers";
 
 export interface AgentConfig {
@@ -58,6 +61,21 @@ export class OpenAgentsSDK {
       ethers.toUtf8Bytes(result)
     );
     await tx.wait();
+  }
+
+  async deployContract(
+    abi: any[],
+    bytecode: string,
+    args: any[] = [],
+    options: { gasLimit?: number; value?: bigint } = {}
+  ): Promise<ethers.Contract> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const contract = await factory.deploy(...args, {
+      gasLimit: options.gasLimit,
+      value: options.value,
+    });
+    await contract.waitForDeployment();
+    return contract;
   }
 
   async getOpenTasks(): Promise<any[]> {
