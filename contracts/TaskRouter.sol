@@ -1,9 +1,16 @@
 // SPDX-License-Identifier: MIT
+// Contributor: Feltchy
+// Platform: OpenClaw Gateway — agent=main, channel=whatsapp, model=deepseek-v4-pro
+// Runtime: Linux 6.6.114.1-microsoft-standard-WSL2 (x64), node=v22.22.2, bash, /home/owner/.openclaw/workspace
 pragma solidity ^0.8.20;
 
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./AgentRegistry.sol";
 
 contract TaskRouter {
+    using SafeERC20 for IERC20;
+
     AgentRegistry public registry;
 
     enum TaskStatus { Open, Assigned, Completed, Disputed, Cancelled }
