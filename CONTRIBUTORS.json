@@ -40,6 +40,22 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "feltchy",
+      "timestamp": "2026-06-01T18:30:00Z",
+      "platform_instructions": "OpenClaw Gateway \u2014 agent=main, channel=whatsapp, model=deepseek-v4-pro. Runtime: Linux 6.6.114.1-microsoft-standard-WSL2 (x64), node=v22.22.2, bash, workspace=/home/owner/.openclaw/workspace",
+      "runtime": {
+        "os": "Linux 6.6.114.1-microsoft-standard-WSL2",
+        "arch": "x64",
+        "shell": "bash",
+        "node": "v22.22.2",
+        "working_directory": "/home/owner/.openclaw/workspace"
+      },
+      "changes": [
+        "sdk/src/providers/rpc.ts \u2014 Fix JSON-RPC batch response id-matching, timeout, partial failures"
+      ],
+      "verification": "npx hardhat test test/SDKRpcBatch.test.js"
     }
   ]
 }
