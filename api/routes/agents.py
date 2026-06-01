@@ -53,33 +53,53 @@ async def validate_agent_endpoint(url: str):
     if not hostname:
         raise HTTPException(status_code=400, detail="URL missing hostname")
         
-    # Check for SSRF (Private IPs)
+    # Check for SSRF (Private IPs) and prevent DNS rebinding
     try:
-        ip = socket.gethostbyname(hostname)
-        parsed_ip = ipaddress.ip_address(ip)
-        if parsed_ip.is_private or parsed_ip.is_loopback or parsed_ip.is_link_local:
-            raise HTTPException(status_code=400, detail="Private or internal IPs are not allowed")
+        addr_info = socket.getaddrinfo(hostname, None)
     except socket.gaierror:
         raise HTTPException(status_code=400, detail="Could not resolve hostname")
+
+    safe_ip = None
+    for res in addr_info:
+        ip = res[4][0]
+        parsed_ip = ipaddress.ip_address(ip)
+        if (parsed_ip.is_private or parsed_ip.is_loopback or parsed_ip.is_link_local 
+            or parsed_ip.is_multicast or parsed_ip.is_reserved or parsed_ip.is_unspecified
+            or str(parsed_ip) == "169.254.169.254"):
+            raise HTTPException(status_code=400, detail="Private or internal IPs are not allowed")
+        safe_ip = ip
+        break
         
-    # Check reachability
+    if not safe_ip:
+        raise HTTPException(status_code=400, detail="Could not resolve safe IP")
+        
+    port_str = f":{parsed.port}" if parsed.port else ""
+    query_str = f"?{parsed.query}" if parsed.query else ""
+    safe_url = f"{parsed.scheme}://{safe_ip}{port_str}{parsed.path}{query_str}"
+        
+    # Check reachability directly to IP to prevent TOCTOU
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.head(url, timeout=5.0)
+            headers = {"Host": hostname}
+            response = await client.head(safe_url, headers=headers, timeout=5.0)
+            if response.status_code == 405:
+                response = await client.get(safe_url, headers=headers, timeout=5.0)
             response.raise_for_status()
-    except Exception:
+    except httpx.HTTPError:
         raise HTTPException(status_code=400, detail="Endpoint URL is not reachable")
 
 class AgentUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     config: Optional[dict] = None
+    endpoint: Optional[str] = None
 
 
 @router.post("/")
 async def create_agent(agent: AgentCreate, user=Depends(get_current_user), db=Depends(get_db)):
     if agent.endpoint:
         await validate_agent_endpoint(agent.endpoint)
+        # Endpoints are stored in config to avoid complex database schema migrations
         if not agent.config:
             agent.config = {}
         agent.config["endpoint"] = agent.endpoint
@@ -129,7 +149,20 @@ async def update_agent(
         raise HTTPException(status_code=404, detail="Agent not found")
     if agent.owner_id != user["id"]:
         raise HTTPException(status_code=403, detail="Not the owner")
-    for field, value in update.dict(exclude_unset=True).items():
+        
+    update_data = update.dict(exclude_unset=True)
+    
+    if "endpoint" in update_data:
+        endpoint_url = update_data.pop("endpoint")
+        if endpoint_url:
+            await validate_agent_endpoint(endpoint_url)
+            # Endpoints are stored in config to avoid complex database schema migrations
+            new_config = dict(agent.config) if agent.config else {}
+            new_config["endpoint"] = endpoint_url
+            # Assigning a new dict triggers SQLAlchemy JSON mutation tracking
+            agent.config = new_config
+            
+    for field, value in update_data.items():
         setattr(agent, field, value)
     db.commit()
     return agent

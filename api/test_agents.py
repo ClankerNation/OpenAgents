@@ -49,15 +49,15 @@ app.dependency_overrides[get_db] = override_get_db
 client = TestClient(app)
 
 def test_create_agent_valid_url():
-    with patch("socket.gethostbyname", return_value="8.8.8.8"):
+    # Mock getaddrinfo to return a safe IP
+    with patch("api.routes.agents.socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))]):
         with patch("httpx.AsyncClient.head", new_callable=MagicMock) as mock_head:
             mock_resp = MagicMock()
+            mock_resp.status_code = 200
             mock_resp.raise_for_status = MagicMock()
             
-            # Since httpx.AsyncClient.head is async, we mock it returning a coroutine that returns mock_resp
             async def async_mock_head(*args, **kwargs):
                 return mock_resp
-            
             mock_head.side_effect = async_mock_head
             
             response = client.post("/agents/", json={
@@ -76,7 +76,7 @@ def test_create_agent_invalid_format():
     assert "URL must be http or https" in response.json()["detail"]
 
 def test_create_agent_private_ip():
-    with patch("socket.gethostbyname", return_value="192.168.1.1"):
+    with patch("api.routes.agents.socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.1", 80))]):
         response = client.post("/agents/", json={
             "name": "Test Agent",
             "endpoint": "http://internal-server.local"
@@ -86,11 +86,10 @@ def test_create_agent_private_ip():
 
 def test_create_agent_timeout():
     import httpx
-    with patch("socket.gethostbyname", return_value="8.8.8.8"):
+    with patch("api.routes.agents.socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))]):
         with patch("httpx.AsyncClient.head", new_callable=MagicMock) as mock_head:
             async def async_mock_head(*args, **kwargs):
                 raise httpx.TimeoutException("Timeout")
-            
             mock_head.side_effect = async_mock_head
             
             response = client.post("/agents/", json={
@@ -99,3 +98,38 @@ def test_create_agent_timeout():
             })
             assert response.status_code == 400
             assert "Endpoint URL is not reachable" in response.json()["detail"]
+
+def test_create_agent_gaierror():
+    with patch("api.routes.agents.socket.getaddrinfo", side_effect=socket.gaierror("No address")):
+        response = client.post("/agents/", json={
+            "name": "Test Agent",
+            "endpoint": "http://unknown-host.test"
+        })
+        assert response.status_code == 400
+        assert "Could not resolve hostname" in response.json()["detail"]
+
+def test_create_agent_405_fallback():
+    with patch("api.routes.agents.socket.getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 80))]):
+        with patch("httpx.AsyncClient.head", new_callable=MagicMock) as mock_head:
+            with patch("httpx.AsyncClient.get", new_callable=MagicMock) as mock_get:
+                mock_head_resp = MagicMock()
+                mock_head_resp.status_code = 405
+                
+                mock_get_resp = MagicMock()
+                mock_get_resp.status_code = 200
+                mock_get_resp.raise_for_status = MagicMock()
+                
+                async def async_mock_head(*args, **kwargs):
+                    return mock_head_resp
+                mock_head.side_effect = async_mock_head
+                
+                async def async_mock_get(*args, **kwargs):
+                    return mock_get_resp
+                mock_get.side_effect = async_mock_get
+                
+                response = client.post("/agents/", json={
+                    "name": "Test Agent",
+                    "endpoint": "http://example.com/api"
+                })
+                assert response.status_code == 200
+                assert mock_get.called
