@@ -76,4 +76,49 @@ describe("TaskRouter V2 Upgrade", function () {
 
         expect(await badToken.balanceOf(agentOwner.address)).to.equal(payout);
     });
+
+    it("should accrue fees and allow admin withdrawal without draining escrow (ERC20)", async function () {
+        const reward = ethers.parseEther("100");
+        const deadline = Math.floor(Date.now() / 1000) + 3600;
+        
+        // Setup two tasks
+        await badToken.connect(creator).approve(await router.getAddress(), reward * 2n);
+        await router.connect(creator).createTaskERC20("Task 1", deadline, reward, await badToken.getAddress());
+        await router.connect(creator).createTaskERC20("Task 2", deadline, reward, await badToken.getAddress());
+
+        const taskId1 = 0;
+        const taskId2 = 1;
+
+        // Assign both
+        await router.connect(agentOwner).assignTask(taskId1, agentId);
+        await router.connect(agentOwner).assignTask(taskId2, agentId);
+
+        // Set to normal behavior
+        await badToken.setForceFail(false);
+
+        // Complete only the first task
+        await router.connect(agentOwner).completeTask(taskId1, "0x1234");
+        
+        const expectedFee = (reward * BigInt(platformFee)) / 10000n;
+        
+        // Accrued fees should equal the fee from one task
+        expect(await router.accruedFees(await badToken.getAddress())).to.equal(expectedFee);
+
+        // Withdrawing more than accrued should revert
+        await expect(
+            router.connect(owner).withdrawFees(await badToken.getAddress(), expectedFee + 1n)
+        ).to.be.revertedWith("Exceeds accrued fees");
+
+        // Withdraw exact accrued amount
+        const balanceBefore = await badToken.balanceOf(owner.address);
+        await router.connect(owner).withdrawFees(await badToken.getAddress(), expectedFee);
+        const balanceAfter = await badToken.balanceOf(owner.address);
+
+        expect(balanceAfter - balanceBefore).to.equal(expectedFee);
+        expect(await router.accruedFees(await badToken.getAddress())).to.equal(0n);
+        
+        // Second task is still open/assigned, its escrow is safe (router still has reward balance)
+        const routerBalance = await badToken.balanceOf(await router.getAddress());
+        expect(routerBalance).to.equal(reward);
+    });
 });

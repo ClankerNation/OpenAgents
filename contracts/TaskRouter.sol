@@ -41,6 +41,7 @@ contract TaskRouter is Ownable {
     }
 
     mapping(uint256 => Task) public tasks;
+    mapping(address => uint256) public accruedFees; // token => amount (address(0) for ETH)
     uint256 public taskCount;
     uint256 public platformFee; // basis points
 
@@ -127,6 +128,8 @@ contract TaskRouter is Ownable {
         uint256 fee = task.reward * platformFee / 10000;
         uint256 payout = task.reward - fee;
 
+        accruedFees[task.paymentToken] += fee;
+
         if (task.paymentType == PaymentType.ETH) {
             (bool success, ) = msg.sender.call{value: payout}("");
             require(success, "Payout failed");
@@ -163,6 +166,9 @@ contract TaskRouter is Ownable {
     }
 
     function withdrawFees(address token, uint256 amount) external onlyOwner {
+        require(amount <= accruedFees[token], "Exceeds accrued fees");
+        accruedFees[token] -= amount;
+        
         if (token == address(0)) {
             (bool success, ) = msg.sender.call{value: amount}("");
             require(success, "Fee withdraw failed");
