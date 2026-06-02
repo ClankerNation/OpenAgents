@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: MIT
+// Contributor: Feltchy
+// Platform: OpenClaw Gateway — agent=main, channel=whatsapp, model=deepseek-v4-pro
+// Runtime: Linux 6.6.114.1-microsoft-standard-WSL2 (x64), node=v22.22.2, bash, /home/owner/.openclaw/workspace
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -25,6 +28,7 @@ contract VestingWallet {
 
     event TokensReleased(address indexed beneficiary, uint256 amount);
     event VestingRevoked(address indexed token, uint256 refund);
+    event TokenMigrated(address indexed oldToken, address indexed newToken, uint256 remaining);
 
     // BUG: No zero-address validation on beneficiary — if beneficiary is set to
     // address(0), all vested tokens are sent to the zero address (burned) on release.
@@ -48,6 +52,29 @@ contract VestingWallet {
         vestingDuration = _vestingDuration;
         totalAllocation = _totalAllocation;
         revocable = _revocable;
+    }
+
+    /// @notice Migrate vesting to a new token address (e.g., v1→v2 upgrade).
+    /// @dev Only owner. Verifies new token has sufficient balance to cover
+    ///      the remaining vesting allocation.
+    /// @param newToken Address of the replacement token.
+    function migrateToken(address newToken) external {
+        require(msg.sender == owner, "Vesting: not owner");
+        require(newToken != address(0), "Vesting: zero address");
+        require(newToken != address(token), "Vesting: same token");
+        require(!revoked, "Vesting: already revoked");
+
+        uint256 remaining = totalAllocation - released;
+        require(remaining > 0, "Vesting: fully vested");
+
+        IERC20 newTokenContract = IERC20(newToken);
+        uint256 balance = newTokenContract.balanceOf(address(this));
+        require(balance >= remaining, "Vesting: insufficient new token balance");
+
+        address oldToken = address(token);
+        token = newTokenContract;
+
+        emit TokenMigrated(oldToken, newToken, remaining);
     }
 
     /// @notice Release vested tokens to the beneficiary.
