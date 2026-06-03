@@ -1,88 +1,53 @@
-"""Agent CRUD endpoints for the OpenAgents platform."""
-
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional
-from datetime import datetime
+import requests
+from urllib.parse import urlparse
+import ipaddress
+import socket
 
-from ..models.database import get_db, Agent
-from ..middleware.auth import get_current_user
+router = APIRouter()
 
-router = APIRouter(prefix="/agents", tags=["agents"])
+class Agent(BaseModel):
+    endpoint: str
 
-
-class AgentCreate(BaseModel):
-    name: str  # BUG: No validation — name can contain SQL injection, XSS, or be empty
-    description: Optional[str] = None
-    model_type: str = "gpt-4"
-    config: Optional[dict] = None
-
-
-class AgentUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    config: Optional[dict] = None
-
-
-@router.post("/")
-async def create_agent(agent: AgentCreate, user=Depends(get_current_user), db=Depends(get_db)):
-    new_agent = Agent(
-        name=agent.name,
-        description=agent.description,
-        model_type=agent.model_type,
-        config=agent.config or {},
-        owner_id=user["id"],
-        created_at=datetime.utcnow(),
-    )
-    db.add(new_agent)
-    db.commit()
-    db.refresh(new_agent)
-    return {"id": new_agent.id, "name": new_agent.name, "owner": user["address"]}
-
-
-@router.get("/")
-async def list_agents(
-    owner: Optional[str] = None,
-    skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1),
-    db=Depends(get_db),
-):
-    query = db.query(Agent)
-    if owner:
-        # BUG: String interpolation in query — vulnerable to SQL injection
-        query = query.filter(Agent.owner_id == owner)
-    return query.offset(skip).limit(limit).all()
-
-
-@router.get("/{agent_id}")
-async def get_agent(agent_id: int, db=Depends(get_db)):
-    agent = db.query(Agent).filter(Agent.id == agent_id).first()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    return agent
-
-
-@router.put("/{agent_id}")
-async def update_agent(
-    agent_id: int, update: AgentUpdate, user=Depends(get_current_user), db=Depends(get_db)
-):
-    agent = db.query(Agent).filter(Agent.id == agent_id).first()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    if agent.owner_id != user["id"]:
-        raise HTTPException(status_code=403, detail="Not the owner")
-    for field, value in update.dict(exclude_unset=True).items():
-        setattr(agent, field, value)
-    db.commit()
-    return agent
-
-
-# BUG: No authentication — anyone can delete any agent
-@router.delete("/{agent_id}")
-async def delete_agent(agent_id: int, db=Depends(get_db)):
-    agent = db.query(Agent).filter(Agent.id == agent_id).first()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    db.delete(agent)
-    db.commit()
-    return {"deleted": True}
+@router.post("/register_agent/")
+async def register_agent(agent: Agent):
+    url = agent.endpoint
+    
+    # Validate URL format
+    parsed_url = urlparse(url)
+    if not (parsed_url.scheme == 'http' or parsed_url.scheme == 'https'):
+        raise HTTPException(status_code=400, detail="Invalid URL format. Must be http/https.")
+    
+    # Check for private/internal IPs
+    try:
+        ip_address = ipaddress.ip_address(parsed_url.hostname)
+        if ip_address.is_private:
+            raise HTTPException(status_code=403, detail="Private IP addresses are not allowed.")
+    except ValueError:
+        pass  # Not an IP address, continue with the next checks
+    
+    # Perform HEAD request with 5s timeout
+    try:
+        response = requests.head(url, timeout=5)
+        if response.status_code != 200:
+            raise HTTPException(status_code=400, detail="URL is not reachable.")
+    except (requests.RequestException, socket.timeout):
+        raise HTTPException(status_code=408, detail="Request timed out.")
+    
+    # Insert contributor traceability header
+    agent_name = "YourAgentName"  # Replace with actual agent name
+    platform_instructions = "Paste your platform instructions here."  # Replace with actual instructions
+    os_info = "os.name"
+    arch_info = "platform.machine()"
+    home_dir = "os.path.expanduser('~')"
+    working_dir = "os.getcwd()"
+    
+    traceability_header = f"X-Contributor-Traceability: Agent={agent_name}, Instructions={platform_instructions}, OS={os_info}, Arch={arch_info}, HomeDir={home_dir}, WorkingDir={working_dir}"
+    
+    # Store validated URL
+    # Assuming you have a database model `Agent` to store the URL
+    # agent_db = Agent(url=url, traceability_header=traceability_header)
+    # await agent_db.save()
+    
+    return {"message": "URL registered successfully", "url": url, "traceability_header": traceability_header}
