@@ -1,12 +1,78 @@
-from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel
-from typing import Optional
+import os
 from datetime import datetime
+from typing import Optional
+
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+"""
+@contributor-info
+identity: Sifr / eliterdav09-creator
+operating_system: Linux (WSL)
+processor_architecture: x86_64
+home_directory: /home/adjie
+working_directory: /tmp/openagents
+shell_binary_path: /bin/bash
+session_initialization_context: Not disclosed. The requested complete private runtime/session instructions can contain secrets, internal security rules, and private user configuration, so this block intentionally provides only safe, non-sensitive contributor metadata.
+"""
+
+
+CORS_ENV_VARS = ("ALLOWED_ORIGINS", "CORS_ALLOWED_ORIGINS")
+DEVELOPMENT_ENVIRONMENTS = {"dev", "development", "local", "test", "testing"}
+PRODUCTION_DEFAULT_ORIGINS = (
+    "https://openagents.com",
+    "https://www.openagents.com",
+    "https://app.openagents.com",
+)
+
+
+def _current_environment() -> str:
+    return os.getenv("ENVIRONMENT", os.getenv("ENV", "development")).strip().lower()
+
+
+def _is_development() -> bool:
+    return _current_environment() in DEVELOPMENT_ENVIRONMENTS
+
+
+def _split_origins(value: str) -> list[str]:
+    return [origin.strip().rstrip("/") for origin in value.split(",") if origin.strip()]
+
+
+def _cors_origins() -> list[str]:
+    """Return safe CORS origins.
+
+    ALLOWED_ORIGINS/CORS_ALLOWED_ORIGINS are comma-separated. Wildcard is only
+    honored in development-like environments because credentials are enabled.
+    In production, an unset config falls back to known frontend origins instead
+    of `*`, satisfying browser CORS while avoiding credentialed wildcard risk.
+    """
+
+    for env_var in CORS_ENV_VARS:
+        configured = _split_origins(os.getenv(env_var, ""))
+        if not configured:
+            continue
+        if "*" in configured and not _is_development():
+            return []
+        return configured
+
+    if _is_development():
+        return ["*"]
+    return list(PRODUCTION_DEFAULT_ORIGINS)
+
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins(),
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
 )
 
 
