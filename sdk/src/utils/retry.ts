@@ -6,13 +6,15 @@ export interface RetryOptions {
   maxRetries?: number;
   baseDelayMs?: number;
   maxDelayMs?: number;
+  retryableStatusCodes?: number[];
   onRetry?: (attempt: number, error: Error) => void;
 }
 
 const DEFAULT_OPTIONS: Required<Omit<RetryOptions, "onRetry">> = {
-  maxRetries: Infinity, // BUG: No cap — will retry forever by default
+  maxRetries: 3,
   baseDelayMs: 500,
   maxDelayMs: 30_000,
+  retryableStatusCodes: [429, 503],
 };
 
 export class RetryHandler {
@@ -31,28 +33,32 @@ export class RetryHandler {
     for (let attempt = 0; attempt <= this.options.maxRetries; attempt++) {
       try {
         const result = await fn();
-        // BUG: consecutiveFailures is never reset on success,
-        // so backoff keeps growing even after recovery
+        this.consecutiveFailures = 0;
         return result;
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
         this.consecutiveFailures++;
 
-        if (attempt < this.options.maxRetries) {
-          this.onRetry?.(attempt + 1, lastError);
-          const delay = this.calculateBackoff(attempt);
-          await this.sleep(delay);
+        if (!this.isRetryable(lastError) || attempt >= this.options.maxRetries) {
+          break;
         }
+
+        this.onRetry?.(attempt + 1, lastError);
+        const delay = this.calculateBackoff(attempt);
+        await this.sleep(delay);
       }
     }
 
     throw lastError ?? new Error("Retry failed with unknown error");
   }
 
+  private isRetryable(error: Error): boolean {
+    return isRetryable(error, this.options.retryableStatusCodes);
+  }
+
   private calculateBackoff(attempt: number): number {
-    // BUG: 2 ** attempt overflows to Infinity for large attempt values (attempt > ~1023),
-    // and Math.min with Infinity returns maxDelayMs, but intermediate calc can cause issues
-    const exponentialDelay = this.options.baseDelayMs * Math.pow(2, attempt);
+    const safeAttempt = Math.min(attempt, 30);
+    const exponentialDelay = this.options.baseDelayMs * 2 ** safeAttempt;
     const jitter = Math.random() * this.options.baseDelayMs;
     return Math.min(exponentialDelay + jitter, this.options.maxDelayMs);
   }
@@ -78,10 +84,14 @@ export async function withRetry<T>(
   return handler.execute(fn);
 }
 
-export function isRetryable(error: Error): boolean {
-  const retryableCodes = ["ETIMEDOUT", "ECONNRESET", "ECONNREFUSED", "429"];
+export function isRetryable(
+  error: Error,
+  retryableStatusCodes: number[] = DEFAULT_OPTIONS.retryableStatusCodes
+): boolean {
+  const retryableCodes = ["ETIMEDOUT", "ECONNRESET", "ECONNREFUSED", "AbortError"];
   const message = error.message.toLowerCase();
-  return retryableCodes.some(
-    (code) => message.includes(code.toLowerCase())
+  return (
+    retryableCodes.some((code) => message.includes(code.toLowerCase())) ||
+    retryableStatusCodes.some((status) => message.includes(String(status)))
   );
 }
