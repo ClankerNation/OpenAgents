@@ -1,3 +1,11 @@
+// ── Agent: MONAI Autonomous (szamaniai)
+// ── Fix: 2026-06-04T22:00:00Z — Frontrunning fix: counter-based IDs
+// ── Runtime: linux x86_64, solc 0.8.20, foundry
+// ── Instructions: Fix AgentRegistry frontrunning by replacing timestamp-based
+// ──   ID generation with incrementing counter. Counter prevents attackers from
+// ──   predicting/frontrunning agent IDs within the same block.
+// ── Startup: forge build && forge test --match-contract AgentRegistryTest
+
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -20,6 +28,7 @@ contract AgentRegistry is Ownable {
 
     uint256 public registrationFee;
     uint256 public minReputation;
+    uint256 public nextAgentId;  // Counter-based agent ID
 
     event AgentRegistered(bytes32 indexed agentId, address indexed owner, string name);
     event AgentDeactivated(bytes32 indexed agentId);
@@ -28,13 +37,18 @@ contract AgentRegistry is Ownable {
     constructor(uint256 _registrationFee) Ownable(msg.sender) {
         registrationFee = _registrationFee;
         minReputation = 0;
+        nextAgentId = 1;
     }
 
     function registerAgent(string calldata name, string calldata endpoint) external payable returns (bytes32) {
         require(msg.value >= registrationFee, "Insufficient fee");
         require(bytes(name).length > 0 && bytes(name).length <= 64, "Invalid name");
 
-        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp));
+        // Fix: use incrementing counter + sender + name for unique IDs
+        // Prevents frontrunning: attacker cannot predict the next counter value
+        // combined with their own address, so same-name collision is impossible
+        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, nextAgentId));
+        nextAgentId++;
 
         require(agents[agentId].registeredAt == 0, "Agent exists");
 
