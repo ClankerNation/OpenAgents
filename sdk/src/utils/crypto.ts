@@ -68,6 +68,75 @@ export function hashPersonalMessage(message: string): string {
   return keccak256(prefix + message);
 }
 
+
+export function hashMessage(message: string): string {
+  // Prepend Ethereum signed message prefix per EIP-191
+  const prefix = `\x19Ethereum Signed Message:\n${message.length}`;
+  return keccak256(prefix + message);
+}
+
+export function hashTypedData(domain: Record<string, any>, types: Record<string, any>, message: Record<string, any>): string {
+  // EIP-712 structured data hashing
+  // Encode type hash
+  const primaryType = Object.keys(types).find(t => t !== 'EIP712Domain') || '';
+  const typeHash = keccak256(encodeType(primaryType, types));
+  
+  // Encode data
+  const encodedData = encodeData(primaryType, message, types);
+  
+  // Return final hash
+  return keccak256(Buffer.concat([
+    Buffer.from('1901', 'hex'),
+    typeHash,
+    encodedData
+  ]));
+}
+
+function encodeType(primaryType: string, types: Record<string, any>): string {
+  const deps = getTypeDependencies(primaryType, types);
+  deps.delete(primaryType);
+  const sorted = [primaryType, ...Array.from(deps).sort()];
+  return sorted.map(t => `${t}(${types[t].map((f: any) => `${f.type} ${f.name}`).join(',')})`).join('');
+}
+
+function getTypeDependencies(primaryType: string, types: Record<string, any>, results = new Set<string>()): Set<string> {
+  if (results.has(primaryType) || !types[primaryType]) return results;
+  results.add(primaryType);
+  for (const field of types[primaryType]) {
+    const baseType = field.type.replace(/\[\]$/, '');
+    if (types[baseType]) getTypeDependencies(baseType, types, results);
+  }
+  return results;
+}
+
+function encodeData(primaryType: string, data: Record<string, any>, types: Record<string, any>): Buffer {
+  const encoded: Buffer[] = [];
+  for (const field of types[primaryType]) {
+    const value = data[field.name];
+    if (field.type === 'string') {
+      encoded.push(Buffer.from(keccak256(value), 'hex'));
+    } else if (field.type === 'bytes') {
+      encoded.push(Buffer.from(keccak256(value), 'hex'));
+    } else if (field.type === 'bool') {
+      encoded.push(Buffer.from(keccak256(value ? 'true' : 'false'), 'hex'));
+    } else if (field.type === 'address') {
+      encoded.push(Buffer.from(value.toLowerCase().padStart(64, '0'), 'hex'));
+    } else if (field.type.endsWith('[]')) {
+      const baseType = field.type.slice(0, -2);
+      const items = value.map((v: any) => encodeData(baseType, { [baseType]: v }, { [baseType]: types[baseType] }));
+      encoded.push(Buffer.from(keccak256(Buffer.concat(items)), 'hex'));
+    } else if (types[field.type]) {
+      encoded.push(Buffer.from(encodeData(field.type, value, types), 'hex'));
+    } else {
+      // uint/int types - encode as 32-byte hex
+      const num = BigInt(value);
+      const hex = (num < 0 ? (BigInt(1) << BigInt(256)) + num : num).toString(16).padStart(64, '0');
+      encoded.push(Buffer.from(hex, 'hex'));
+    }
+  }
+  return Buffer.concat(encoded);
+}
+
 export function recoverPublicKey(
   message: string,
   signature: string,
