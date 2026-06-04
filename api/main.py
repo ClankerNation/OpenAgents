@@ -1,4 +1,7 @@
+import os
+
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -7,6 +10,37 @@ app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
+)
+
+
+def _is_development() -> bool:
+    return os.getenv("ENV", os.getenv("ENVIRONMENT", "development")).lower() in {
+        "dev",
+        "development",
+        "local",
+        "test",
+    }
+
+
+def _cors_origins() -> list[str]:
+    configured = [
+        origin.strip()
+        for origin in os.getenv("ALLOWED_ORIGINS", "").split(",")
+        if origin.strip()
+    ]
+    if configured:
+        if "*" in configured and not _is_development():
+            return []
+        return configured
+    return ["*"] if _is_development() else []
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins(),
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
 )
 
 
