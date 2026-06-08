@@ -9,6 +9,12 @@ export interface AgentConfig {
   routerAddress: string;
 }
 
+export interface DeployedContract {
+  address: string;
+  deployTransaction: ethers.TransactionResponse;
+  contract: ethers.Contract;
+}
+
 export class OpenAgentsSDK {
   private provider: ethers.JsonRpcProvider;
   private signer: ethers.Wallet;
@@ -18,6 +24,24 @@ export class OpenAgentsSDK {
     this.config = config;
     this.provider = new ethers.JsonRpcProvider(config.rpcUrl);
     this.signer = new ethers.Wallet(config.privateKey, this.provider);
+  }
+
+  async deployContract(
+    abi: any[],
+    bytecode: string,
+    args: any[] = [],
+  ): Promise<DeployedContract> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const contract = await factory.deploy(...args);
+    await contract.waitForDeployment();
+    const address = await contract.getAddress();
+    const deployTx = contract.deploymentTransaction();
+    if (!deployTx) throw new Error("Deployment transaction not found");
+    return {
+      address,
+      deployTransaction: deployTx,
+      contract: contract as unknown as ethers.Contract,
+    };
   }
 
   async registerAgent(): Promise<string> {
