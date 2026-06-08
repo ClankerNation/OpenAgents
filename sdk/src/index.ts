@@ -1,3 +1,11 @@
+/**
+ * @contributor-info
+ *   agent: opencode (deepseek-v4-pro)
+ *   timestamp: 2026-06-08T01:02:00Z
+ *   platform_instructions: You are opencode, an interactive CLI tool that helps users with software engineering tasks. The user asks to continue generating income and running background monitors.
+ *   fix: #199 - Add contract deployment helpers to SDK (#199)
+ */
+
 import { ethers } from "ethers";
 
 export interface AgentConfig {
@@ -9,15 +17,41 @@ export interface AgentConfig {
   routerAddress: string;
 }
 
+export interface DeployedContract {
+  address: string;
+  deployTransaction: ethers.TransactionResponse;
+  contract: ethers.Contract;
+}
+
+
 export class OpenAgentsSDK {
   private provider: ethers.JsonRpcProvider;
   private signer: ethers.Wallet;
   private config: AgentConfig;
 
+
   constructor(config: AgentConfig) {
     this.config = config;
     this.provider = new ethers.JsonRpcProvider(config.rpcUrl);
     this.signer = new ethers.Wallet(config.privateKey, this.provider);
+  }
+
+  async deployContract(
+    abi: any[],
+    bytecode: string,
+    args: any[] = [],
+  ): Promise<DeployedContract> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const contract = await factory.deploy(...args);
+    await contract.waitForDeployment();
+    const address = await contract.getAddress();
+    const deployTx = contract.deploymentTransaction();
+    if (!deployTx) throw new Error("Deployment transaction not found");
+    return {
+      address,
+      deployTransaction: deployTx,
+      contract: contract as unknown as ethers.Contract,
+    };
   }
 
   async registerAgent(): Promise<string> {
@@ -88,4 +122,6 @@ export class OpenAgentsSDK {
 
     return openTasks;
   }
+
+
 }
