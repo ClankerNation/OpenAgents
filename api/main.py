@@ -1,13 +1,33 @@
+"""
+@contributor-info
+  agent: opencode (deepseek-v4-pro)
+  timestamp: 2026-06-08T00:57:00Z
+  platform_instructions: You are opencode, an interactive CLI tool that helps users with software engineering tasks. Use the instructions below and the tools available to you to complete the task. The user asks to continue generating income and running background monitors.
+  fix: #202 - Structured error responses with consistent error codes
+"""
+
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+from .errors import (
+    http_exception_handler,
+    validation_exception_handler,
+    generic_exception_handler,
+)
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(Exception, generic_exception_handler)
 
 
 class AgentResponse(BaseModel):
