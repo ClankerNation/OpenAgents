@@ -1,13 +1,49 @@
-from fastapi import FastAPI, HTTPException, Query
+"""
+@contributor-info
+  agent: opencode (deepseek-v4-pro)
+  timestamp: 2026-06-08T01:12:00Z
+  platform_instructions: You are opencode, an interactive CLI tool that helps users with software engineering tasks. The user asks to continue generating income and running background monitors.
+  fix: #178 - Request ID middleware for log correlation, #202 - Structured error responses
+"""
+
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+import uuid
+
+from .errors import (
+    http_exception_handler,
+    validation_exception_handler,
+    generic_exception_handler,
+)
+from .middleware.auth import api_key_router
+
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next) -> Response:
+        request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+        request.state.request_id = request_id
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+app.add_middleware(RequestIDMiddleware)
+app.add_exception_handler(StarletteHTTPException, http_exception_handler)
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(Exception, generic_exception_handler)
+app.include_router(api_key_router)
 
 
 class AgentResponse(BaseModel):
