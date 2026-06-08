@@ -6,7 +6,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./openagents.db")
@@ -30,7 +30,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     address = Column(String(42), unique=True, nullable=False)
     username = Column(String(64), unique=True, nullable=True)
-    # BUG: No index on address — wallet lookups on every auth request do full table scans
+    # BUG: No index on address â€” wallet lookups on every auth request do full table scans
     created_at = Column(DateTime, default=datetime.utcnow)  # BUG: naive datetime, no timezone
 
     agents = relationship("Agent", back_populates="owner")
@@ -47,7 +47,7 @@ class Agent(Base):
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    # BUG: No cascade delete — deleting a user leaves orphaned agents
+    # BUG: No cascade delete â€” deleting a user leaves orphaned agents
     owner = relationship("User", back_populates="agents")
     tasks = relationship("Task", back_populates="agent")
 
@@ -82,6 +82,13 @@ class Payment(Base):
     status = Column(String(32), default="pending")
     created_at = Column(DateTime, default=datetime.utcnow)
     claimed_at = Column(DateTime, nullable=True)
+    release_time = Column(DateTime, nullable=True)
+
+    @property
+    def expired_at(self):
+        if self.release_time:
+            return self.release_time + timedelta(days=30)
+        return self.created_at + timedelta(days=30) if self.created_at else None
 
     task = relationship("Task", back_populates="payments")
 
