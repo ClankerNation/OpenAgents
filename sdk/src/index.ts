@@ -9,10 +9,13 @@ export interface AgentConfig {
   routerAddress: string;
 }
 
+export type EventCallback = (log: ethers.Log, decoded: ethers.LogDescription | null) => void;
+
 export class OpenAgentsSDK {
   private provider: ethers.JsonRpcProvider;
   private signer: ethers.Wallet;
   private config: AgentConfig;
+  private eventSubscriptions: Map<string, { contract: ethers.Contract; listener: any }> = new Map();
 
   constructor(config: AgentConfig) {
     this.config = config;
@@ -87,5 +90,47 @@ export class OpenAgentsSDK {
     }
 
     return openTasks;
+  }
+
+  subscribeToEvents(
+    contract: ethers.Contract,
+    eventName: string,
+    callback: EventCallback,
+    filter?: Record<string, any>,
+  ): string {
+    const subId = `${contract.target}-${eventName}-${Date.now()}`;
+    const listener = (...args: any[]) => {
+      const log = args[args.length - 1] as ethers.Log;
+      let decoded: ethers.LogDescription | null = null;
+      try {
+        const iface = contract.interface;
+        decoded = iface.parseLog({ topics: [...log.topics], data: log.data });
+      } catch {
+        decoded = null;
+      }
+      callback(log, decoded);
+    };
+    const filterArgs: any[] = [];
+    if (filter) {
+      filterArgs.push(filter);
+    }
+    contract.on(eventName, ...filterArgs, listener);
+    this.eventSubscriptions.set(subId, { contract, listener });
+    return subId;
+  }
+
+  unsubscribeFromEvents(subId: string): boolean {
+    const sub = this.eventSubscriptions.get(subId);
+    if (!sub) return false;
+    sub.contract.off(sub.listener);
+    this.eventSubscriptions.delete(subId);
+    return true;
+  }
+
+  unsubscribeAll(): void {
+    for (const [, sub] of this.eventSubscriptions) {
+      sub.contract.off(sub.listener);
+    }
+    this.eventSubscriptions.clear();
   }
 }
