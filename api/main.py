@@ -110,3 +110,15 @@ async def health():
         "tasks_indexed": len(tasks_cache),
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+
+# Register routers
+from .routes.auth import router as auth_router
+from .routes.agents import router as agents_router
+from .routes.tasks import router as tasks_router
+from .routes.payments import router as payments_router
+
+app.include_router(auth_router)
+app.include_router(agents_router)
+app.include_router(tasks_router)
+app.include_router(payments_router)

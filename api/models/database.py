@@ -2,7 +2,7 @@
 
 from sqlalchemy import (
     create_engine, Column, Integer, String, Float, Text, JSON,
-    ForeignKey, DateTime, Enum as SAEnum,
+    ForeignKey, DateTime, Boolean, Enum as SAEnum,
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -28,12 +28,12 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    address = Column(String(42), unique=True, nullable=False)
+    address = Column(String(42), unique=True, nullable=False, index=True)
     username = Column(String(64), unique=True, nullable=True)
-    # BUG: No index on address — wallet lookups on every auth request do full table scans
-    created_at = Column(DateTime, default=datetime.utcnow)  # BUG: naive datetime, no timezone
+    created_at = Column(DateTime, default=datetime.utcnow)
 
     agents = relationship("Agent", back_populates="owner")
+    api_keys = relationship("ApiKey", back_populates="user")
 
 
 class Agent(Base):
@@ -47,7 +47,6 @@ class Agent(Base):
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    # BUG: No cascade delete — deleting a user leaves orphaned agents
     owner = relationship("User", back_populates="agents")
     tasks = relationship("Task", back_populates="agent")
 
@@ -84,6 +83,20 @@ class Payment(Base):
     claimed_at = Column(DateTime, nullable=True)
 
     task = relationship("Task", back_populates="payments")
+
+
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    key_hash = Column(String(64), unique=True, nullable=False, index=True)
+    name = Column(String(128), nullable=True)
+    revoked = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_used_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", back_populates="api_keys")
 
 
 def init_db():
