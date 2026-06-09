@@ -1,5 +1,8 @@
 """Agent CRUD endpoints for the OpenAgents platform."""
 
+import re
+from urllib.parse import urlparse
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
@@ -24,8 +27,52 @@ class AgentUpdate(BaseModel):
     config: Optional[dict] = None
 
 
+def _validate_endpoint_url(url: str) -> None:
+    """Validate agent endpoint URL with SSRF protection."""
+    if not url or not isinstance(url, str):
+        return  # endpoint is optional
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(
+            status_code=400,
+            detail="Only HTTP and HTTPS URLs are allowed for agent endpoint"
+        )
+    if not parsed.netloc:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid endpoint URL: missing hostname"
+        )
+
+    hostname = parsed.netloc.split(":")[0].lower()
+
+    # Block private/reserved IPs and localhost to prevent SSRF
+    private_patterns = (
+        r"^127\.",         # loopback
+        r"^10\.",          # RFC 1918
+        r"^172\.1[6-9]\.",
+        r"^172\.2[0-9]\.",
+        r"^172\.3[0-1]\.",
+        r"^192\.168\.",    # RFC 1918
+        r"^0\.0\.0\.0",
+        r"^169\.254\.",    # link-local
+        r"^localhost$",
+        r"^\[::1\]$",      # IPv6 loopback
+    )
+    if re.match("|".join(private_patterns), hostname):
+        raise HTTPException(
+            status_code=400,
+            detail="Endpoint URL resolves to a private address (SSRF protection)"
+        )
+
+
 @router.post("/")
 async def create_agent(agent: AgentCreate, user=Depends(get_current_user), db=Depends(get_db)):
+    # Validate endpoint URL in config before storing
+    endpoint = (agent.config or {}).get("endpoint")
+    if endpoint:
+        _validate_endpoint_url(endpoint)
+
     new_agent = Agent(
         name=agent.name,
         description=agent.description,
