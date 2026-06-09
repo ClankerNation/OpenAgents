@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: MIT
+// @generated-by szamaniai-agent
+// @timestamp 2026-06-09T06:15:00Z
+// @startup-instructions See CONTRIBUTORS.json entry "szamaniai-agent"
+// @runtime os=linux arch=x64 home=/root wd=/tmp/OpenAgents shell=bash
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -8,6 +12,8 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 /// @notice Linear vesting wallet with a cliff period for token distribution.
 /// @dev Tokens vest linearly from cliff end to vesting end. The contract owner
 ///      can revoke unvested tokens and redirect them to a specified address.
+///      Also supports migrating the vesting token to a new contract address
+///      (e.g., after a token upgrade v1 -> v2).
 contract VestingWallet {
     using SafeERC20 for IERC20;
 
@@ -25,6 +31,7 @@ contract VestingWallet {
 
     event TokensReleased(address indexed beneficiary, uint256 amount);
     event VestingRevoked(address indexed token, uint256 refund);
+    event TokenMigrated(address indexed oldToken, address indexed newToken, uint256 remainingVesting);
 
     // BUG: No zero-address validation on beneficiary — if beneficiary is set to
     // address(0), all vested tokens are sent to the zero address (burned) on release.
@@ -100,6 +107,32 @@ contract VestingWallet {
     /// @notice Get the releasable (vested but not yet released) token amount.
     function releasable() external view returns (uint256) {
         return vestedAmount() - released;
+    }
+
+    /// @notice Migrate the vesting token to a new contract address.
+    /// @dev Allows the owner to update the token address when the underlying
+    ///      token contract is upgraded (e.g., v1 -> v2). Validates that the
+    ///      new token contract holds at least the remaining vesting amount
+    ///      before switching. After migration, all subsequent claims use the
+    ///      new token.
+    /// @param newToken The address of the new token contract
+    function migrateToken(address newToken) external {
+        require(msg.sender == owner, "Vesting: not owner");
+        require(newToken != address(0), "Vesting: zero address");
+        require(newToken != address(token), "Vesting: same token");
+        require(!revoked, "Vesting: already revoked");
+
+        address oldToken = address(token);
+        uint256 remaining = totalAllocation - released;
+
+        // Verify the contract holds at least the remaining vesting amount
+        // in the new token. This prevents migration if insufficient new
+        // tokens have been deposited.
+        uint256 newBalance = IERC20(newToken).balanceOf(address(this));
+        require(newBalance >= remaining, "Vesting: insufficient new tokens");
+
+        token = IERC20(newToken);
+        emit TokenMigrated(oldToken, newToken, remaining);
     }
 
     /// @notice Check if the cliff period has passed.
