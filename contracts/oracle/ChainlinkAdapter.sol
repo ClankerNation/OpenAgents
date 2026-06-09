@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.28;
 
 interface AggregatorV3Interface {
     function latestRoundData() external view returns (
@@ -73,12 +73,14 @@ contract ChainlinkAdapter {
         require(config.active, "Feed not active");
 
         (
-            uint80 /* roundId */,
+            uint80 _roundId,
             int256 answer,
-            /* uint256 startedAt */,
-            uint256 /* updatedAt */,
-            uint80 /* answeredInRound */
+            uint256 _startedAt,
+            uint256 _updatedAt,
+            uint80 _answeredInRound
         ) = config.feed.latestRoundData();
+        // Silence unused variable warnings
+        _roundId; _startedAt; _updatedAt; _answeredInRound;
 
         // No validation of roundId, staleness, or negative price
         uint256 price = uint256(answer);
