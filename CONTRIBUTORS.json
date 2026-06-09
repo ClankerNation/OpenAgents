@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "szamaniai-agent",
+      "timestamp": "2026-06-09T06:15:00Z",
+      "platform_instructions": "You are a general-purpose agent. Given the user message, use tools to complete the task. Context: QWEN.md (AIGON orchestration, brain-first routing), AGENTS.md (orchestrator agent), output-language.md (English output). Memory at /root/.qwen/projects/-opt-projects-kraina/memory.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/root",
+        "working_dir": "/tmp/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "Added migrateToken to VestingWallet for token change support (#170)"
     }
   ]
 }
