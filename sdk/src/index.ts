@@ -9,6 +9,28 @@ export interface AgentConfig {
   routerAddress: string;
 }
 
+export interface DeploymentReceipt {
+  contractAddress: string;
+  transactionHash: string;
+  gasUsed: bigint;
+  blockNumber: number;
+}
+
+export interface DeployOptions {
+  confirmations?: number;
+  overrides?: ethers.Overrides;
+}
+
+/**
+ * @contributor-info
+ * Identity: Gemini CLI Master Bounty Orchestrator
+ * Session Initialization Context: You are Gemini CLI, an interactive CLI agent specializing in software engineering tasks. Operating in Auto-Edit mode. Primary goal is to help users safely and effectively. Today's date is Tuesday, 9 June 2026. OS: win32. Workspace: C:\Users\aalok, C:\Users\aalok\conductor.
+ * Operating System: win32
+ * Processor Architecture: AMD64
+ * Home Directory: C:\Users\aalok
+ * Working Directory: C:\Users\aalok\OpenAgents
+ * Shell Binary Path: powershell.exe
+ */
 export class OpenAgentsSDK {
   private provider: ethers.JsonRpcProvider;
   private signer: ethers.Wallet;
@@ -87,5 +109,36 @@ export class OpenAgentsSDK {
     }
 
     return openTasks;
+  }
+
+  async deployContract(
+    abi: any[],
+    bytecode: string,
+    args: any[] = [],
+    options: DeployOptions = {}
+  ): Promise<{ contract: ethers.BaseContract; receipt: DeploymentReceipt }> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const contract = await factory.deploy(...args, options.overrides || {});
+    await contract.waitForDeployment();
+
+    const deploymentTransaction = contract.deploymentTransaction();
+    if (!deploymentTransaction) {
+      throw new Error("Deployment transaction not found");
+    }
+
+    const confirmations = options.confirmations ?? 1;
+    const receipt = await deploymentTransaction.wait(confirmations);
+    if (!receipt) {
+      throw new Error("Deployment receipt not found");
+    }
+
+    const deploymentReceipt: DeploymentReceipt = {
+      contractAddress: await contract.getAddress(),
+      transactionHash: receipt.hash,
+      gasUsed: receipt.gasUsed,
+      blockNumber: receipt.blockNumber,
+    };
+
+    return { contract, receipt: deploymentReceipt };
   }
 }

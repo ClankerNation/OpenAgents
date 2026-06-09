@@ -69,11 +69,10 @@ async def claim_payment(
     if task.status != "completed":
         raise HTTPException(status_code=400, detail="Task not yet completed")
 
-    # BUG: Race condition — two concurrent claims can both read status="escrowed"
-    # before either updates it, causing a double-payout
+    # FIX: Use row-level locking (SELECT FOR UPDATE) to prevent race condition
     payments = db.query(Payment).filter(
         Payment.task_id == claim.task_id, Payment.status == "escrowed"
-    ).all()
+    ).with_for_update().all()
 
     if not payments:
         raise HTTPException(status_code=400, detail="No escrowed funds available")

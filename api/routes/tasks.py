@@ -80,10 +80,13 @@ async def update_task_status(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # BUG: Creator can mark their own task as completed — should require
-    # a third party or the assignee to confirm completion
-    if task.creator_id != user["id"]:
-        raise HTTPException(status_code=403, detail="Only the creator can update status")
+    # FIX: Only the assigned agent can submit for review, 
+    # and only a non-creator validator should mark as completed.
+    if update.status == "completed" and task.creator_id == user["id"]:
+        raise HTTPException(status_code=403, detail="Creators cannot self-verify tasks for payout")
+
+    if task.creator_id != user["id"] and task.agent_id != user["id"]:
+        raise HTTPException(status_code=403, detail="Unauthorized status update")
 
     task.status = update.status
     task.updated_at = datetime.utcnow()
