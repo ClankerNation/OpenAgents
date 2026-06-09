@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/**
+ * @title PaymentEscrow
+ * @notice Escrow contract supporting fee-on-transfer tokens via balance-before/after pattern
+ *
+ * Contributor: Szamani AI
+ * Platform: GitHub Autonomous Agents
+ * Runtime: linux x86_64, /tmp/OpenAgents, bash
+ */
+
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
@@ -9,7 +18,7 @@ contract PaymentEscrow is Ownable {
         address payer;
         address payee;
         address token;
-        uint256 amount;
+        uint256 amount;          /// @dev actual received amount (post-fee for fee-on-transfer tokens)
         uint256 releaseTime;
         bool released;
         bool refunded;
@@ -24,6 +33,10 @@ contract PaymentEscrow is Ownable {
 
     constructor() Ownable(msg.sender) {}
 
+    /**
+     * @notice Create an escrow with actual received amount tracking
+     * @dev Uses balance-before/after to handle fee-on-transfer tokens correctly
+     */
     function createEscrow(
         address payee,
         address token,
@@ -33,20 +46,27 @@ contract PaymentEscrow is Ownable {
         require(payee != address(0), "Invalid payee");
         require(amount > 0, "Amount must be > 0");
 
+        // Balance-before/after pattern for fee-on-transfer token support
+        uint256 balanceBefore = IERC20(token).balanceOf(address(this));
         IERC20(token).transferFrom(msg.sender, address(this), amount);
+        uint256 balanceAfter = IERC20(token).balanceOf(address(this));
+
+        require(balanceAfter > balanceBefore, "No tokens received");
+        uint256 actualReceived = balanceAfter - balanceBefore;
+        require(actualReceived > 0, "Actual received amount must be > 0");
 
         uint256 escrowId = escrowCount++;
         escrows[escrowId] = Escrow({
             payer: msg.sender,
             payee: payee,
             token: token,
-            amount: amount,
+            amount: actualReceived,
             releaseTime: block.timestamp + lockDuration,
             released: false,
             refunded: false
         });
 
-        emit EscrowCreated(escrowId, msg.sender, amount);
+        emit EscrowCreated(escrowId, msg.sender, actualReceived);
         return escrowId;
     }
 
