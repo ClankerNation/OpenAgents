@@ -86,5 +86,13 @@ class Payment(Base):
     task = relationship("Task", back_populates="payments")
 
 
+class RevokedToken(Base):
+    __tablename__ = "revoked_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    token_jti = Column(String(64), unique=True, index=True, nullable=False)
+    revoked_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
