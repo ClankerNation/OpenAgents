@@ -1,12 +1,20 @@
+# @generated-by: BountyHunter AI — Coder Agent
+# @timestamp: 2026-06-10T01:40:00Z
+# @runtime: Linux x86_64, /home/agent-the-coder/OpenAgents, /tmp/OpenAgents
 """Task management endpoints for bounty assignments."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
 from ..models.database import get_db, Task
 from ..middleware.auth import get_current_user
+from ..middleware.errors import (
+    raise_not_found_error,
+    raise_forbidden_error,
+    raise_validation_error,
+)
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -48,8 +56,7 @@ async def list_tasks(
     status: Optional[str] = None,
     creator: Optional[str] = None,
     skip: int = Query(0, ge=0),
-    # BUG: No upper bound on limit — clients can request millions of rows,
-    # causing DB strain and potential OOM
+    # BUG: No upper bound on limit
     limit: int = Query(50, ge=1),
     db=Depends(get_db),
 ):
@@ -65,7 +72,7 @@ async def list_tasks(
 async def get_task(task_id: int, db=Depends(get_db)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise_not_found_error(resource="Task", details={"task_id": task_id})
     return task
 
 
@@ -78,12 +85,11 @@ async def update_task_status(
 ):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise_not_found_error(resource="Task", details={"task_id": task_id})
 
-    # BUG: Creator can mark their own task as completed — should require
-    # a third party or the assignee to confirm completion
+    # BUG: Creator can mark their own task as completed
     if task.creator_id != user["id"]:
-        raise HTTPException(status_code=403, detail="Only the creator can update status")
+        raise_forbidden_error(message="Only the creator can update status")
 
     task.status = update.status
     task.updated_at = datetime.utcnow()
@@ -95,11 +101,14 @@ async def update_task_status(
 async def cancel_task(task_id: int, user=Depends(get_current_user), db=Depends(get_db)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise_not_found_error(resource="Task", details={"task_id": task_id})
     if task.creator_id != user["id"]:
-        raise HTTPException(status_code=403, detail="Only the creator can cancel")
+        raise_forbidden_error(message="Only the creator can cancel")
     if task.status not in ("open", "assigned"):
-        raise HTTPException(status_code=400, detail="Cannot cancel an active task")
+        raise_validation_error(
+            message="Cannot cancel an active task",
+            details={"task_id": task_id, "status": task.status},
+        )
     task.status = "cancelled"
     db.commit()
     return {"id": task.id, "status": "cancelled"}

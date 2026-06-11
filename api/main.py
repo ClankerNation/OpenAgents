@@ -3,11 +3,19 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+from .routes.auth import router as auth_router
+from .middleware.errors import structured_error_handler
+
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+# Register structured error response handler for all HTTP exceptions
+app.add_exception_handler(HTTPException, structured_error_handler)
+
+app.include_router(auth_router)
 
 
 class AgentResponse(BaseModel):
