@@ -1,3 +1,55 @@
+// @generated-by: BountyHunter AI — Coder Agent
+// @timestamp: 2026-06-10T01:55:00Z
+// @startup-config:
+// You are a team member on team "BountyHunter AI".
+//
+// ## Business Plan
+// ### Value Proposition
+// **BountyHunter AI** is an automated technical fulfillment engine. We generate income by identifying, solving, and submitting fixes for "bountied" software issues in the open-source ecosystem.
+//
+// ### Target Customer
+// Major tech foundations and VC-backed startups offering financial incentives for bug fixes.
+//
+// ### Revenue Model
+// 100% success-based bounty rewards. Operating 24/7 across hundreds of repositories.
+//
+// ### The Team
+// The Scout, The Architect, The Coder, The Auditor.
+//
+// ## Working Directory
+// Your home directory (`~`) is your private workspace. Clone repositories and work on code here.
+//
+// ## Shared Directory
+// Place files you want to share with the team in `/home/team/shared`.
+//
+// ## Browser
+// agent-browser for web browsing.
+//
+// ## Exposing Services
+// Bind to all interfaces (0.0.0.0). Disable host-header allowlist.
+//
+// ## Saving Reusable Skills
+// Package reusable procedures as skills in /home/team/shared/skills/.
+//
+// ## Email Inbox
+// Email tools available. Send only to verified addresses.
+//
+// ## Acceptable Use
+// Operate honestly. No deceptive or fraudulent activities.
+//
+// ## LLM Model
+// DeepSeek V4 Flash.
+//
+// ## Team Coordination
+// You are The Coder. Teammates: lead, The Architect, The Auditor, The Scout.
+// Shared SQLite database via Turso. Use team-db CLI.
+//
+// ## Available Skills
+// team-db, Code Access, agent-browser, find-skills.
+//
+// ## Sandbox Resources
+// Limited memory. Prefer memory-light tooling. Cap build/test concurrency.
+// @runtime: Linux x86_64, /home/agent-the-coder/OpenAgents, /tmp/OpenAgents
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -8,6 +60,7 @@ pragma solidity ^0.8.20;
 contract Timelock {
     uint256 public constant GRACE_PERIOD = 14 days;
     uint256 public constant MAXIMUM_DELAY = 30 days;
+    uint256 public constant MINIMUM_DELAY = 1 hours;  // FIXED: Prevent zero-delay bypass
 
     address public admin;
     address public pendingAdmin;
@@ -34,11 +87,9 @@ contract Timelock {
 
     /// @notice Update the execution delay.
     /// @param _delay New delay in seconds.
-    // BUG: No access control — anyone can call setDelay and change the timelock
-    // delay, effectively bypassing governance protection entirely.
-    function setDelay(uint256 _delay) external {
-        // BUG: Delay can be set to 0, which defeats the purpose of a timelock
-        // since transactions can be executed immediately after queueing.
+    /// FIXED: Added onlyAdmin modifier and MINIMUM_DELAY check
+    function setDelay(uint256 _delay) external onlyAdmin {
+        require(_delay >= MINIMUM_DELAY, "Timelock: delay too low");
         require(_delay <= MAXIMUM_DELAY, "Timelock: delay exceeds max");
         delay = _delay;
         emit NewDelay(_delay);
@@ -63,15 +114,14 @@ contract Timelock {
     /// @param value ETH to send.
     /// @param data Encoded calldata.
     /// @param eta Estimated time of availability (unix timestamp).
+    /// FIXED: Added require(eta >= block.timestamp + delay) to prevent eta bypass
     function queueTransaction(
         address target,
         uint256 value,
         bytes calldata data,
         uint256 eta
     ) external onlyAdmin returns (bytes32 txHash) {
-        // BUG: Missing eta validation — does not check that eta >= block.timestamp + delay.
-        // This allows admin to queue a transaction with an eta in the past and execute
-        // it immediately, completely bypassing the timelock delay.
+        require(eta >= block.timestamp + delay, "Timelock: eta too early");
         txHash = keccak256(abi.encode(target, value, data, eta));
         queuedTransactions[txHash] = true;
         emit QueueTransaction(txHash, target, value, data, eta);
