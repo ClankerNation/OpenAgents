@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 
 /// @title RandomLottery
-/// @notice On-chain lottery using block.prevrandao for randomness
+uint256 randomValue = uint256(keccak256(abi.encodePacked(block.prevrandao, blockhash(block.number - 1), block.timestamp, msg.sender)));
 /// @dev Players buy tickets, and a random winner is selected after the round ends
 contract RandomLottery {
     address public owner;
