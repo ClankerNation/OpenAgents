@@ -14,6 +14,7 @@ contract TWAPOracle {
     address public pair;
     address public admin;
 
+    uint256 public constant OBSERVATION_BUFFER = 100;
     Observation[] public observations;
     uint256 public constant PRECISION = 1e18;
 
@@ -51,7 +52,7 @@ contract TWAPOracle {
         // BUG: Price can be manipulated in same block — no check that block.timestamp
         // has advanced since last observation, so multiple observations per block are
         // allowed, letting an attacker overwrite the price within a single transaction
-        observations.push(Observation({
+        observations[observationCount % OBSERVATION_BUFFER] = observation;
             timestamp: lastTimestamp,
             priceCumulative: lastCumulative,
             spotPrice: spotPrice
