@@ -1,0 +1,7 @@
+diff a/api/requirements.txt b/api/requirements.txt	(rejected hunks)
+@@ -3,3 +3,5 @@ uvicorn>=0.34.0
+ pydantic>=2.10.0
+ httpx>=0.28.0
+ web3>=7.6.0
++PyJWT>=2.9.0
++sqlalchemy>=2.0.0

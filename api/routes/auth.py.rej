@@ -1,0 +1,27 @@
+diff a/api/routes/auth.py b/api/routes/auth.py	(rejected hunks)
+@@ -81,6 +81,12 @@ from ..middleware.auth import (
+     JWT_ALGORITHM,
+     ACCESS_TOKEN_EXPIRE_MINUTES,
+ )
++from ..middleware.errors import (
++    raise_auth_error,
++    raise_not_found_error,
++    raise_validation_error,
++    raise_internal_error,
++)
+ from ..models.database import get_db, RevokedToken
+ 
+ router = APIRouter(prefix="/auth", tags=["auth"])
+@@ -143,10 +149,10 @@ async def refresh_token(req: RefreshRequest, db=Depends(get_db)):
+     try:
+         payload = decode_token(req.refresh_token)
+     except HTTPException:
+-        raise HTTPException(status_code=401, detail="Invalid refresh token")
++        raise_auth_error(message="Invalid refresh token", details={"reason": "decode_failed"})
+     
+     if payload.get("type") != "refresh":
+-        raise HTTPException(status_code=401, detail="Not a refresh token")
++        raise_auth_error(message="Not a refresh token", details={"reason": "wrong_type"})
+     
+     # Revoke old refresh token
+     jti = payload.get("jti")

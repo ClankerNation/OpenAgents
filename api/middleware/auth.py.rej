@@ -1,0 +1,68 @@
+diff a/api/middleware/auth.py b/api/middleware/auth.py	(rejected hunks)
+@@ -85,12 +85,17 @@
+ import jwt
+ import os
+ import uuid
+-from fastapi import Request, HTTPException, Depends
++from fastapi import Request, Depends
+ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+ from datetime import datetime, timedelta
+ from typing import Optional
+ 
+ from ..models.database import get_db, RevokedToken
++from .errors import (
++    raise_auth_error,
++    raise_forbidden_error,
++    AUTH_ERROR,
++)
+ 
+ # BUG FIXED: Graceful env var fallback instead of crashing KeyError
+ JWT_SECRET = os.getenv("JWT_SECRET")
+@@ -141,9 +146,9 @@ def decode_token(token: str) -> dict:
+             options={"require": ["exp", "sub"], "verify_exp": True},
+         )
+     except jwt.ExpiredSignatureError:
+-        raise HTTPException(status_code=401, detail="Token has expired")
++        raise_auth_error(message="Token has expired", details={"reason": "expired"})
+     except jwt.InvalidTokenError:
+-        raise HTTPException(status_code=401, detail="Invalid token")
++        raise_auth_error(message="Invalid token", details={"reason": "invalid_signature"})
+ 
+     # BUG FIXED: Check if token has been revoked
+     jti = payload.get("jti")
+@@ -151,7 +156,7 @@ def decode_token(token: str) -> dict:
+         db = next(get_db())
+         revoked = db.query(RevokedToken).filter(RevokedToken.token_jti == jti).first()
+         if revoked:
+-            raise HTTPException(status_code=401, detail="Token has been revoked")
++            raise_auth_error(message="Token has been revoked", details={"reason": "revoked"})
+ 
+     return payload
+ 
+@@ -163,7 +168,7 @@ async def get_current_user(
+     payload = decode_token(token)
+ 
+     if payload.get("type") != "access":
+-        raise HTTPException(status_code=401, detail="Invalid token type")
++        raise_auth_error(message="Invalid token type", details={"reason": "wrong_type"})
+ 
+     user_data = {
+         "id": payload.get("sub"),
+@@ -172,7 +177,7 @@ async def get_current_user(
+     }
+ 
+     if not user_data["id"]:
+-        raise HTTPException(status_code=401, detail="Invalid token payload")
++        raise_auth_error(message="Invalid token payload", details={"reason": "missing_sub"})
+ 
+     return user_data
+ 
+@@ -180,7 +185,7 @@ async def get_current_user(
+ def require_role(role: str):
+     async def role_checker(user: dict = Depends(get_current_user)):
+         if role not in user.get("roles", []):
+-            raise HTTPException(status_code=403, detail=f"Role '{role}' required")
++            raise_forbidden_error(message=f"Role '{role}' required")
+         return user
+     return role_checker
+ 
