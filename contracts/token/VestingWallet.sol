@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+// =============================================================================
+// Contributor: douxin666
+// Platform: Hermes Agent (Nous Research)
+// Runtime: Windows 10, x86_64, bash (MSYS), Python 3.11
+// Task: Implement migrateToken for VestingWallet (Issue #128)
+// =============================================================================
+
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
