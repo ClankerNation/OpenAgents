@@ -25,6 +25,7 @@ contract VestingWallet {
 
     event TokensReleased(address indexed beneficiary, uint256 amount);
     event VestingRevoked(address indexed token, uint256 refund);
+    event TokenMigrated(address indexed oldToken, address indexed newToken, uint256 remainingAmount);
 
     // BUG: No zero-address validation on beneficiary — if beneficiary is set to
     // address(0), all vested tokens are sent to the zero address (burned) on release.
@@ -95,6 +96,24 @@ contract VestingWallet {
 
         token.safeTransfer(owner, refund);
         emit VestingRevoked(address(token), refund);
+    }
+
+
+    /// @notice Migrate to a new token address (e.g., after a token upgrade).
+    /// @param newToken The address of the new token contract.
+    function migrateToken(address newToken) external {
+        require(msg.sender == owner, "Vesting: not owner");
+        require(newToken != address(0), "Vesting: zero address");
+        require(newToken != address(token), "Vesting: same token");
+
+        uint256 remaining = totalAllocation - released;
+        uint256 newBalance = IERC20(newToken).balanceOf(address(this));
+        require(newBalance >= remaining, "Vesting: insufficient new token balance");
+
+        address oldToken = address(token);
+        token = IERC20(newToken);
+
+        emit TokenMigrated(oldToken, newToken, remaining);
     }
 
     /// @notice Get the releasable (vested but not yet released) token amount.
