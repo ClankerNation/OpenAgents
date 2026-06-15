@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 /// @title GovernorAlpha
 /// @notice Minimal governance contract supporting proposal creation, voting, and execution.
@@ -30,6 +30,8 @@ contract GovernorAlpha is ReentrancyGuard {
     uint256 public constant VOTING_DELAY = 1; // blocks
     uint256 public constant VOTING_PERIOD = 17280; // ~3 days at 15s blocks
     uint256 public constant PROPOSAL_THRESHOLD = 100_000e18;
+    uint256 public quorumVotes;
+    address public admin;
 
     mapping(uint256 => Proposal) public proposals;
 
@@ -37,9 +39,17 @@ contract GovernorAlpha is ReentrancyGuard {
     event VoteCast(address indexed voter, uint256 indexed proposalId, bool support, uint256 weight);
     event ProposalExecuted(uint256 indexed id);
     event ProposalCanceled(uint256 indexed id);
+    event QuorumUpdated(uint256 oldQuorum, uint256 newQuorum);
+
+    modifier onlyAdmin() {
+        require(msg.sender == admin, "GovernorAlpha: not admin");
+        _;
+    }
 
     constructor(address _token) {
         token = ERC20Votes(_token);
+        admin = msg.sender;
+        quorumVotes = token.totalSupply() * 4 / 100; // 4% of total supply
     }
 
     /// @notice Create a new governance proposal.
@@ -95,12 +105,9 @@ contract GovernorAlpha is ReentrancyGuard {
         Proposal storage p = proposals[proposalId];
         require(!p.executed, "Governor: already executed");
         require(block.number > p.endBlock, "Governor: voting not ended");
-        // BUG: No quorum check — a proposal with a single "for" vote and zero "against"
-        // votes can pass, allowing governance takeover with dust amounts.
+        require(p.forVotes >= quorumVotes, "GovernorAlpha::execute: below quorum");
         require(p.forVotes > p.againstVotes, "Governor: proposal defeated");
 
-        // BUG: No timelock delay on execution — proposals execute instantly after voting
-        // ends, giving no time for users to exit if a malicious proposal passes.
         p.executed = true;
         for (uint256 i = 0; i < p.targets.length; i++) {
             (bool ok, ) = p.targets[i].call{value: p.values[i]}(p.calldatas[i]);
@@ -108,6 +115,14 @@ contract GovernorAlpha is ReentrancyGuard {
         }
 
         emit ProposalExecuted(proposalId);
+    }
+
+    /// @notice Update the quorum requirement. Only admin can call.
+    /// @param newQuorum The new quorum value in votes.
+    function setQuorum(uint256 newQuorum) external onlyAdmin {
+        uint256 oldQuorum = quorumVotes;
+        quorumVotes = newQuorum;
+        emit QuorumUpdated(oldQuorum, newQuorum);
     }
 
     /// @notice Cancel a proposal. Only the proposer can cancel.
