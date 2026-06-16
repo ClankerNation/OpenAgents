@@ -3,6 +3,9 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 
+/// @title AgentRegistry
+/// @notice Registry for AI agents with gas-optimized active count
+/// @dev Maintains activeCount counter for O(1) lookup instead of looping
 contract AgentRegistry is Ownable {
     struct Agent {
         address owner;
@@ -20,6 +23,7 @@ contract AgentRegistry is Ownable {
 
     uint256 public registrationFee;
     uint256 public minReputation;
+    uint256 private activeCount;
 
     event AgentRegistered(bytes32 indexed agentId, address indexed owner, string name);
     event AgentDeactivated(bytes32 indexed agentId);
@@ -50,6 +54,7 @@ contract AgentRegistry is Ownable {
 
         ownerAgents[msg.sender].push(agentId);
         agentIds.push(agentId);
+        activeCount++;
 
         emit AgentRegistered(agentId, msg.sender, name);
         return agentId;
@@ -57,7 +62,9 @@ contract AgentRegistry is Ownable {
 
     function deactivateAgent(bytes32 agentId) external {
         require(agents[agentId].owner == msg.sender, "Not agent owner");
+        require(agents[agentId].active, "Already inactive");
         agents[agentId].active = false;
+        activeCount--;
         emit AgentDeactivated(agentId);
     }
 
@@ -79,9 +86,26 @@ contract AgentRegistry is Ownable {
         return agents[agentId];
     }
 
+    /// @notice Returns the number of active agents in O(1) time
+    /// @dev Uses maintained counter instead of looping through all agents
+    /// @return count The number of active agents
     function getActiveAgentCount() external view returns (uint256 count) {
-        for (uint256 i = 0; i < agentIds.length; i++) {
-            if (agents[agentIds[i]].active) count++;
+        return activeCount;
+    }
+
+    /// @notice Returns agent IDs for a specific owner with pagination
+    /// @param owner The address of the agent owner
+    /// @param offset Starting index for pagination
+    /// @param limit Maximum number of results to return
+    /// @return result Array of agent IDs belonging to the owner
+    function getAgentsByOwner(address owner, uint256 offset, uint256 limit) external view returns (bytes32[] memory result) {
+        bytes32[] storage all = ownerAgents[owner];
+        uint256 end = offset + limit;
+        if (end > all.length) end = all.length;
+        if (offset >= all.length) return new bytes32[](0);
+        result = new bytes32[](end - offset);
+        for (uint256 i = offset; i < end; i++) {
+            result[i - offset] = all[i];
         }
     }
 
