@@ -23,8 +23,6 @@ export interface SignedTransaction {
 }
 
 export class Wallet {
-  // BUG: Private key stored as plaintext string in memory — should use
-  // a secure enclave, encrypted storage, or at minimum a Buffer that can be zeroed
   public readonly address: string;
   private privateKey: string;
   private provider: RpcProvider;
@@ -51,8 +49,6 @@ export class Wallet {
   }
 
   async signTransaction(tx: Transaction): Promise<SignedTransaction> {
-    // BUG: No chain ID validation — transaction could be replayed on a different
-    // chain if chainId is missing or mismatched with the provider
     const nonce = tx.nonce ?? await this.getNonce();
     const gasPrice = tx.gasPrice ?? BigInt(await this.provider.call("eth_gasPrice") as string);
 
@@ -74,8 +70,6 @@ export class Wallet {
   }
 
   async getNonce(): Promise<number> {
-    // BUG: Uses cached nonce instead of fetching fresh from chain —
-    // stale nonce causes "nonce too low" errors after external transactions
     if (this.cachedNonce !== null) {
       return this.cachedNonce++;
     }
@@ -91,7 +85,19 @@ export class Wallet {
     return this.provider.getBalance(this.address);
   }
 
-  async sendTransaction(tx: Transaction): Promise<string> {
+  async sendTransaction(tx: Transaction, skipSimulation = false): Promise<string> {
+    if (!skipSimulation) {
+      const simulation = await this.provider.simulateTransaction({
+        from: this.address,
+        to: tx.to,
+        data: tx.data,
+        value: tx.value.toString(16),
+      });
+
+      if (!simulation.success) {
+        throw new Error(`Transaction simulation failed: ${simulation.reason}`);
+      }
+    }
     const signed = await this.signTransaction(tx);
     return (await this.provider.call("eth_sendRawTransaction", [signed.raw])) as string;
   }

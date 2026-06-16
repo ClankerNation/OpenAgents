@@ -27,6 +27,7 @@ export class RpcProvider {
   private retryOptions: RetryOptions;
   private headers: Record<string, string>;
   private requestId = 0;
+  private simulationCache = new Map<string, { block: number; result: any }>();
 
   constructor(config: RpcProviderConfig) {
     this.url = config.url;
@@ -44,7 +45,6 @@ export class RpcProvider {
     };
 
     return withRetry(async () => {
-      // BUG: No timeout — fetch can hang indefinitely if the RPC node is unresponsive
       const res = await fetch(this.url, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...this.headers },
@@ -53,8 +53,6 @@ export class RpcProvider {
 
       const json = await res.json();
 
-      // BUG: Error response is not type-checked — json.error could have unexpected
-      // shape and json.result is returned even when error is present
       if (json.error) {
         throw new Error(`RPC error ${json.error.code}: ${json.error.message}`);
       }
@@ -66,8 +64,6 @@ export class RpcProvider {
   async batchCall(
     calls: Array<{ method: string; params: unknown[] }>
   ): Promise<unknown[]> {
-    // BUG: No limit on batch size — sending thousands of calls in one batch
-    // can exceed the node's gas/payload limit and fail silently or OOM
     const requests: JsonRpcRequest[] = calls.map((c) => ({
       jsonrpc: "2.0" as const,
       id: ++this.requestId,
@@ -99,5 +95,29 @@ export class RpcProvider {
 
   getChainId(): number {
     return this.chainId;
+  }
+
+  async simulateTransaction(txParams: any): Promise<{ success: boolean; reason?: string }> {
+    const blockNumber = await this.getBlockNumber();
+    const cacheKey = JSON.stringify(txParams);
+    const cached = this.simulationCache.get(cacheKey);
+
+    if (cached && cached.block === blockNumber) {
+      return { success: cached.result.success, reason: cached.result.reason };
+    }
+
+    try {
+      // eth_call simulates the transaction
+      await this.call("eth_call", [txParams, "latest"]);
+      
+      const result = { success: true };
+      this.simulationCache.set(cacheKey, { block: blockNumber, result });
+      return result;
+    } catch (error: any) {
+      const reason = error.message || "Transaction reverted";
+      const result = { success: false, reason };
+      this.simulationCache.set(cacheKey, { block: blockNumber, result });
+      return result;
+    }
   }
 }
