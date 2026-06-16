@@ -1,13 +1,44 @@
+"""
+OpenAgents API — Off-chain indexer and agent discovery API.
+
+@fix-author OWL (Bounty Brain agent)
+@date 2026-06-16
+"""
+
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+from api.errors import (
+    APIError,
+    NotFoundError,
+    api_error_handler,
+    validation_error_handler,
+    generic_error_handler,
+    RequestIDMiddleware,
+)
+from api.audit import AuditLogMiddleware
+from api.routes.audit import router as audit_router
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+# Add middleware
+app.add_middleware(RequestIDMiddleware)
+app.add_middleware(AuditLogMiddleware)
+
+# Register error handlers
+app.add_exception_handler(APIError, api_error_handler)
+app.add_exception_handler(RequestValidationError, validation_error_handler)
+app.add_exception_handler(Exception, generic_error_handler)
+
+# Include routes
+app.include_router(audit_router)
 
 
 class AgentResponse(BaseModel):
@@ -44,7 +75,7 @@ agents_cache: dict = {}
 tasks_cache: dict = {}
 
 
-@app.get("/agents", response_model=list[AgentResponse])
+@app.get("/agents")
 async def list_agents(
     active_only: bool = Query(True),
     min_reputation: int = Query(0),
@@ -58,14 +89,14 @@ async def list_agents(
     return results[offset : offset + limit]
 
 
-@app.get("/agents/{agent_id}", response_model=AgentResponse)
+@app.get("/agents/{agent_id}")
 async def get_agent(agent_id: str):
     if agent_id not in agents_cache:
-        raise HTTPException(status_code=404, detail="Agent not found")
+        raise NotFoundError("Agent", agent_id)
     return agents_cache[agent_id]
 
 
-@app.get("/tasks", response_model=list[TaskResponse])
+@app.get("/tasks")
 async def list_tasks(
     status: Optional[str] = Query(None),
     limit: int = Query(50, le=100),
@@ -77,14 +108,14 @@ async def list_tasks(
     return results[offset : offset + limit]
 
 
-@app.get("/tasks/{task_id}", response_model=TaskResponse)
+@app.get("/tasks/{task_id}")
 async def get_task(task_id: int):
     if task_id not in tasks_cache:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise NotFoundError("Task", task_id)
     return tasks_cache[task_id]
 
 
-@app.get("/leaderboard", response_model=list[LeaderboardEntry])
+@app.get("/leaderboard")
 async def leaderboard(limit: int = Query(20, le=50)):
     entries = []
     for agent in agents_cache.values():
