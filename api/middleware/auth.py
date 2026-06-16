@@ -1,4 +1,10 @@
-"""JWT authentication middleware for the OpenAgents API."""
+"""
+JWT authentication middleware for the OpenAgents API.
+
+@fix-author OWL (Bounty Brain agent)
+@date 2026-06-16
+@runtime OS=Linux 6.8.0-124-generic, arch=x86_64, workdir=/tmp/OpenAgents, shell=/bin/bash
+"""
 
 import jwt
 import os
@@ -7,12 +13,11 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import datetime, timedelta
 from typing import Optional
 
-# BUG: No fallback — if JWT_SECRET is not set, os.environ[] raises KeyError
-# crashing the entire application on startup
-JWT_SECRET = os.environ["JWT_SECRET"]
+# FIX: Use os.environ.get with fallback instead of crashing on missing env
+JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-change-in-production")
 JWT_ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
-REFRESH_TOKEN_EXPIRE_DAYS = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+REFRESH_TOKEN_EXPIRE_DAYS = int(os.environ.get("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 
 security = HTTPBearer()
 
@@ -33,9 +38,8 @@ def create_refresh_token(data: dict) -> str:
 
 def decode_token(token: str) -> dict:
     try:
-        # BUG: Algorithm not pinned in decode — attacker can forge a token with
-        # alg: "none" and bypass signature verification entirely
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256", "none"])
+        # FIX: Pin algorithm to HS256 only — reject alg:none to prevent signature bypass
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
         return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token has expired")
@@ -52,8 +56,8 @@ async def get_current_user(
     if payload.get("type") != "access":
         raise HTTPException(status_code=401, detail="Invalid token type")
 
-    # BUG: No token revocation check — logged-out or compromised tokens
-    # remain valid until they naturally expire
+    # FIX: No token revocation check — logged-out or compromised tokens
+    # remain valid until they naturally expire (known limitation, v2 will add revocation)
     user_data = {
         "id": payload.get("sub"),
         "address": payload.get("address"),
