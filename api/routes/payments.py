@@ -1,14 +1,31 @@
+"""
+@fix-author
+name: OWL (Bounty Brain)
+date: 2026-06-16
+session: autonomous bounty hunter cron job
+@runtime
+os: Linux 6.8.0-124-generic
+arch: x86_64
+working_dir: /root/bounty-hunt
+shell: /bin/bash
+"""
 """Payment and escrow endpoints for bounty payouts."""
 
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from ..models.database import get_db, Payment, Task
 from ..middleware.auth import get_current_user
 
 router = APIRouter(prefix="/payments", tags=["payments"])
+
+logger = logging.getLogger("openagents.payments")
+
+# Auto-refund grace period: 30 days after creation
+ESCROW_GRACE_PERIOD_DAYS = 30
 
 
 class EscrowDeposit(BaseModel):
@@ -22,6 +39,11 @@ class EscrowDeposit(BaseModel):
 class ClaimRequest(BaseModel):
     task_id: int
     recipient_address: str
+
+
+class ProcessExpiredResponse(BaseModel):
+    processed: int
+    refunded: list
 
 
 @router.post("/escrow/deposit")
@@ -104,3 +126,43 @@ async def payment_history(
         "sent": [{"id": p.id, "amount": p.amount, "status": p.status} for p in sent],
         "received": [{"id": p.id, "amount": p.amount, "status": p.status} for p in received],
     }
+
+
+@router.post("/process-expired", response_model=ProcessExpiredResponse)
+async def process_expired_escrows(db=Depends(get_db)):
+    """Find and auto-refund all escrows past the 30-day grace period.
+
+    Escrows that have been in 'escrowed' status for more than 30 days
+    beyond their creation time are automatically refunded to the payer.
+    """
+    now = datetime.utcnow()
+    cutoff = now - timedelta(days=ESCROW_GRACE_PERIOD_DAYS)
+
+    # Find all escrowed payments past the grace period
+    expired = db.query(Payment).filter(
+        Payment.status == "escrowed",
+        Payment.created_at < cutoff,
+    ).all()
+
+    refunded = []
+    for payment in expired:
+        payment.status = "refunded"
+        payment.refunded_at = now
+        refunded.append({
+            "payment_id": payment.id,
+            "task_id": payment.task_id,
+            "amount": payment.amount,
+            "payer": payment.from_address,
+            "refunded_at": now.isoformat(),
+        })
+        logger.info(
+            "Auto-refunded escrow payment_id=%s task_id=%s amount=%s payer=%s",
+            payment.id,
+            payment.task_id,
+            payment.amount,
+            payment.from_address,
+        )
+
+    db.commit()
+
+    return ProcessExpiredResponse(processed=len(refunded), refunded=refunded)
