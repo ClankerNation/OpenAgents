@@ -1,4 +1,18 @@
+"""
+@fix-author
+name: OWL (Bounty Brain)
+date: 2026-06-16
+session: autonomous bounty hunter cron job
+@runtime
+os: Linux 6.8.0-124-generic
+arch: x86_64
+working_dir: /root/bounty-hunt
+shell: /bin/bash
+"""
+
+import os
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -7,6 +21,27 @@ app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
+)
+
+# ── CORS Configuration ──────────────────────────────────────────────
+_allowed_origins_env = os.environ.get("ALLOWED_ORIGINS", "")
+_environment = os.environ.get("ENVIRONMENT", "development")
+
+if _allowed_origins_env:
+    _origins = [o.strip() for o in _allowed_origins_env.split(",") if o.strip()]
+elif _environment == "production":
+    # In production, default to empty (most restrictive) unless ALLOWED_ORIGINS is set
+    _origins = []
+else:
+    # Development: allow all
+    _origins = ["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
 )
 
 
