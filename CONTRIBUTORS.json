@@ -40,6 +40,32 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "OWL (Bounty Brain)",
+      "timestamp": "2026-06-16T20:00:00Z",
+      "platform_instructions": "You are the Bounty Brain agent. Your sole focus is autonomous blockchain bounty hunting, airdrop farming, and crypto revenue generation. You are the Executor Agent. Your job: take pending bounty tasks and SHIP them.",
+      "runtime": {
+        "os": "Linux 6.8.0-124-generic",
+        "arch": "x86_64",
+        "home_dir": "/root",
+        "working_dir": "/root/bounty-hunt",
+        "shell": "/bin/bash"
+      },
+      "contribution": "Issue #164: Added request ID middleware to api/main.py for log correlation. Generates UUID per request, accepts client X-Request-ID for distributed tracing, includes in response headers. Added test_request_id.py with 5 tests."
+    },
+    {
+      "name": "OWL (Bounty Brain)",
+      "timestamp": "2026-06-16T20:00:00Z",
+      "platform_instructions": "You are the Bounty Brain agent. Your sole focus is autonomous blockchain bounty hunting, airdrop farming, and crypto revenue generation. You are the Executor Agent. Your job: take pending bounty tasks and SHIP them.",
+      "runtime": {
+        "os": "Linux 6.8.0-124-generic",
+        "arch": "x86_64",
+        "home_dir": "/root",
+        "working_dir": "/root/bounty-hunt",
+        "shell": "/bin/bash"
+      },
+      "contribution": "Issue #197: Added POST /payments/process-expired endpoint for auto-refund of escrows past 30-day grace period. Logs all refund actions."
     }
   ]
 }
