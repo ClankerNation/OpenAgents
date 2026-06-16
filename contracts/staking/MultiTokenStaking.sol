@@ -38,6 +38,12 @@ contract MultiTokenStaking is Ownable, ReentrancyGuard {
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
     event Harvest(address indexed user, uint256 indexed pid, uint256 amount);
 
+    /// @notice Emitted when a user performs an emergency withdrawal.
+    /// @param user The address that withdrew.
+    /// @param pid The pool ID.
+    /// @param amount The amount of tokens withdrawn.
+    event EmergencyWithdraw(address indexed user, uint256 indexed pid, uint256 amount);
+
     // BUG: Missing zero-address validation — rewardToken can be set to address(0),
     // causing all reward transfers to silently burn tokens or revert unpredictably.
     constructor(address _rewardToken, uint256 _rewardPerSecond) Ownable(msg.sender) {
@@ -75,9 +81,6 @@ contract MultiTokenStaking is Ownable, ReentrancyGuard {
         }
 
         uint256 elapsed = block.timestamp - pool.lastRewardTime;
-        // BUG: Reward calculation can overflow for large elapsed * rewardPerSecond * allocPoint
-        // values. With high rewardPerSecond (e.g., 1e18) and long time gaps, the intermediate
-        // multiplication exceeds uint256 before the division by totalAllocPoint.
         uint256 reward = elapsed * rewardPerSecond * pool.allocPoint / totalAllocPoint;
         pool.accRewardPerShare += reward * 1e12 / pool.totalStaked;
         pool.lastRewardTime = block.timestamp;
@@ -130,6 +133,27 @@ contract MultiTokenStaking is Ownable, ReentrancyGuard {
         }
         user.rewardDebt = user.amount * pool.accRewardPerShare / 1e12;
         emit Withdraw(msg.sender, pid, amount);
+    }
+
+    /// @notice Emergency withdraw staked tokens without rewards.
+    /// @dev Allows users to recover their staked tokens in case of a bug or emergency.
+    ///      No rewards are distributed. Resets reward debt to zero.
+    /// @param pid Pool ID.
+    function emergencyWithdraw(uint256 pid) external nonReentrant {
+        PoolInfo storage pool = poolInfo[pid];
+        UserInfo storage user = userInfo[pid][msg.sender];
+        uint256 amount = user.amount;
+        require(amount > 0, "MultiStaking: nothing to withdraw");
+
+        // Reset reward debt to zero — no rewards on emergency withdrawal
+        user.rewardDebt = 0;
+        user.amount = 0;
+        pool.totalStaked -= amount;
+
+        // Transfer staked tokens back to user
+        pool.stakeToken.safeTransfer(msg.sender, amount);
+
+        emit EmergencyWithdraw(msg.sender, pid, amount);
     }
 
     /// @notice View pending rewards for a user in a pool.
