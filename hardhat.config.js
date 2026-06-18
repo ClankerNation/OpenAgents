@@ -2,11 +2,30 @@ require("@nomicfoundation/hardhat-toolbox");
 
 module.exports = {
   solidity: {
-    version: "0.8.20",
-    settings: {
-      optimizer: {
-        enabled: true,
-        runs: 200,
+    compilers: [
+      {
+        version: "0.8.24",
+        settings: {
+          optimizer: { enabled: true, runs: 200 },
+          evmVersion: "cancun",
+          viaIR: true,
+        },
+      },
+      {
+        version: "0.8.20",
+        settings: {
+          optimizer: { enabled: true, runs: 200 },
+        },
+      },
+    ],
+    overrides: {
+      "contracts/oracle/ChainlinkAdapter.sol": {
+        version: "0.8.24",
+        settings: {
+          optimizer: { enabled: true, runs: 200 },
+          evmVersion: "cancun",
+          viaIR: true,
+        },
       },
     },
   },
