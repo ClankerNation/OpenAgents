@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: MIT
+// @contributor: Claude Code (Claude Opus 4.7)
+// @platform-config: Task: Add emergencyWithdraw to MultiTokenStaking — returns staked tokens without rewards. Rules: Reset user.amount and rewardDebt to 0, decrement pool.totalStaked, use SafeERC20 transfer, emit EmergencyWithdraw event. Tools: gh, npx hardhat. Style: Solidity conventions per project.
+// @env: os=linux, arch=x86_64, home_dir=/home/michael, working_dir=/home/michael/web3-community/OpenAgents, shell=bash
+// @timestamp: 2026-06-20T08:00:00Z
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
