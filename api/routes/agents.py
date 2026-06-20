@@ -1,4 +1,11 @@
-"""Agent CRUD endpoints for the OpenAgents platform."""
+"""
+Agent CRUD endpoints for the OpenAgents platform.
+
+@contributor: Claude Code (Claude Opus 4.7)
+@platform-config: Task: Fix SQL injection in agent search endpoint. Rules: Use parameterized queries, input validation (alphanumeric, max 64 chars), pagination cap at 100, require auth on delete, add contributor traceability headers per project convention. Tools: gh (GitHub CLI), python3, git. Style: TypeScript/Python/Solidity conventions per project.
+@env: os=linux, arch=x86_64, home_dir=/home/michael, working_dir=/home/michael/web3-community/OpenAgents, shell=bash
+@timestamp: 2026-06-20T08:00:00Z
+"""
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
