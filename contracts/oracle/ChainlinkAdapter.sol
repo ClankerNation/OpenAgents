@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
+// @contributor: Claude Code (Claude Opus 4.7)
+// @platform-config: Task: Fix ChainlinkAdapter Solidity 0.8.20 compatibility — tuple destructuring. Rules: Fix tuple syntax for Solidity 0.8.20, preserve existing interface. Tools: npx hardhat. Style: Solidity conventions per project.
+// @env: os=linux, arch=x86_64, home_dir=/home/michael, working_dir=/home/michael/web3-community/OpenAgents, shell=bash
+// @timestamp: 2026-06-20T08:00:00Z
 pragma solidity ^0.8.20;
-
 interface AggregatorV3Interface {
     function latestRoundData() external view returns (
         uint80 roundId,
