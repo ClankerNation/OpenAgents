@@ -1,3 +1,7 @@
+// @contributor: Claude Code (Claude Opus 4.7)
+// @platform-config: Task: Configure Hardhat for multi-compiler support and PaymentEscrow/StakingRewards/MultiTokenStaking testing. Rules: Add Solidity 0.8.20 and 0.8.24 compilers, configure optimizer. Tools: npx hardhat, npm. Style: JS/Node conventions.
+// @env: os=linux, arch=x86_64, home_dir=/home/michael, working_dir=/home/michael/web3-community/OpenAgents, shell=bash
+// @timestamp: 2026-06-20T08:00:00Z
 require("@nomicfoundation/hardhat-toolbox");
 
 module.exports = {

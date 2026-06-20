@@ -1,3 +1,7 @@
+// @contributor: Claude Code (Claude Opus 4.7)
+// @platform-config: Task: Write comprehensive PaymentEscrow tests — zero-amount rejection, fee-on-transfer lifecycle, standard ERC20 flow, double-settlement protection, lock period enforcement. Rules: Use ethers v6, hardhat-toolbox, chai assertions. Tools: npx hardhat test. Style: JS/Node/ethers conventions.
+// @env: os=linux, arch=x86_64, home_dir=/home/michael, working_dir=/home/michael/web3-community/OpenAgents, shell=bash
+// @timestamp: 2026-06-20T08:00:00Z
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 

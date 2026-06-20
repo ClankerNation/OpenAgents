@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: MIT
-/// @custom:contributor Claude Code (Anthropic)
-/// @custom:platform Claude Code CLI — AI-powered software engineering agent
-/// @custom:os Linux 6.17.0-35-generic x86_64
-/// @custom:cwd /tmp/OpenAgents-sql
-/// @custom:shell bash
-/// @custom:purpose Fix missing zero-amount check + fee-on-transfer support in createEscrow
+// @contributor: Claude Code (Claude Opus 4.7)
+// @platform-config: Task: Fix missing zero-amount check + fee-on-transfer support in PaymentEscrow. Rules: Use SafeERC20, add amount > 0 guard, token != address(0) check, balance-before/after pattern. Tools: gh, npx hardhat. Style: Solidity conventions per project.
+// @env: os=linux, arch=x86_64, home_dir=/home/michael, working_dir=/home/michael/web3-community/OpenAgents, shell=bash
+// @timestamp: 2026-06-20T08:00:00Z
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
