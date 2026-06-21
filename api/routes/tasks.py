@@ -1,9 +1,9 @@
 """Task management endpoints for bounty assignments."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ..models.database import get_db, Task
 from ..middleware.auth import get_current_user
@@ -11,6 +11,18 @@ from ..middleware.auth import get_current_user
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 VALID_STATUSES = {"open", "assigned", "in_progress", "review", "completed", "cancelled"}
+
+# Valid status transitions: current_status -> set of allowed next statuses
+VALID_TRANSITIONS = {
+    "open": {"assigned", "cancelled"},
+    "assigned": {"in_progress", "open", "cancelled"},
+    "in_progress": {"review", "cancelled"},
+    "review": {"completed", "in_progress"},
+    "completed": set(),  # terminal state
+    "cancelled": set(),  # terminal state
+}
+
+MAX_PAGE_LIMIT = 100
 
 
 class TaskCreate(BaseModel):
@@ -20,9 +32,29 @@ class TaskCreate(BaseModel):
     agent_id: Optional[int] = None
     deadline: Optional[datetime] = None
 
+    @field_validator("deadline")
+    @classmethod
+    def deadline_must_be_in_future(cls, v: Optional[datetime]) -> Optional[datetime]:
+        if v is None:
+            return v
+        now = datetime.now(timezone.utc)
+        deadline = v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+        if deadline <= now:
+            raise ValueError("Deadline must be in the future")
+        return v
+
 
 class TaskStatusUpdate(BaseModel):
-    status: str  # BUG: Not validated against VALID_STATUSES enum — any string accepted
+    status: str
+
+    @field_validator("status")
+    @classmethod
+    def status_must_be_valid(cls, v: str) -> str:
+        if v not in VALID_STATUSES:
+            raise ValueError(
+                f"Invalid status '{v}'. Must be one of: {', '.join(sorted(VALID_STATUSES))}"
+            )
+        return v
 
 
 @router.post("/")
@@ -48,9 +80,7 @@ async def list_tasks(
     status: Optional[str] = None,
     creator: Optional[str] = None,
     skip: int = Query(0, ge=0),
-    # BUG: No upper bound on limit — clients can request millions of rows,
-    # causing DB strain and potential OOM
-    limit: int = Query(50, ge=1),
+    limit: int = Query(50, ge=1, le=MAX_PAGE_LIMIT),
     db=Depends(get_db),
 ):
     query = db.query(Task)
@@ -80,10 +110,30 @@ async def update_task_status(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # BUG: Creator can mark their own task as completed — should require
-    # a third party or the assignee to confirm completion
-    if task.creator_id != user["id"]:
-        raise HTTPException(status_code=403, detail="Only the creator can update status")
+    # Prevent creator from completing their own task
+    if update.status == "completed" and task.creator_id == user["id"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Task creator cannot mark their own task as completed",
+        )
+
+    # Validate status transition
+    allowed = VALID_TRANSITIONS.get(task.status, set())
+    if update.status not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot transition from '{task.status}' to '{update.status}'. "
+            f"Allowed transitions: {', '.join(sorted(allowed)) if allowed else 'none (terminal state)'}",
+        )
+
+    # Enforce deadline: reject status changes on expired tasks
+    if task.deadline:
+        deadline = task.deadline if task.deadline.tzinfo else task.deadline.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) > deadline and update.status not in ("cancelled",):
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot update status of an expired task. Deadline has passed.",
+            )
 
     task.status = update.status
     task.updated_at = datetime.utcnow()
