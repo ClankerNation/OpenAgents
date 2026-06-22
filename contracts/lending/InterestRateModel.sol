@@ -4,6 +4,9 @@ pragma solidity ^0.8.20;
 /// @title InterestRateModel
 /// @notice Variable interest rate model based on pool utilization
 /// @dev Rate increases with utilization, with a kink at the optimal point
+/// @custom:fix-author Gaotax2006
+/// @custom:date 2026-06-23
+/// @custom:issue #193 Add events with old/new values and getParameters() view
 contract InterestRateModel {
     // BUG: No bounds on base rate — admin can set baseRate to any value including
     // extremely high values that make borrowing effectively impossible, or zero
@@ -18,7 +21,14 @@ contract InterestRateModel {
 
     address public admin;
 
-    event RateParamsUpdated(uint256 baseRate, uint256 multiplier, uint256 jumpMultiplier, uint256 kink);
+    event RateParamsUpdated(uint256 indexed oldBaseRate, uint256 indexed newBaseRate, uint256 oldMultiplier, uint256 newMultiplier, uint256 oldJumpMultiplier, uint256 newJumpMultiplier, uint256 oldKink, uint256 newKink);
+
+    struct RateParameters {
+        uint256 baseRate;
+        uint256 multiplier;
+        uint256 jumpMultiplier;
+        uint256 kink;
+    }
 
     modifier onlyAdmin() {
         require(msg.sender == admin, "Not admin");
@@ -44,11 +54,19 @@ contract InterestRateModel {
         uint256 _jumpMultiplier,
         uint256 _kink
     ) external onlyAdmin {
+        emit RateParamsUpdated(baseRate, _baseRate, multiplier, _multiplier, jumpMultiplier, _jumpMultiplier, kink, _kink);
         baseRate = _baseRate;
         multiplier = _multiplier;
         jumpMultiplier = _jumpMultiplier;
         kink = _kink;
-        emit RateParamsUpdated(_baseRate, _multiplier, _jumpMultiplier, _kink);
+    }
+
+    /**
+     * @notice Get all current rate parameters in a single call.
+     * @return struct with baseRate, multiplier, jumpMultiplier, and kink.
+     */
+    function getParameters() external view returns (RateParameters memory) {
+        return RateParameters(baseRate, multiplier, jumpMultiplier, kink);
     }
 
     function getUtilization(uint256 totalBorrowed, uint256 totalDeposits) public pure returns (uint256) {
