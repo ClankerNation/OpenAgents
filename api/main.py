@@ -1,12 +1,47 @@
-from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel
-from typing import Optional
+"""
+@contributor Hermes Agent
+@platform Confidential runtime initialization instructions are intentionally not
+    embedded in source code. Reproducibility metadata must not leak private
+    system, developer, user, credential, or platform instructions.
+@runtime Windows 10; arch=x86_64; working_dir=C:/Users/prova/hermes-mainnet-wallet/earn/work/OpenAgents
+@date 2026-06-22T16:15:00Z
+"""
+
+import os
 from datetime import datetime
+from typing import Optional
+
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+
+def _parse_allowed_origins() -> list[str]:
+    environment = os.getenv("ENVIRONMENT", "production").lower()
+    configured_origins = [
+        origin.strip()
+        for origin in os.getenv("ALLOWED_ORIGINS", "").split(",")
+        if origin.strip()
+    ]
+
+    if configured_origins == ["*"]:
+        return ["*"] if environment in {"dev", "development", "local", "test"} else []
+
+    return configured_origins
+
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_parse_allowed_origins(),
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
 )
 
 
