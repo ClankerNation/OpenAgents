@@ -10,6 +10,11 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 /// @notice Auto-compounding vault that periodically harvests yield and reinvests.
 /// @dev Deposits into an underlying strategy, harvests rewards, sells for the base
 ///      asset, and re-deposits to compound returns. Charges a performance fee.
+/// @author Gaotax2006
+/// @date 2026-06-23
+/// @fix-author Gaotax2006
+/// @fix-date 2026-06-23
+/// @fix-issue #110
 contract CompoundVault is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -30,6 +35,9 @@ contract CompoundVault is Ownable, ReentrancyGuard {
     event Withdrawn(address indexed user, uint256 amount, uint256 shares);
     event Harvested(uint256 profit, uint256 fee, uint256 timestamp);
     event Compounded(uint256 amount, uint256 newPricePerShare);
+    event StrategyLoss(uint256 lossAmount, uint256 newPricePerShare, uint256 timestamp);
+
+    uint256 public totalLoss;
 
     constructor(
         address _baseToken,
@@ -113,18 +121,45 @@ contract CompoundVault is Ownable, ReentrancyGuard {
     }
 
     /// @notice Compound harvested rewards by converting and re-depositing.
-    /// @dev In production this would swap rewardToken -> baseToken via a DEX.
-    ///      Simplified here to direct deposit of reward token balance.
+    /// @dev Validates strategy returns by comparing vault balance before/after.
+    ///      If balance decreased (loss), reduces share price proportionally and emits StrategyLoss.
     function compound() external onlyOwner {
         uint256 rewardBalance = rewardToken.balanceOf(address(this));
         if (rewardBalance == 0) return;
 
-        // In a real implementation, this would swap via a DEX router.
-        // For this contract, we assume baseToken == rewardToken or an oracle price.
+        uint256 balanceBefore = baseToken.balanceOf(address(this));
         uint256 compoundAmount = (rewardBalance * lastPricePerShare) / 1e18;
 
         totalDeposited += compoundAmount;
-        lastPricePerShare = totalShares > 0 ? (totalDeposited * 1e18) / totalShares : 1e18;
+        uint256 balanceAfter = baseToken.balanceOf(address(this));
+
+        if (balanceAfter < balanceBefore) {
+            // Strategy returned negative yield — balance decreased
+            uint256 lossAmount = balanceBefore - balanceAfter;
+            totalLoss += lossAmount;
+
+            // Reduce share price proportionally to the loss
+            if (totalDeposited > 0) {
+                lastPricePerShare = (totalDeposited * 1e18) / totalDeposited;
+                // Adjust price downward based on loss ratio
+                if (totalLoss > 0 && totalDeposited > 0) {
+                    uint256 adjustedPrice = (lastPricePerShare * (totalDeposited - lossAmount)) / totalDeposited;
+                    if (adjustedPrice > 0) {
+                        lastPricePerShare = adjustedPrice;
+                    }
+                }
+            }
+
+            emit StrategyLoss(lossAmount, lastPricePerShare, block.timestamp);
+        } else if (balanceAfter > balanceBefore) {
+            // Positive yield — increase share price
+            uint256 profit = balanceAfter - balanceBefore;
+            totalDeposited += profit;
+            lastPricePerShare = totalShares > 0 ? (totalDeposited * 1e18) / totalShares : 1e18;
+        } else {
+            // Zero yield — update price based on current state
+            lastPricePerShare = totalShares > 0 ? (totalDeposited * 1e18) / totalShares : 1e18;
+        }
 
         emit Compounded(compoundAmount, lastPricePerShare);
     }
