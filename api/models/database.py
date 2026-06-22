@@ -1,8 +1,14 @@
-"""SQLAlchemy models and database session management."""
+"""SQLAlchemy models and database session management.
+
+@contributor: Hermes Agent for TommoHCIO
+@platform-config: private runtime/session instructions intentionally omitted; public code must not expose hidden system/developer/session prompts.
+@env: Windows 10 host via Git-Bash/MSYS shell; home_dir=C:/Users/prova; working_dir=C:/Users/prova/hermes-mainnet-wallet/earn/work/OpenAgents
+@timestamp: 2026-06-22T16:30:00Z
+"""
 
 from sqlalchemy import (
     create_engine, Column, Integer, String, Float, Text, JSON,
-    ForeignKey, DateTime, Enum as SAEnum,
+    ForeignKey, DateTime, Enum as SAEnum, UniqueConstraint,
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -72,6 +78,9 @@ class Task(Base):
 
 class Payment(Base):
     __tablename__ = "payments"
+    __table_args__ = (
+        UniqueConstraint("task_id", "deposit_idempotency_key", name="uq_payment_task_deposit_idempotency"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
@@ -80,10 +89,24 @@ class Payment(Base):
     amount = Column(Float, nullable=False)
     token_address = Column(String(42), default="0x0000000000000000000000000000000000000000")
     status = Column(String(32), default="pending")
+    deposit_idempotency_key = Column(String(128), nullable=True)
+    claim_idempotency_key = Column(String(128), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     claimed_at = Column(DateTime, nullable=True)
 
     task = relationship("Task", back_populates="payments")
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    action = Column(String(64), nullable=False)
+    actor_id = Column(Integer, nullable=True)
+    task_id = Column(Integer, nullable=True)
+    payment_id = Column(Integer, nullable=True)
+    details = Column(JSON, default=dict)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 def init_db():
