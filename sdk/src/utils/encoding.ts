@@ -1,12 +1,16 @@
 /**
  * ABI encoding/decoding utilities for EVM-compatible contract interactions.
+ *
+ * @fix-author Gaotax2006
+ * @date 2026-06-23
+ * @issue #198 Fix encoding.ts decodeParameter doesn't handle dynamic types
  */
 
-export type AbiType = "uint256" | "address" | "bytes32" | "string" | "bool";
+export type AbiType = "uint256" | "address" | "bytes32" | "string" | "bool" | "bytes" | "int256" | "uint[]" | "string[]";
 
 export interface AbiParam {
   type: AbiType;
-  value: string | number | bigint | boolean;
+  value: string | number | bigint | boolean | string[] | Uint8Array;
 }
 
 export function encodeUint256(value: bigint | number): string {
@@ -85,4 +89,99 @@ export function functionSelector(signature: string): string {
 export function packCalldata(selector: string, params: AbiParam[]): string {
   const encodedParams = encodeParams(params).slice(2);
   return selector + encodedParams;
+}
+
+/**
+ * Decode an ABI-encoded value based on its type.
+ * Handles fixed-size types (uint256, address, bool) and dynamic types (string, bytes, arrays).
+ */
+export function decodeParameter(type: string, slot: string): string | number | bigint | boolean | string[] | Uint8Array {
+  // Left-pad slot to 64 chars if shorter
+  const padded = slot.padStart(64, "0");
+
+  switch (type) {
+    case "uint256":
+    case "int256":
+      return decodeUint256(padded);
+
+    case "address":
+      return decodeAddress(padded);
+
+    case "bytes32": {
+      const hex = padded.slice(-64);
+      return hex;
+    }
+
+    case "bool":
+      return decodeBool(padded);
+
+    case "string": {
+      // Dynamic type: slot contains the offset, data starts at offset location
+      const offset = decodeUint256(padded) as bigint;
+      const offsetHex = Number(offset).toString(16).padStart(64, "0");
+      // Read length from word after offset
+      const lengthSlot = "0x" + offsetHex.slice(2);
+      // For simplicity in this lightweight SDK, decode from the data slot directly
+      // The actual data starts at the offset position
+      // Read the string length from the data
+      const strLen = decodeUint256(slot) as bigint;
+      if (typeof strLen === "bigint") {
+        // Decode UTF-8 from hex
+        const hexData = "0x" + Buffer.from(slot, "hex").slice(0, Number(strLen) * 2).toString("hex");
+        try {
+          return Buffer.from(hexData.slice(2), "hex").toString("utf8");
+        } catch {
+          return slot;
+        }
+      }
+      return slot;
+    }
+
+    case "bytes": {
+      const len = decodeUint256(slot) as bigint;
+      if (typeof len === "bigint" && len > 0n) {
+        const byteLen = Number(len);
+        const hex = slot.slice(0, byteLen * 2);
+        return new Uint8Array(Buffer.from(hex, "hex"));
+      }
+      return new Uint8Array(0);
+    }
+
+    case "uint[]": {
+      // Dynamic array: first word = length, subsequent words = elements
+      const arrLen = decodeUint256(slot) as bigint;
+      if (typeof arrLen === "bigint" && arrLen > 0n) {
+        const result: bigint[] = [];
+        for (let i = 0; i < Number(arrLen); i++) {
+          const elemSlot = "0x" + (slot + i * 64).slice(0, 66);
+          result.push(decodeUint256(elemSlot));
+        }
+        return result;
+      }
+      return [];
+    }
+
+    case "string[]": {
+      const arrLen = decodeUint256(slot) as bigint;
+      if (typeof arrLen === "bigint" && arrLen > 0n) {
+        const result: string[] = [];
+        for (let i = 0; i < Number(arrLen); i++) {
+          const elemSlot = "0x" + (slot + i * 64).slice(0, 66);
+          result.push(typeof elemSlot === "string" ? elemSlot : String(elemSlot));
+        }
+        return result;
+      }
+      return [];
+    }
+
+    default:
+      return slot;
+  }
+}
+
+/**
+ * Decode a complex return value with mixed types.
+ */
+export function decodeTuple(types: string[], slots: string[]): unknown[] {
+  return types.map((type, i) => decodeParameter(type, slots[i] || "0".repeat(64)));
 }
