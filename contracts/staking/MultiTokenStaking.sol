@@ -144,4 +144,22 @@ contract MultiTokenStaking is Ownable, ReentrancyGuard {
         }
         return user.amount * accRewardPerShare / 1e12 - user.rewardDebt;
     }
+
+    /// @notice Emergency withdraw: withdraw all staked tokens without claiming rewards.
+    /// @dev Use this function if the contract is compromised or you cannot call regular withdraw.
+    ///      This bypasses pending reward calculation to avoid potential reverts from broken pools.
+    /// @param pid Pool ID to withdraw from.
+    function emergencyWithdraw(uint256 pid) external nonReentrant {
+        PoolInfo storage pool = poolInfo[pid];
+        UserInfo storage user = userInfo[pid][msg.sender];
+        require(user.amount > 0, "MultiStaking: nothing to withdraw");
+
+        uint256 amount = user.amount;
+        user.amount = 0;
+        user.rewardDebt = 0;
+        pool.totalStaked -= amount;
+
+        pool.stakeToken.safeTransfer(msg.sender, amount);
+        emit Withdraw(msg.sender, pid, amount);
+    }
 }
