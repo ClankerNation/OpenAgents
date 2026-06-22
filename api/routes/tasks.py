@@ -8,6 +8,12 @@ from datetime import datetime
 from ..models.database import get_db, Task
 from ..middleware.auth import get_current_user
 
+try:
+    from ..main import broadcast_task_update
+except ImportError:
+    async def broadcast_task_update(*a, **kw):
+        pass
+
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 VALID_STATUSES = {"open", "assigned", "in_progress", "review", "completed", "cancelled"}
@@ -88,6 +94,19 @@ async def update_task_status(
     task.status = update.status
     task.updated_at = datetime.utcnow()
     db.commit()
+
+    # FIX: Broadcast task status change via WebSocket
+    try:
+        import asyncio
+        asyncio.create_task(
+            broadcast_task_update(task.id, {
+                "status": task.status,
+                "updated_at": task.updated_at.isoformat() if task.updated_at else None,
+            })
+        )
+    except Exception:
+        pass
+
     return {"id": task.id, "status": task.status}
 
 
