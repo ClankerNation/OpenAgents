@@ -1,13 +1,129 @@
-from fastapi import FastAPI, HTTPException, Query
+# @fix-author
+# name: Hermes Agent for TommoHCIO
+# date: 2026-06-22T16:46:31Z
+# platform-config: private runtime/session instructions intentionally omitted; public code must not expose hidden system/developer/session prompts.
+# @runtime: os=Windows host via Git-Bash, arch=x86_64/unknown, working_dir=C:/Users/prova/hermes-mainnet-wallet/bug-bounties/openagents-202, shell=POSIX bash
+
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import Optional
+from typing import Any, Optional
 from datetime import datetime
+from uuid import uuid4
+
+ERROR_CODE_BY_STATUS = {
+    400: "VALIDATION_ERROR",
+    401: "AUTH_FAILED",
+    403: "AUTH_FAILED",
+    404: "NOT_FOUND",
+    422: "VALIDATION_ERROR",
+    429: "RATE_LIMITED",
+}
+
+ERROR_CODES = {
+    "VALIDATION_ERROR": "The request payload, path, or query parameters failed validation.",
+    "NOT_FOUND": "The requested resource does not exist.",
+    "AUTH_FAILED": "Authentication or authorization failed.",
+    "RATE_LIMITED": "The request was rate limited.",
+    "INTERNAL_ERROR": "An unexpected server error occurred.",
+}
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+
+def _request_id(request: Request) -> str:
+    existing = getattr(request.state, "request_id", None)
+    if existing:
+        return existing
+    request_id = request.headers.get("X-Request-ID") or str(uuid4())
+    request.state.request_id = request_id
+    return request_id
+
+
+def _error_payload(
+    *,
+    code: str,
+    message: str,
+    request_id: str,
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "code": code,
+        "message": message,
+        "details": details or {},
+        "request_id": request_id,
+    }
+
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    request_id = _request_id(request)
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    request_id = _request_id(request)
+    code = ERROR_CODE_BY_STATUS.get(exc.status_code, "INTERNAL_ERROR")
+    message = exc.detail if isinstance(exc.detail, str) else ERROR_CODES[code]
+    details = exc.detail if isinstance(exc.detail, dict) else {}
+    headers = dict(exc.headers or {})
+    headers["X-Request-ID"] = request_id
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=_error_payload(
+            code=code,
+            message=message,
+            details=details,
+            request_id=request_id,
+        ),
+        headers=headers,
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    request_id = _request_id(request)
+    field_errors = [
+        {
+            "field": ".".join(str(part) for part in error.get("loc", [])),
+            "message": error.get("msg", "Invalid value"),
+            "type": error.get("type", "validation_error"),
+        }
+        for error in exc.errors()
+    ]
+    return JSONResponse(
+        status_code=422,
+        content=_error_payload(
+            code="VALIDATION_ERROR",
+            message="Request validation failed",
+            details={"fields": field_errors},
+            request_id=request_id,
+        ),
+        headers={"X-Request-ID": request_id},
+    )
+
+
+@app.exception_handler(Exception)
+async def internal_exception_handler(request: Request, exc: Exception):
+    request_id = _request_id(request)
+    return JSONResponse(
+        status_code=500,
+        content=_error_payload(
+            code="INTERNAL_ERROR",
+            message=ERROR_CODES["INTERNAL_ERROR"],
+            details={},
+            request_id=request_id,
+        ),
+        headers={"X-Request-ID": request_id},
+    )
 
 
 class AgentResponse(BaseModel):

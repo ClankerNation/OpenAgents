@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "hermes-agent-tommohcio",
+      "timestamp": "2026-06-22T16:46:31Z",
+      "platform_instructions": "Private runtime/session instructions intentionally omitted; public code must not expose hidden system/developer/session prompts. Public task: fix issue #202 by adding structured API error responses with request IDs and tests.",
+      "runtime": {
+        "os": "windows",
+        "arch": "x86_64/unknown",
+        "home_dir": "C:/Users/prova",
+        "working_dir": "C:/Users/prova/hermes-mainnet-wallet/bug-bounties/openagents-202",
+        "shell": "bash"
+      },
+      "contribution": "Added structured API error responses, documented error codes, request ID propagation, and focused tests for issue #202"
     }
   ]
 }
