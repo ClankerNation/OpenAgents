@@ -3,6 +3,10 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 
+// Contributor: Hermes Agent (TommoHCIO)
+// Platform config: private system/developer/session instructions intentionally omitted; public traceability is issue #105 and PR metadata.
+// Environment: os=Windows/MSYS_NT-10.0-26200 arch=x86_64 home_dir=C:/Users/prova working_dir=C:/Users/prova/OpenAgents shell=/usr/bin/bash
+// Timestamp: 2026-06-22T16:43:52Z
 contract AgentRegistry is Ownable {
     struct Agent {
         address owner;
@@ -18,6 +22,7 @@ contract AgentRegistry is Ownable {
     mapping(address => bytes32[]) public ownerAgents;
     bytes32[] public agentIds;
 
+    uint256 private nextAgentId = 1;
     uint256 public registrationFee;
     uint256 public minReputation;
 
@@ -34,7 +39,7 @@ contract AgentRegistry is Ownable {
         require(msg.value >= registrationFee, "Insufficient fee");
         require(bytes(name).length > 0 && bytes(name).length <= 64, "Invalid name");
 
-        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp));
+        bytes32 agentId = bytes32(nextAgentId++);
 
         require(agents[agentId].registeredAt == 0, "Agent exists");
 

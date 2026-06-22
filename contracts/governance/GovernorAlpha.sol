@@ -59,9 +59,11 @@ contract GovernorAlpha is ReentrancyGuard {
         Proposal storage p = proposals[proposalId];
         p.id = proposalId;
         p.proposer = msg.sender;
-        p.targets = targets;
-        p.values = values;
-        p.calldatas = calldatas;
+        for (uint256 i = 0; i < targets.length; i++) {
+            p.targets.push(targets[i]);
+            p.values.push(values[i]);
+            p.calldatas.push(calldatas[i]);
+        }
         p.startBlock = block.number + VOTING_DELAY;
         p.endBlock = block.number + VOTING_DELAY + VOTING_PERIOD;
 
