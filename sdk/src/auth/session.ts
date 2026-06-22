@@ -1,6 +1,14 @@
 import { Wallet } from "./wallet";
 import { keccak256 } from "../utils/crypto";
 
+/**
+ * In-memory session store — replaces localStorage to eliminate XSS vector.
+ * Tokens are kept only in memory and never persisted to disk.
+ */
+interface MemoryStore {
+  [key: string]: unknown;
+}
+
 export interface SessionConfig {
   wallet: Wallet;
   apiBaseUrl: string;
@@ -20,6 +28,8 @@ export class SessionManager {
   private autoRefresh: boolean;
   private currentToken: SessionToken | null = null;
   private refreshPromise: Promise<SessionToken> | null = null;
+  /** In-memory store replaces localStorage — no XSS risk */
+  private store: MemoryStore = {};
 
   constructor(config: SessionConfig) {
     this.wallet = config.wallet;
@@ -28,22 +38,26 @@ export class SessionManager {
     this.loadStoredSession();
   }
 
+  /**
+   * Load session from in-memory store instead of localStorage.
+   * Tokens are never written to disk, eliminating XSS exposure.
+   */
   private loadStoredSession(): void {
-    // BUG: Storing tokens in localStorage is vulnerable to XSS attacks —
-    // any injected script can steal the session token
-    if (typeof window !== "undefined" && window.localStorage) {
-      const stored = localStorage.getItem(`session_${this.wallet.address}`);
-      if (stored) {
-        this.currentToken = JSON.parse(stored);
-      }
+    const key = `session_${this.wallet.address}`;
+    const stored = this.store[key] as SessionToken | undefined;
+    if (stored) {
+      this.currentToken = stored;
     }
   }
 
+  /**
+   * Persist session to in-memory store only.
+   * No localStorage, no cookies — tokens survive only in process memory.
+   */
   private persistSession(token: SessionToken): void {
     this.currentToken = token;
-    if (typeof window !== "undefined" && window.localStorage) {
-      localStorage.setItem(`session_${this.wallet.address}`, JSON.stringify(token));
-    }
+    const key = `session_${this.wallet.address}`;
+    this.store[key] = token;
   }
 
   async authenticate(): Promise<SessionToken> {
@@ -73,47 +87,88 @@ export class SessionManager {
     return token;
   }
 
+  /**
+   * getToken with expiry check.
+   * Returns cached token only if not expired; auto-refreshes if needed.
+   */
   async getToken(): Promise<string> {
-    // BUG: No expiry check — returns the cached token even if it has expired,
-    // causing 401 errors on subsequent API calls
     if (this.currentToken) {
-      return this.currentToken.token;
+      const now = Math.floor(Date.now() / 1000);
+      // Check if token has expired
+      if (this.currentToken.expiresAt > now) {
+        return this.currentToken.token;
+      }
+      // Token expired — refresh or re-authenticate
+      if (this.autoRefresh) {
+        const refreshed = await this.refresh();
+        return refreshed.token;
+      }
     }
     const session = await this.authenticate();
     return session.token;
   }
 
+  /**
+   * refresh with mutex to prevent race conditions.
+   * Multiple concurrent callers share a single refresh promise.
+   */
   async refresh(): Promise<SessionToken> {
-    // BUG: Race condition — multiple concurrent callers can trigger parallel
-    // refresh requests, and only the last one's token survives
+    // Mutex: if a refresh is already in progress, await it instead of starting a new one
+    if (this.refreshPromise) {
+      return this.refreshPromise;
+    }
+
     if (!this.currentToken?.refreshToken) {
-      return this.authenticate();
+      this.refreshPromise = this.authenticate();
+    } else {
+      this.refreshPromise = (async () => {
+        try {
+          const res = await fetch(`${this.apiBaseUrl}/auth/refresh`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ refreshToken: this.currentToken!.refreshToken }),
+          });
+
+          if (!res.ok) {
+            this.currentToken = null;
+            return this.authenticate();
+          }
+
+          const token: SessionToken = await res.json();
+          this.persistSession(token);
+          return token;
+        } finally {
+          // Clear the promise regardless of success/failure
+          this.refreshPromise = null;
+        }
+      })();
     }
 
-    const res = await fetch(`${this.apiBaseUrl}/auth/refresh`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refreshToken: this.currentToken.refreshToken }),
-    });
-
-    if (!res.ok) {
-      this.currentToken = null;
-      return this.authenticate();
-    }
-
-    const token: SessionToken = await res.json();
-    this.persistSession(token);
-    return token;
+    return this.refreshPromise;
   }
 
   logout(): void {
     this.currentToken = null;
-    if (typeof window !== "undefined" && window.localStorage) {
-      localStorage.removeItem(`session_${this.wallet.address}`);
-    }
+    const key = `session_${this.wallet.address}`;
+    delete this.store[key];
   }
 
   isAuthenticated(): boolean {
-    return this.currentToken !== null;
+    if (!this.currentToken) return false;
+    // Also check expiry
+    const now = Math.floor(Date.now() / 1000);
+    return this.currentToken.expiresAt > now;
+  }
+
+  /**
+   * Rotate tokens — invalidate current session and get fresh tokens.
+   * Used for security hardening after suspicious activity.
+   */
+  async rotateTokens(): Promise<SessionToken> {
+    this.currentToken = null;
+    this.refreshPromise = null;
+    const key = `session_${this.wallet.address}`;
+    delete this.store[key];
+    return this.authenticate();
   }
 }

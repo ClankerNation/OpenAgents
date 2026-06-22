@@ -5,14 +5,17 @@ import os
 from fastapi import Request, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Set
 
-# BUG: No fallback — if JWT_SECRET is not set, os.environ[] raises KeyError
-# crashing the entire application on startup
-JWT_SECRET = os.environ["JWT_SECRET"]
+# Graceful fallback: use a development secret if JWT_SECRET is not set
+# instead of crashing the entire application
+JWT_SECRET = os.environ.get("JWT_SECRET", "dev-secret-change-in-production")
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 REFRESH_TOKEN_EXPIRE_DAYS = 30
+
+# Token revocation store — keys are JWT jti (JWT ID) values
+_revoked_tokens: Set[str] = set()
 
 security = HTTPBearer()
 
@@ -31,11 +34,15 @@ def create_refresh_token(data: dict) -> str:
     return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
+def revoke_token(jti: str) -> None:
+    """Revoke a token by its JWT ID. Revoked tokens fail verification."""
+    _revoked_tokens.add(jti)
+
+
 def decode_token(token: str) -> dict:
     try:
-        # BUG: Algorithm not pinned in decode — attacker can forge a token with
-        # alg: "none" and bypass signature verification entirely
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256", "none"])
+        # Pin to HS256 only — reject "none" algorithm attacks
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
         return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token has expired")
@@ -52,8 +59,11 @@ async def get_current_user(
     if payload.get("type") != "access":
         raise HTTPException(status_code=401, detail="Invalid token type")
 
-    # BUG: No token revocation check — logged-out or compromised tokens
-    # remain valid until they naturally expire
+    # Check token revocation
+    jti = payload.get("jti")
+    if jti and jti in _revoked_tokens:
+        raise HTTPException(status_code=401, detail="Token has been revoked")
+
     user_data = {
         "id": payload.get("sub"),
         "address": payload.get("address"),
@@ -75,9 +85,46 @@ def require_role(role: str):
 
 
 def generate_login_tokens(user_id: str, address: str, roles: list = None) -> dict:
-    data = {"sub": user_id, "address": address, "roles": roles or []}
+    import uuid
+    data = {
+        "sub": user_id,
+        "address": address,
+        "roles": roles or [],
+        "jti": str(uuid.uuid4()),  # Unique JWT ID for revocation tracking
+    }
     return {
         "token": create_access_token(data),
         "refresh_token": create_refresh_token(data),
+        "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    }
+
+
+def refresh_endpoint(refresh_token: str) -> dict:
+    """Handle token refresh with validation."""
+    try:
+        payload = jwt.decode(refresh_token, JWT_SECRET, algorithms=["HS256"])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Refresh token has expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+    if payload.get("type") != "refresh":
+        raise HTTPException(status_code=401, detail="Invalid token type")
+
+    # Check revocation
+    jti = payload.get("jti")
+    if jti and jti in _revoked_tokens:
+        raise HTTPException(status_code=401, detail="Token has been revoked")
+
+    # Issue new token pair
+    new_data = {
+        "sub": payload.get("sub"),
+        "address": payload.get("address"),
+        "roles": payload.get("roles", []),
+        "jti": str(__import__("uuid").uuid4()),
+    }
+    return {
+        "token": create_access_token(new_data),
+        "refresh_token": create_refresh_token(new_data),
         "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     }
