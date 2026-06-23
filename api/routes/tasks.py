@@ -1,8 +1,8 @@
 """Task management endpoints for bounty assignments."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Set
 from datetime import datetime
 
 from ..models.database import get_db, Task
@@ -88,6 +88,14 @@ async def update_task_status(
     task.status = update.status
     task.updated_at = datetime.utcnow()
     db.commit()
+
+    await manager.broadcast({
+        "event": "task_status_updated",
+        "task_id": task.id,
+        "status": task.status,
+        "updated_at": task.updated_at.isoformat() if task.updated_at else None,
+    })
+
     return {"id": task.id, "status": task.status}
 
 
@@ -103,3 +111,50 @@ async def cancel_task(task_id: int, user=Depends(get_current_user), db=Depends(g
     task.status = "cancelled"
     db.commit()
     return {"id": task.id, "status": "cancelled"}
+
+
+class ConnectionManager:
+    """Manages WebSocket connections for real-time task updates."""
+
+    def __init__(self) -> None:
+        self._connections: Set[WebSocket] = set()
+
+    async def connect(self, websocket: WebSocket) -> None:
+        await websocket.accept()
+        self._connections.add(websocket)
+
+    def disconnect(self, websocket: WebSocket) -> None:
+        self._connections.discard(websocket)
+
+    async def broadcast(self, message: dict) -> None:
+        dead: Set[WebSocket] = set()
+        for conn in self._connections:
+            try:
+                await conn.send_json(message)
+            except Exception:
+                dead.add(conn)
+        self._connections -= dead
+
+
+manager = ConnectionManager()
+
+
+@router.websocket("/ws/tasks")
+async def task_websocket(websocket: WebSocket) -> None:
+    """Real-time task status update endpoint.
+
+    Clients connect here to receive live notifications when any task
+    changes status. Each message is a JSON object with the updated
+    task fields plus an ``event`` key indicating the action.
+    """
+    await manager.connect(websocket)
+    try:
+        while True:
+            # Keep the connection alive; client sends ping-style keepalive
+            data = await websocket.receive_text()
+            if data.lower() == "ping":
+                await websocket.send_text("pong")
+    except Exception:
+        pass
+    finally:
+        manager.disconnect(websocket)
