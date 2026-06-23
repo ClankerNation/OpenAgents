@@ -110,3 +110,53 @@ async def health():
         "tasks_indexed": len(tasks_cache),
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+
+# --- Audit log for admin actions ---
+
+import logging
+from collections import deque
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("openagents.audit")
+
+# In-memory audit log (ring buffer, max 10000 entries)
+_audit_log: deque = deque(maxlen=10000)
+
+
+class AuditEntry(BaseModel):
+    timestamp: datetime
+    action: str
+    user: Optional[str] = None
+    endpoint: Optional[str] = None
+    method: Optional[str] = None
+    status_code: Optional[int] = None
+    details: Optional[dict] = None
+
+
+def log_admin_action(action: str, user: str = "anonymous", details: dict = None, endpoint: str = None, method: str = None, status_code: int = None):
+    """Record an admin action to the audit log."""
+    entry = AuditEntry(
+        timestamp=datetime.utcnow(),
+        action=action,
+        user=user,
+        endpoint=endpoint,
+        method=method,
+        status_code=status_code,
+        details=details or {},
+    )
+    _audit_log.append(entry.model_dump())
+    logger.info("AUDIT: %s by %s at %s", action, user, endpoint)
+
+
+@app.get("/audit-log")
+async def get_audit_log(
+    action: Optional[str] = None,
+    limit: int = Query(50, le=100),
+    offset: int = Query(0),
+):
+    """Retrieve audit log entries, optionally filtered by action."""
+    entries = list(_audit_log)
+    if action:
+        entries = [e for e in entries if e["action"] == action]
+    return entries[offset : offset + limit]
