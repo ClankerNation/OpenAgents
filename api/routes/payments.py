@@ -6,7 +6,7 @@ from typing import Optional
 from datetime import datetime
 
 from ..models.database import get_db, Payment, Task
-from ..middleware.auth import get_current_user
+from ..middleware.auth import get_current_user_or_api_key
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 
@@ -26,7 +26,7 @@ class ClaimRequest(BaseModel):
 
 @router.post("/escrow/deposit")
 async def deposit_escrow(
-    deposit: EscrowDeposit, user=Depends(get_current_user), db=Depends(get_db)
+    deposit: EscrowDeposit, user=Depends(get_current_user_or_api_key), db=Depends(get_db)
 ):
     task = db.query(Task).filter(Task.id == deposit.task_id).first()
     if not task:
@@ -61,7 +61,7 @@ async def get_escrow_balance(task_id: int, db=Depends(get_db)):
 
 @router.post("/claim")
 async def claim_payment(
-    claim: ClaimRequest, user=Depends(get_current_user), db=Depends(get_db)
+    claim: ClaimRequest, user=Depends(get_current_user_or_api_key), db=Depends(get_db)
 ):
     task = db.query(Task).filter(Task.id == claim.task_id).first()
     if not task:
@@ -95,7 +95,7 @@ async def claim_payment(
 
 @router.get("/history")
 async def payment_history(
-    user=Depends(get_current_user),
+    user=Depends(get_current_user_or_api_key),
     db=Depends(get_db),
 ):
     sent = db.query(Payment).filter(Payment.from_address == user["address"]).all()

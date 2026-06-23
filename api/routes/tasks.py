@@ -6,7 +6,7 @@ from typing import Optional
 from datetime import datetime
 
 from ..models.database import get_db, Task
-from ..middleware.auth import get_current_user
+from ..middleware.auth import get_current_user_or_api_key
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -26,7 +26,7 @@ class TaskStatusUpdate(BaseModel):
 
 
 @router.post("/")
-async def create_task(task: TaskCreate, user=Depends(get_current_user), db=Depends(get_db)):
+async def create_task(task: TaskCreate, user=Depends(get_current_user_or_api_key), db=Depends(get_db)):
     new_task = Task(
         title=task.title,
         description=task.description,
@@ -73,7 +73,7 @@ async def get_task(task_id: int, db=Depends(get_db)):
 async def update_task_status(
     task_id: int,
     update: TaskStatusUpdate,
-    user=Depends(get_current_user),
+    user=Depends(get_current_user_or_api_key),
     db=Depends(get_db),
 ):
     task = db.query(Task).filter(Task.id == task_id).first()
@@ -92,7 +92,7 @@ async def update_task_status(
 
 
 @router.delete("/{task_id}")
-async def cancel_task(task_id: int, user=Depends(get_current_user), db=Depends(get_db)):
+async def cancel_task(task_id: int, user=Depends(get_current_user_or_api_key), db=Depends(get_db)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")

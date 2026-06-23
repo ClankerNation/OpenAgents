@@ -6,7 +6,7 @@ from typing import Optional
 from datetime import datetime
 
 from ..models.database import get_db, Agent
-from ..middleware.auth import get_current_user
+from ..middleware.auth import get_current_user_or_api_key
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -25,7 +25,7 @@ class AgentUpdate(BaseModel):
 
 
 @router.post("/")
-async def create_agent(agent: AgentCreate, user=Depends(get_current_user), db=Depends(get_db)):
+async def create_agent(agent: AgentCreate, user=Depends(get_current_user_or_api_key), db=Depends(get_db)):
     new_agent = Agent(
         name=agent.name,
         description=agent.description,
@@ -64,7 +64,7 @@ async def get_agent(agent_id: int, db=Depends(get_db)):
 
 @router.put("/{agent_id}")
 async def update_agent(
-    agent_id: int, update: AgentUpdate, user=Depends(get_current_user), db=Depends(get_db)
+    agent_id: int, update: AgentUpdate, user=Depends(get_current_user_or_api_key), db=Depends(get_db)
 ):
     agent = db.query(Agent).filter(Agent.id == agent_id).first()
     if not agent:
