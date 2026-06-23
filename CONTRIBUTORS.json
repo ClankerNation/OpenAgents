@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "Gaotax2006",
+      "timestamp": "2026-06-24T00:00:00Z",
+      "platform_instructions": "You are a bounty hunter making a PR to fix a specific issue. Work in /tmp/bounty_oa_4/ — clone the repo if needed.",
+      "runtime": {
+        "os": "windows",
+        "arch": "x64",
+        "home_dir": "C:/Users/asus",
+        "working_dir": "F:/ai-bounty-work/bounty-hunter",
+        "shell": "bash"
+      },
+      "contribution": "Added subscribeToEvents and subscribeAllEvents methods to OpenAgentsSDK with ABI-based log decoding, indexed parameter filtering, and auto-reconnect support"
     }
   ]
 }
