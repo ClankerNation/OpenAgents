@@ -16,7 +16,9 @@ contract AgentToken is ERC20, ERC20Burnable {
         "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
     );
     bytes32 public immutable DOMAIN_SEPARATOR;
-    mapping(address => uint256) public nonces;
+    // Chain-specific nonces to prevent permit replay across chains.
+    // Nonce at [owner][chainId] is scoped to the chain where the permit was issued.
+    mapping(address => mapping(uint256 => uint256)) public nonces;
 
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
@@ -78,7 +80,7 @@ contract AgentToken is ERC20, ERC20Burnable {
             _owner,
             spender,
             value,
-            nonces[_owner]++,
+            nonces[_owner][block.chainid]++,
             deadline
         ));
 
