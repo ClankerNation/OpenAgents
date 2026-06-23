@@ -8,6 +8,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 /// @notice Linear vesting wallet with a cliff period for token distribution.
 /// @dev Tokens vest linearly from cliff end to vesting end. The contract owner
 ///      can revoke unvested tokens and redirect them to a specified address.
+///      Includes chain-aware DOMAIN_SEPARATOR to prevent cross-chain replay attacks.
 contract VestingWallet {
     using SafeERC20 for IERC20;
 
@@ -22,6 +23,12 @@ contract VestingWallet {
     uint256 public released;
     bool public revocable;
     bool public revoked;
+
+    bytes32 public constant DOMAIN_TYPEHASH = keccak256(
+        "EIP712Domain(string name,uint256 chainId,address verifyingContract)"
+    );
+
+    bytes32 public immutable DOMAIN_SEPARATOR;
 
     event TokensReleased(address indexed beneficiary, uint256 amount);
     event VestingRevoked(address indexed token, uint256 refund);
@@ -48,6 +55,13 @@ contract VestingWallet {
         vestingDuration = _vestingDuration;
         totalAllocation = _totalAllocation;
         revocable = _revocable;
+
+        DOMAIN_SEPARATOR = keccak256(abi.encode(
+            DOMAIN_TYPEHASH,
+            keccak256(bytes("VestingWallet")),
+            block.chainid,
+            address(this)
+        ));
     }
 
     /// @notice Release vested tokens to the beneficiary.
@@ -95,6 +109,11 @@ contract VestingWallet {
 
         token.safeTransfer(owner, refund);
         emit VestingRevoked(address(token), refund);
+    }
+
+    /// @notice Get the domain separator for EIP-712 structured data.
+    function getDomainSeparator() external view returns (bytes32) {
+        return DOMAIN_SEPARATOR;
     }
 
     /// @notice Get the releasable (vested but not yet released) token amount.
