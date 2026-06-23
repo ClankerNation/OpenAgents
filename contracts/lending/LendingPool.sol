@@ -5,6 +5,10 @@ interface IPriceFeed {
     function getPrice(address token) external view returns (uint256);
 }
 
+interface IFlashLoanReceiver {
+    function onFlashLoan(address borrower, address token, uint256 amount, uint256 fee, bytes calldata data) external;
+}
+
 interface IERC20 {
     function transferFrom(address from, address to, uint256 amount) external returns (bool);
     function transfer(address to, uint256 amount) external returns (bool);
@@ -24,6 +28,7 @@ contract LendingPool {
     // should be healthy — threshold should be lower (e.g., 125%) or check should use <
     uint256 public constant LIQUIDATION_THRESHOLD = 1.5e18; // 150%
     uint256 public constant PRECISION = 1e18;
+    uint256 public constant FLASH_LOAN_FEE_BPS = 30; // 0.3% flash loan fee
 
     struct Position {
         uint256 collateralAmount;
@@ -38,6 +43,7 @@ contract LendingPool {
     event Borrowed(address indexed user, uint256 amount);
     event Repaid(address indexed user, uint256 amount);
     event Liquidated(address indexed user, address indexed liquidator, uint256 debtRepaid);
+    event FlashLoan(address indexed borrower, address indexed token, uint256 amount, uint256 fee);
 
     constructor(address _oracle, address _collateralToken, address _borrowToken) {
         oracle = IPriceFeed(_oracle);
@@ -111,5 +117,35 @@ contract LendingPool {
     function getPosition(address user) external view returns (uint256 collateral, uint256 debt) {
         Position storage pos = positions[user];
         return (pos.collateralAmount, pos.borrowedAmount);
+    }
+
+    /// @notice Execute a flash loan — borrow tokens with no collateral, must repay in same tx.
+    /// @param receiver Contract that implements IFlashLoanReceiver
+    /// @param amount Amount of borrowToken to flash loan
+    /// @param data Arbitrary calldata passed to receiver.onFlashLoan
+    function executeFlashLoan(
+        IFlashLoanReceiver receiver,
+        uint256 amount,
+        bytes calldata data
+    ) external {
+        require(amount > 0, "Zero amount");
+        require(amount <= borrowToken.balanceOf(address(this)), "Insufficient liquidity");
+
+        uint256 fee = (amount * FLASH_LOAN_FEE_BPS) / 10_000;
+        uint256 repayAmount = amount + fee;
+
+        require(borrowToken.transfer(address(receiver), amount), "Flash loan transfer failed");
+
+        receiver.onFlashLoan(msg.sender, address(borrowToken), amount, fee, data);
+
+        require(borrowToken.balanceOf(address(this)) >= totalDeposits + totalBorrowed - fee + repayAmount - amount,
+            "Flash loan repayment failed");
+
+        // Transfer fee to pool reserve
+        if (fee > 0) {
+            borrowToken.transfer(address(this), fee);
+        }
+
+        emit FlashLoan(address(receiver), address(borrowToken), amount, fee);
     }
 }
