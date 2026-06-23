@@ -1,13 +1,39 @@
+"""OpenAgents API — Off-chain indexer and agent discovery service.
+
+Contributors:
+  - Gaotax2006 <gaotax2006@gmail.com> — #178 request ID middleware
+"""
+
+import logging
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+from api.middleware.request_id import RequestIDMiddleware
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+# Configure structured logging with request ID support
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Request ID middleware (must be first so all requests get an ID)
+app.add_middleware(RequestIDMiddleware)
 
 
 class AgentResponse(BaseModel):
