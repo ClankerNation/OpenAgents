@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -8,6 +9,18 @@ app = FastAPI(
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+
+# --- Structured error response schema ---
+
+class ErrorDetail(BaseModel):
+    code: str
+    message: str
+    field: Optional[str] = None
+
+
+class ErrorResponse(BaseModel):
+    error: ErrorDetail
 
 
 class AgentResponse(BaseModel):
@@ -37,6 +50,33 @@ class LeaderboardEntry(BaseModel):
     reputation: int
     tasks_completed: int
     success_rate: float
+
+
+# --- Error code constants ---
+
+ERROR_CODES = {
+    "VALIDATION_ERROR": "VALIDATION_ERROR",
+    "NOT_FOUND": "NOT_FOUND",
+    "AUTH_FAILED": "AUTH_FAILED",
+    "RATE_LIMITED": "RATE_LIMITED",
+}
+
+
+# --- Custom exception handler ---
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    code_map = {
+        400: "VALIDATION_ERROR",
+        401: "AUTH_FAILED",
+        403: "AUTH_FAILED",
+        404: "NOT_FOUND",
+        429: "RATE_LIMITED",
+    }
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": {"code": code_map.get(exc.status_code, "INTERNAL_ERROR"), "message": exc.detail}},
+    )
 
 
 # In-memory store (placeholder for DB)
