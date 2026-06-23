@@ -34,6 +34,60 @@ contract AMMPool {
     // enabling a well-known inflation attack where attacker donates tokens to manipulate
     // share price and steal from the next depositor
     function addLiquidity(uint256 amountA, uint256 amountB) external returns (uint256 lpTokens) {
+        return _addLiquidityInternal(amountA, amountB);
+    }
+
+
+
+    /// @notice Add liquidity using Permit2 signature (gasless approval).
+    /// @param amountA Amount of token A to add.
+    /// @param amountB Amount of token B to add.
+    /// @param deadline Timestamp after which the permit expires.
+    /// @param v ECDSA recovery byte.
+    /// @param r ECDSA r value.
+    /// @param s ECDSA s value.
+    /// @return lpTokens The liquidity tokens minted.
+    function addLiquidityWithPermit2(
+        uint256 amountA,
+        uint256 amountB,
+        uint256 deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external returns (uint256 lpTokens) {
+        require(amountA > 0 && amountB > 0, "Zero amounts");
+        require(block.timestamp <= deadline, "Permit2 expired");
+
+        // Verify EIP-712 signature
+        bytes32 structHash = keccak256(abi.encode(
+            keccak256("Permit2Liquidity(address owner,uint256 amountA,uint256 amountB,uint256 nonce,uint256 deadline)"),
+            msg.sender,
+            amountA,
+            amountB,
+            0,
+            deadline
+        ));
+        bytes32 digest = keccak256(abi.encodePacked("", DOMAIN_SEPARATOR(), structHash));
+        address recovered = ecrecover(digest, v, r, s);
+        require(recovered != address(0) && recovered == msg.sender, "Permit2: invalid signature");
+
+        return _addLiquidityInternal(amountA, amountB);
+    }
+
+    /// @notice Domain separator for Permit2 liquidity signatures.
+    /// @return The EIP-712 domain separator.
+    function DOMAIN_SEPARATOR() public view returns (bytes32) {
+        return keccak256(abi.encode(
+            keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+            keccak256(bytes("AMMPool")),
+            keccak256(bytes("1")),
+            block.chainid,
+            address(this)
+        ));
+    }
+
+    /// @notice Extract liquidity addition into internal helper for reuse.
+    function _addLiquidityInternal(uint256 amountA, uint256 amountB) internal returns (uint256 lpTokens) {
         require(amountA > 0 && amountB > 0, "Zero amounts");
 
         if (totalLiquidity == 0) {

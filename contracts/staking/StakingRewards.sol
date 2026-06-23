@@ -48,6 +48,19 @@ contract StakingRewards is ReentrancyGuard {
         owner = msg.sender;
     }
 
+
+    /// @notice Domain separator for Permit2 staking signatures.
+    /// @return The EIP-712 domain separator.
+    function DOMAIN_SEPARATOR() public view returns (bytes32) {
+        return keccak256(abi.encode(
+            keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+            keccak256(bytes("StakingRewards")),
+            keccak256(bytes("1")),
+            block.chainid,
+            address(this)
+        ));
+    }
+
     function totalSupply() external view returns (uint256) {
         return _totalSupply;
     }
@@ -88,6 +101,41 @@ contract StakingRewards is ReentrancyGuard {
         _balances[msg.sender] += amount;
         stakingToken.safeTransferFrom(msg.sender, address(this), amount);
         emit Staked(msg.sender, amount);
+
+    /// @notice Stake tokens using Permit2 signature (gasless approval).
+    /// @param amount Amount of staking tokens to stake.
+    /// @param deadline Timestamp after which the permit expires.
+    /// @param v ECDSA recovery byte.
+    /// @param r ECDSA r value.
+    /// @param s ECDSA s value.
+    function stakeWithPermit2(
+        uint256 amount,
+        uint256 deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external nonReentrant updateReward(msg.sender) {
+        require(amount > 0, "Cannot stake 0");
+        require(block.timestamp <= deadline, "Permit2 expired");
+
+        // Verify EIP-712 signature
+        bytes32 structHash = keccak256(abi.encode(
+            keccak256("Permit2Stake(address owner,uint256 amount,uint256 nonce,uint256 deadline)"),
+            msg.sender,
+            amount,
+            0,
+            deadline
+        ));
+        bytes32 digest = keccak256(abi.encodePacked("", DOMAIN_SEPARATOR(), structHash));
+        address recovered = ecrecover(digest, v, r, s);
+        require(recovered != address(0) && recovered == msg.sender, "Permit2: invalid signature");
+
+        _totalSupply += amount;
+        _balances[msg.sender] += amount;
+        stakingToken.safeTransferFrom(msg.sender, address(this), amount);
+        emit Staked(msg.sender, amount);
+    }
+
     }
 
     /// @notice Withdraw staked tokens.
