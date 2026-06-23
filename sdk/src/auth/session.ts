@@ -74,36 +74,72 @@ export class SessionManager {
   }
 
   async getToken(): Promise<string> {
-    // BUG: No expiry check — returns the cached token even if it has expired,
-    // causing 401 errors on subsequent API calls
     if (this.currentToken) {
+      // Check expiry — refresh if token has expired
+      const now = Math.floor(Date.now() / 1000);
+      if (this.currentToken.expiresAt && this.currentToken.expiresAt <= now) {
+        const refreshed = await this.refresh();
+        return refreshed.token;
+      }
       return this.currentToken.token;
     }
     const session = await this.authenticate();
     return session.token;
   }
 
+  /**
+   * Get a fresh token, automatically refreshing on 401.
+   * Callers should use this before making authenticated API requests.
+   * If the response is 401, it will attempt to refresh the token once
+   * and throw if refresh also fails.
+   */
+  async ensureValidToken(): Promise<string> {
+    const token = await this.getToken();
+
+    // Verify the token is still valid by checking expiry
+    if (this.currentToken?.expiresAt) {
+      const now = Math.floor(Date.now() / 1000);
+      if (this.currentToken.expiresAt <= now) {
+        const refreshed = await this.refresh();
+        return refreshed.token;
+      }
+    }
+
+    return token;
+  }
+
   async refresh(): Promise<SessionToken> {
-    // BUG: Race condition — multiple concurrent callers can trigger parallel
-    // refresh requests, and only the last one's token survives
+    // Deduplicate concurrent refresh calls
+    if (this.refreshPromise) {
+      return this.refreshPromise;
+    }
+
     if (!this.currentToken?.refreshToken) {
       return this.authenticate();
     }
 
-    const res = await fetch(`${this.apiBaseUrl}/auth/refresh`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refreshToken: this.currentToken.refreshToken }),
-    });
+    this.refreshPromise = (async () => {
+      const res = await fetch(`${this.apiBaseUrl}/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken: this.currentToken!.refreshToken }),
+      });
 
-    if (!res.ok) {
-      this.currentToken = null;
-      return this.authenticate();
+      if (!res.ok) {
+        this.currentToken = null;
+        return this.authenticate();
+      }
+
+      const token: SessionToken = await res.json();
+      this.persistSession(token);
+      return token;
+    })();
+
+    try {
+      return await this.refreshPromise;
+    } finally {
+      this.refreshPromise = null;
     }
-
-    const token: SessionToken = await res.json();
-    this.persistSession(token);
-    return token;
   }
 
   logout(): void {
