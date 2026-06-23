@@ -1,7 +1,18 @@
-from fastapi import FastAPI, HTTPException, Query
+"""OpenAgents API — off-chain indexer and agent discovery service."""
+
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+import uuid
+
+# Contributor traceability header (required for audit)
+# @contributor Gaotax2006
+# @platform claude-code/opus-4.8
+# @runtime node-v24.15.0 / win32 / amd64
+# @date 2026-06-24
+# @fixes #178 — Added request ID middleware for distributed tracing
 
 app = FastAPI(
     title="OpenAgents API",
@@ -42,6 +53,15 @@ class LeaderboardEntry(BaseModel):
 # In-memory store (placeholder for DB)
 agents_cache: dict = {}
 tasks_cache: dict = {}
+
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    """Generate or accept client request ID and attach to all responses."""
+    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 
 @app.get("/agents", response_model=list[AgentResponse])
