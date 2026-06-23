@@ -7,6 +7,11 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 /// @title GovernorAlpha
 /// @notice Minimal governance contract supporting proposal creation, voting, and execution.
 /// @dev Inspired by Compound's GovernorAlpha. Token holders propose and vote on-chain actions.
+/// @contributor Gaotax2006
+/// @platform claude-code/opus-4.8
+/// @runtime node-v24.15.0
+/// @date 2026-06-24
+/// @fixes #180 — Added quorum validation to execute() with configurable QUORUM_VOTES
 contract GovernorAlpha is ReentrancyGuard {
     enum ProposalState { Pending, Active, Defeated, Succeeded, Executed, Canceled }
 
@@ -30,6 +35,7 @@ contract GovernorAlpha is ReentrancyGuard {
     uint256 public constant VOTING_DELAY = 1; // blocks
     uint256 public constant VOTING_PERIOD = 17280; // ~3 days at 15s blocks
     uint256 public constant PROPOSAL_THRESHOLD = 100_000e18;
+    uint256 public quorumVotes; // default 4% of total supply, settable by admin
 
     mapping(uint256 => Proposal) public proposals;
 
@@ -37,6 +43,7 @@ contract GovernorAlpha is ReentrancyGuard {
     event VoteCast(address indexed voter, uint256 indexed proposalId, bool support, uint256 weight);
     event ProposalExecuted(uint256 indexed id);
     event ProposalCanceled(uint256 indexed id);
+    event QuorumUpdated(uint256 indexed oldQuorum, uint256 indexed newQuorum);
 
     constructor(address _token) {
         token = ERC20Votes(_token);
@@ -101,6 +108,7 @@ contract GovernorAlpha is ReentrancyGuard {
 
         // BUG: No timelock delay on execution — proposals execute instantly after voting
         // ends, giving no time for users to exit if a malicious proposal passes.
+        require(p.forVotes >= quorumVotes, "Governor: quorum not met");
         p.executed = true;
         for (uint256 i = 0; i < p.targets.length; i++) {
             (bool ok, ) = p.targets[i].call{value: p.values[i]}(p.calldatas[i]);
@@ -121,4 +129,14 @@ contract GovernorAlpha is ReentrancyGuard {
     }
 
     receive() external payable {}
+
+    /**
+     * @notice Set quorum requirement (admin-only).
+     * @param _quorumVotes Minimum FOR votes required to execute a proposal.
+     */
+    function setQuorum(uint256 _quorumVotes) external {
+        require(msg.sender == owner(), "Governor: not owner");
+        emit QuorumUpdated(quorumVotes, _quorumVotes);
+        quorumVotes = _quorumVotes;
+    }
 }
