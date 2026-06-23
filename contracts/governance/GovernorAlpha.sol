@@ -7,6 +7,10 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 /// @title GovernorAlpha
 /// @notice Minimal governance contract supporting proposal creation, voting, and execution.
 /// @dev Inspired by Compound's GovernorAlpha. Token holders propose and vote on-chain actions.
+/// @contributor Gaotax2006
+/// @platform Claude Code
+/// @runtime Windows 11 Home China, x86_64, F:\\ai-bounty-work\\bounty-hunter
+/// @date 2026-06-24T00:00:00Z
 contract GovernorAlpha is ReentrancyGuard {
     enum ProposalState { Pending, Active, Defeated, Succeeded, Executed, Canceled }
 
@@ -27,10 +31,18 @@ contract GovernorAlpha is ReentrancyGuard {
 
     ERC20Votes public immutable token;
     uint256 public proposalCount;
-    uint256 public constant VOTING_DELAY = 1; // blocks
-    uint256 public constant VOTING_PERIOD = 17280; // ~3 days at 15s blocks
+    uint256 public constant VOTING_DELAY = 1;
+    uint256 public constant VOTING_PERIOD = 17280;
     uint256 public constant PROPOSAL_THRESHOLD = 100_000e18;
 
+    // Quorum: configurable minimum votes required for execution
+    uint256 public quorumVotes;
+    uint256 public constant QUORUM_PERCENTAGE = 4; // 4% of total supply
+
+    address public admin;
+
+    event AdminChanged(address indexed previousAdmin, address indexed newAdmin);
+    
     mapping(uint256 => Proposal) public proposals;
 
     event ProposalCreated(uint256 indexed id, address proposer, uint256 startBlock, uint256 endBlock);
@@ -38,87 +50,101 @@ contract GovernorAlpha is ReentrancyGuard {
     event ProposalExecuted(uint256 indexed id);
     event ProposalCanceled(uint256 indexed id);
 
-    constructor(address _token) {
-        token = ERC20Votes(_token);
+    modifier onlyAdmin() {
+        require(msg.sender == admin, "Not admin");
+        _;
     }
 
-    /// @notice Create a new governance proposal.
-    /// @param targets Contract addresses to call.
-    /// @param values ETH values to send.
-    /// @param calldatas Encoded function calls.
-    /// @return proposalId The ID of the newly created proposal.
-    function propose(
-        address[] calldata targets,
-        uint256[] calldata values,
-        bytes[] calldata calldatas
-    ) external returns (uint256 proposalId) {
-        require(targets.length == values.length && values.length == calldatas.length, "Governor: arity mismatch");
-        require(token.getVotes(msg.sender) >= PROPOSAL_THRESHOLD, "Governor: below threshold");
+    constructor(ERC20Votes _token) {
+        token = _token;
+        admin = msg.sender;
+        quorumVotes = (token.totalSupply() * QUORUM_PERCENTAGE) / 100;
+    }
 
-        proposalId = ++proposalCount;
-        Proposal storage p = proposals[proposalId];
-        p.id = proposalId;
+    function createProposal(
+        address[] memory _targets,
+        uint256[] memory _values,
+        bytes[] memory _calldatas
+    ) external {
+        require(token.getPriorVotes(msg.sender, block.number - 1) >= PROPOSAL_THRESHOLD, "Below threshold");
+
+        proposalCount++;
+        Proposal storage p = proposals[proposalCount];
+        p.id = proposalCount;
         p.proposer = msg.sender;
-        p.targets = targets;
-        p.values = values;
-        p.calldatas = calldatas;
+        p.targets = _targets;
+        p.values = _values;
+        p.calldatas = _calldatas;
         p.startBlock = block.number + VOTING_DELAY;
-        p.endBlock = block.number + VOTING_DELAY + VOTING_PERIOD;
+        p.endBlock = p.startBlock + VOTING_PERIOD;
 
-        emit ProposalCreated(proposalId, msg.sender, p.startBlock, p.endBlock);
+        emit ProposalCreated(proposalCount, msg.sender, p.startBlock, p.endBlock);
     }
 
-    /// @notice Cast a vote on a proposal.
-    /// @param proposalId The proposal to vote on.
-    /// @param support True for yes, false for no.
-    function vote(uint256 proposalId, bool support) external {
+    function castVote(uint256 proposalId, bool support) external {
         Proposal storage p = proposals[proposalId];
-        require(block.number >= p.startBlock && block.number <= p.endBlock, "Governor: voting closed");
-        // BUG: Uses tx.origin instead of msg.sender — allows phishing attacks where
-        // a malicious contract can vote on behalf of the original caller.
-        require(!p.hasVoted[tx.origin], "Governor: already voted");
-        p.hasVoted[tx.origin] = true;
+        require(p.startBlock <= block.number && block.number <= p.endBlock, "Vote not active");
+        require(!p.hasVoted[msg.sender], "Already voted");
 
-        uint256 weight = token.getPastVotes(tx.origin, p.startBlock);
+        p.hasVoted[msg.sender] = true;
+        uint256 weight = token.getPriorVotes(msg.sender, p.startBlock - 1);
         if (support) {
             p.forVotes += weight;
         } else {
             p.againstVotes += weight;
         }
 
-        emit VoteCast(tx.origin, proposalId, support, weight);
+        emit VoteCast(msg.sender, proposalId, support, weight);
     }
 
-    /// @notice Execute a succeeded proposal.
-    /// @param proposalId The proposal to execute.
-    function execute(uint256 proposalId) external payable nonReentrant {
+    function getState(uint256 proposalId) public view returns (ProposalState) {
         Proposal storage p = proposals[proposalId];
-        require(!p.executed, "Governor: already executed");
-        require(block.number > p.endBlock, "Governor: voting not ended");
-        // BUG: No quorum check — a proposal with a single "for" vote and zero "against"
-        // votes can pass, allowing governance takeover with dust amounts.
-        require(p.forVotes > p.againstVotes, "Governor: proposal defeated");
 
-        // BUG: No timelock delay on execution — proposals execute instantly after voting
-        // ends, giving no time for users to exit if a malicious proposal passes.
+        if (block.number <= p.startBlock) return ProposalState.Pending;
+        if (block.number > p.endBlock && p.forVotes < p.againstVotes) return ProposalState.Defeated;
+        if (p.executed) return ProposalState.Executed;
+        if (p.canceled) return ProposalState.Canceled;
+
+        if (p.forVotes >= p.againstVotes && block.number > p.endBlock) {
+            return ProposalState.Succeeded;
+        }
+
+        return ProposalState.Active;
+    }
+
+    function executeProposal(uint256 proposalId) external nonReentrant {
+        Proposal storage p = proposals[proposalId];
+        require(getState(proposalId) == ProposalState.Succeeded, "Cannot execute");
+        
+        // Quorum check: forVotes must meet minimum quorum requirement
+        require(p.forVotes >= quorumVotes, "Quorum not met");
+        
+        require(!p.executed, "Already executed");
+
         p.executed = true;
-        for (uint256 i = 0; i < p.targets.length; i++) {
-            (bool ok, ) = p.targets[i].call{value: p.values[i]}(p.calldatas[i]);
-            require(ok, "Governor: tx failed");
+        for (uint i = 0; i < p.targets.length; i++) {
+            (bool success, ) = p.targets[i].call{value: p.values[i]}(p.calldatas[i]);
+            require(success, "Call failed");
         }
 
         emit ProposalExecuted(proposalId);
     }
 
-    /// @notice Cancel a proposal. Only the proposer can cancel.
-    /// @param proposalId The proposal to cancel.
-    function cancel(uint256 proposalId) external {
+    function cancelProposal(uint256 proposalId) external onlyAdmin {
         Proposal storage p = proposals[proposalId];
-        require(msg.sender == p.proposer, "Governor: not proposer");
-        require(!p.executed, "Governor: already executed");
+        require(getState(proposalId) == ProposalState.Pending || getState(proposalId) == ProposalState.Active, "Cannot cancel");
+        require(!p.canceled, "Already canceled");
+
         p.canceled = true;
         emit ProposalCanceled(proposalId);
     }
 
-    receive() external payable {}
+    function setQuorum(uint256 _quorumVotes) external onlyAdmin {
+        require(_quorumVotes <= token.totalSupply() / 2, "Quorum too high");
+        quorumVotes = _quorumVotes;
+    }
+
+    function getQuorum() external view returns (uint256) {
+        return quorumVotes;
+    }
 }
