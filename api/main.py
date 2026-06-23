@@ -1,13 +1,37 @@
-from fastapi import FastAPI, HTTPException, Query
+"""OpenAgents API — off-chain indexer and agent discovery service."""
+
+import logging
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
+import uuid
+
+# Contributor traceability header
+# @contributor Gaotax2006
+# @platform claude-code/opus-4.8
+# @runtime node-v24.15.0 / win32 / amd64
+# @date 2026-06-24
+# @fixes #164 — Added request ID middleware with logging correlation
+
+logger = logging.getLogger("openagents")
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    """Attach request ID to all requests and responses for log correlation."""
+    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    logger.info("%s %s %d %s", request.method, request.url.path, response.status_code, request_id)
+    return response
 
 
 class AgentResponse(BaseModel):
@@ -44,7 +68,7 @@ agents_cache: dict = {}
 tasks_cache: dict = {}
 
 
-@app.get("/agents", response_model=list[AgentResponse])
+@app.get("/agents", response_model=List[AgentResponse])
 async def list_agents(
     active_only: bool = Query(True),
     min_reputation: int = Query(0),
@@ -65,7 +89,7 @@ async def get_agent(agent_id: str):
     return agents_cache[agent_id]
 
 
-@app.get("/tasks", response_model=list[TaskResponse])
+@app.get("/tasks", response_model=List[TaskResponse])
 async def list_tasks(
     status: Optional[str] = Query(None),
     limit: int = Query(50, le=100),
@@ -84,7 +108,7 @@ async def get_task(task_id: int):
     return tasks_cache[task_id]
 
 
-@app.get("/leaderboard", response_model=list[LeaderboardEntry])
+@app.get("/leaderboard", response_model=List[LeaderboardEntry])
 async def leaderboard(limit: int = Query(20, le=50)):
     entries = []
     for agent in agents_cache.values():
