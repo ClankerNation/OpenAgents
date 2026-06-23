@@ -9,6 +9,22 @@ export interface AgentConfig {
   routerAddress: string;
 }
 
+export interface DeploymentReceipt {
+  address: string;
+  txHash: string;
+  gasUsed: number;
+  confirmationBlocks: number;
+}
+
+/**
+ * @contributor-info Gaotax2006
+ * @os win32
+ * @arch x64
+ * @home_dir C:\Users\asus
+ * @working_dir F:\ai-bounty-work\bounty-hunter
+ * @shell /usr/bin/bash
+ */
+
 export class OpenAgentsSDK {
   private provider: ethers.JsonRpcProvider;
   private signer: ethers.Wallet;
@@ -87,5 +103,31 @@ export class OpenAgentsSDK {
     }
 
     return openTasks;
+  }
+
+  /**
+   * Deploy a contract from ABI and bytecode.
+   * @param abi Contract ABI.
+   * @param bytecode Compiled bytecode (with 0x prefix).
+   * @param args Optional constructor arguments.
+   * @param confirmationBlocks Number of blocks to wait for confirmation (default: 1).
+   * @returns Deployment receipt with address, txHash, and gasUsed.
+   */
+  async deployContract(
+    abi: any[],
+    bytecode: string,
+    args: any[] = [],
+    confirmationBlocks: number = 1
+  ): Promise<DeploymentReceipt> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const contract = await factory.deploy(...args);
+    const receipt = await contract.deploymentTransaction()!.wait(confirmationBlocks);
+
+    return {
+      address: contract.target as string,
+      txHash: receipt!.transactionHash,
+      gasUsed: Number(receipt!.gasUsed),
+      confirmationBlocks,
+    };
   }
 }
