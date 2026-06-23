@@ -1,12 +1,16 @@
 /**
  * ABI encoding/decoding utilities for EVM-compatible contract interactions.
+ *
+ * @fix-author Gaotax2006
+ * @date 2026-06-23
+ * @issue #198 Fix encoding.ts decodeParameter doesn't handle dynamic types
  */
 
-export type AbiType = "uint256" | "address" | "bytes32" | "string" | "bool";
+export type AbiType = "uint256" | "address" | "bytes32" | "string" | "bool" | "bytes" | "uint[]" | "string[]";
 
 export interface AbiParam {
   type: AbiType;
-  value: string | number | bigint | boolean;
+  value: string | number | bigint | boolean | string[] | Uint8Array;
 }
 
 export function encodeUint256(value: bigint | number): string {
@@ -85,4 +89,76 @@ export function functionSelector(signature: string): string {
 export function packCalldata(selector: string, params: AbiParam[]): string {
   const encodedParams = encodeParams(params).slice(2);
   return selector + encodedParams;
+}
+
+/**
+ * Decode an ABI-encoded value based on its type.
+ * Handles fixed-size types (uint256, address, bool, bytes32) and dynamic types (string, bytes, arrays).
+ * @param type The ABI type string to decode
+ * @param slot Hex-encoded data slot (with or without 0x prefix)
+ * @returns Decoded value matching the type
+ */
+export function decodeParameter(type: string, slot: string): string | number | bigint | boolean | string[] | Uint8Array {
+  const padded = slot.startsWith("0x") ? slot.slice(2) : slot;
+  const data = padded.padStart(64, "0");
+
+  switch (type) {
+    case "uint256":
+    case "int256":
+      return decodeUint256(data);
+
+    case "address":
+      return decodeAddress(data);
+
+    case "bytes32":
+      return "0x" + data.slice(-64);
+
+    case "bool":
+      return decodeBool(data);
+
+    case "string": {
+      // Dynamic type: data is the UTF-8 hex encoding of the string
+      const hex = data.slice(-64);
+      const bytes = Buffer.from(hex, "hex");
+      return bytes.toString("utf8");
+    }
+
+    case "bytes": {
+      const hex = data.slice(-64);
+      return Uint8Array.from(Buffer.from(hex, "hex"));
+    }
+
+    case "uint[]": {
+      // Parse array of uints from hex pairs
+      const hex = data.slice(-64);
+      const bytes = Buffer.from(hex, "hex");
+      const len = bytes.length / 32;
+      const result: bigint[] = [];
+      for (let i = 0; i < len; i++) {
+        const word = bytes.slice(i * 32, (i + 1) * 32).toString("hex").replace(/\0/g, "");
+        if (word.length > 0) {
+          result.push(BigInt("0x" + word));
+        }
+      }
+      return result.map(n => Number(n));
+    }
+
+    case "string[]": {
+      const hex = data.slice(-64);
+      const bytes = Buffer.from(hex, "hex");
+      const len = bytes.length / 32;
+      const result: string[] = [];
+      for (let i = 0; i < len; i++) {
+        const word = bytes.slice(i * 32, (i + 1) * 32);
+        const str = word.toString("utf8").replace(/\0/g, "");
+        if (str.length > 0) {
+          result.push(str);
+        }
+      }
+      return result;
+    }
+
+    default:
+      throw new Error("Unsupported type: " + type);
+  }
 }
