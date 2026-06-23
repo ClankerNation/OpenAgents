@@ -22,6 +22,7 @@ contract AgentRegistry is Ownable {
     uint256 public minReputation;
 
     event AgentRegistered(bytes32 indexed agentId, address indexed owner, string name);
+    event BatchRegistered(address indexed owner, uint256 count);
     event AgentDeactivated(bytes32 indexed agentId);
     event ReputationUpdated(bytes32 indexed agentId, uint256 newReputation);
 
@@ -92,5 +93,45 @@ contract AgentRegistry is Ownable {
     function withdrawFees() external onlyOwner {
         (bool success, ) = owner().call{value: address(this).balance}("");
         require(success, "Withdraw failed");
+    }
+
+    /// @notice Batch register multiple agents in a single transaction.
+    /// @param names Array of agent names (max 10 per batch).
+    /// @param endpoints Array of agent endpoints (must match names length).
+    /// @return agentIds Array of registered agent IDs.
+    function batchRegister(
+        string[] calldata names,
+        string[] calldata endpoints
+    ) external payable returns (bytes32[] memory) {
+        require(names.length == endpoints.length, "names/endpoints mismatch");
+        require(names.length > 0 && names.length <= 10, "invalid batch size");
+        require(msg.value >= registrationFee * names.length, "Insufficient fee");
+
+        bytes32[] memory result = new bytes32[](names.length);
+
+        for (uint256 i = 0; i < names.length; i++) {
+            require(bytes(names[i]).length > 0 && bytes(names[i]).length <= 64, "Invalid name");
+
+            bytes32 agentId = keccak256(abi.encodePacked(msg.sender, names[i], block.timestamp, i));
+
+            require(agents[agentId].registeredAt == 0, "Agent exists");
+
+            agents[agentId] = Agent({
+                owner: msg.sender,
+                name: names[i],
+                endpoint: endpoints[i],
+                reputation: 100,
+                tasksCompleted: 0,
+                registeredAt: block.timestamp,
+                active: true
+            });
+
+            ownerAgents[msg.sender].push(agentId);
+            agentIds.push(agentId);
+            result[i] = agentId;
+        }
+
+        emit BatchRegistered(msg.sender, names.length);
+        return result;
     }
 }
