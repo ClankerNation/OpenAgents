@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import "./AgentRegistry.sol";
 
-contract TaskRouter {
+contract TaskRouter is EIP712("TaskRouterRelay", "1") {
+    using ECDSA for bytes32;
     AgentRegistry public registry;
 
     enum TaskStatus { Open, Assigned, Completed, Disputed, Cancelled }
@@ -26,6 +29,13 @@ contract TaskRouter {
     event TaskAssigned(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskCompleted(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskDisputed(uint256 indexed taskId);
+    event RelayerUsed(address indexed relayer, bytes32 indexed agentId);
+
+    // Nonce tracking per agent for replay protection
+    mapping(bytes32 => uint256) public agentNonces;
+    uint256 public constant NONCE_MAX = type(uint256).max;
+
+    // EIP-712 domain separator is inherited from EIP712
 
     constructor(address _registry, uint256 _platformFee) {
         registry = AgentRegistry(_registry);
@@ -103,5 +113,54 @@ contract TaskRouter {
 
         task.status = TaskStatus.Disputed;
         emit TaskDisputed(taskId);
+    }
+
+    /// @notice EIP-712 typed data hash for signing.
+    function _hashTypedDataV4(bytes32 structHash) internal view virtual override returns (bytes32) {
+        return super._hashTypedDataV4(structHash);
+    }
+
+    /// @notice Execute a task on behalf of a registered agent via signed meta-transaction.
+    /// @param taskId ID of the task to complete.
+    /// @param result Task completion result bytes.
+    /// @param nonce Agent nonce for replay protection.
+    /// @param deadline Signature expiration timestamp.
+    /// @param signature Agent's ECDSA signature over the task completion.
+    function executeOnBehalf(
+        uint256 taskId,
+        bytes calldata result,
+        uint256 nonce,
+        uint256 deadline,
+        bytes calldata signature
+    ) external {
+        require(block.timestamp <= deadline, "Relay: signature expired");
+
+        Task storage task = tasks[taskId];
+        require(task.status == TaskStatus.Assigned, "Not assigned");
+
+        // Verify nonce hasn't been used (replay protection)
+        require(nonce <= NONCE_MAX, "Relay: invalid nonce");
+        agentNonces[task.assignedAgent] = nonce + 1;
+
+        // Verify agent signature
+        bytes32 structHash = keccak256(abi.encode(taskId, keccak256(result), nonce, deadline));
+        bytes32 digest = _hashTypedDataV4(structHash);
+        address signer = digest.recover(signature);
+
+        AgentRegistry.Agent memory agent = registry.getAgent(task.assignedAgent);
+        require(signer == agent.owner, "Relay: invalid agent signature");
+
+        // Execute task completion
+        task.result = result;
+        task.status = TaskStatus.Completed;
+
+        uint256 fee = task.reward * platformFee / 10000;
+        uint256 payout = task.reward - fee;
+
+        (bool success, ) = payable(signer).call{value: payout}("");
+        require(success, "Payout failed");
+
+        emit TaskCompleted(taskId, task.assignedAgent);
+        emit RelayerUsed(msg.sender, task.assignedAgent);
     }
 }
