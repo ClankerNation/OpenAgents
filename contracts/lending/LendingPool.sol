@@ -11,6 +11,10 @@ interface IERC20 {
     function balanceOf(address account) external view returns (uint256);
 }
 
+interface IFlashLoanReceiver {
+    function onFlashLoan(address borrower, address token, uint256 amount, uint256 fee, bytes calldata data) external;
+}
+
 /// @title LendingPool
 /// @notice Collateralized lending pool supporting deposit, borrow, repay, and liquidation
 /// @dev Uses an external price feed oracle for collateral valuation
@@ -24,6 +28,7 @@ contract LendingPool {
     // should be healthy — threshold should be lower (e.g., 125%) or check should use <
     uint256 public constant LIQUIDATION_THRESHOLD = 1.5e18; // 150%
     uint256 public constant PRECISION = 1e18;
+    uint256 public constant FLASH_LOAN_FEE = 5e14; // 0.05% fee
 
     struct Position {
         uint256 collateralAmount;
@@ -38,6 +43,7 @@ contract LendingPool {
     event Borrowed(address indexed user, uint256 amount);
     event Repaid(address indexed user, uint256 amount);
     event Liquidated(address indexed user, address indexed liquidator, uint256 debtRepaid);
+    event FlashLoan(address indexed receiver, address indexed token, uint256 amount, uint256 fee);
 
     constructor(address _oracle, address _collateralToken, address _borrowToken) {
         oracle = IPriceFeed(_oracle);
@@ -106,6 +112,28 @@ contract LendingPool {
         uint256 borrowValue = (pos.borrowedAmount * borrowPrice) / PRECISION;
 
         return collateralValue >= (borrowValue * LIQUIDATION_THRESHOLD) / PRECISION;
+    }
+
+    function flashLoan(
+        IFlashLoanReceiver receiver,
+        address token,
+        uint256 amount,
+        bytes calldata data
+    ) external {
+        require(amount > 0, "Zero amount");
+        require(token == address(borrowToken) || token == address(collateralToken), "Unsupported token");
+
+        uint256 balanceBefore = IERC20(token).balanceOf(address(this));
+        uint256 fee = (amount * FLASH_LOAN_FEE) / PRECISION;
+
+        require(IERC20(token).transfer(address(receiver), amount), "Transfer failed");
+
+        receiver.onFlashLoan(msg.sender, token, amount, fee, data);
+
+        uint256 balanceAfter = IERC20(token).balanceOf(address(this));
+        require(balanceAfter >= balanceBefore + fee, "Insufficient fee payment");
+
+        emit FlashLoan(address(receiver), token, amount, fee);
     }
 
     function getPosition(address user) external view returns (uint256 collateral, uint256 debt) {
