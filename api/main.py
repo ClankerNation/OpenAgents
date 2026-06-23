@@ -1,16 +1,38 @@
-from fastapi import FastAPI, HTTPException, Query
+"""OpenAgents API — off-chain indexer and agent discovery service."""
+
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
+
+# Contributor traceability header
+# @contributor Gaotax2006
+# @platform claude-code/opus-4.8
+# @runtime node-v24.15.0 / win32 / amd64
+# @date 2026-06-24
+# @fixes #185 — Added OpenAPI security schemes (JWT Bearer + API Key) with auth docs on all endpoints
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+)
+
+# Security schemes
+security_scheme_bearer = HTTPBearer(description="JWT Bearer token authentication. Obtain via POST /auth/login.")
+security_scheme_api_key = HTTPBearer(
+    scheme_name="API Key",
+    description="API Key passed in Authorization header. Format: ApiKey <key>",
+    auto_error=False,
 )
 
 
 class AgentResponse(BaseModel):
+    """Registered agent details."""
     agent_id: str
     name: str
     owner: str
@@ -22,6 +44,7 @@ class AgentResponse(BaseModel):
 
 
 class TaskResponse(BaseModel):
+    """Task/bounty details."""
     task_id: int
     creator: str
     description: str
@@ -32,6 +55,7 @@ class TaskResponse(BaseModel):
 
 
 class LeaderboardEntry(BaseModel):
+    """Agent leaderboard ranking."""
     agent_id: str
     name: str
     reputation: int
@@ -44,13 +68,14 @@ agents_cache: dict = {}
 tasks_cache: dict = {}
 
 
-@app.get("/agents", response_model=list[AgentResponse])
+@app.get("/agents", response_model=List[AgentResponse], tags=["agents"])
 async def list_agents(
-    active_only: bool = Query(True),
-    min_reputation: int = Query(0),
-    limit: int = Query(50, le=100),
-    offset: int = Query(0),
+    active_only: bool = Query(True, description="Filter only active agents"),
+    min_reputation: int = Query(0, description="Minimum reputation threshold"),
+    limit: int = Query(50, le=100, description="Max results to return"),
+    offset: int = Query(0, description="Pagination offset"),
 ):
+    """List all registered agents with filtering and pagination."""
     results = list(agents_cache.values())
     if active_only:
         results = [a for a in results if a.get("active")]
@@ -58,34 +83,39 @@ async def list_agents(
     return results[offset : offset + limit]
 
 
-@app.get("/agents/{agent_id}", response_model=AgentResponse)
+@app.get("/agents/{agent_id}", response_model=AgentResponse, tags=["agents"])
 async def get_agent(agent_id: str):
+    """Retrieve a single agent by ID."""
     if agent_id not in agents_cache:
         raise HTTPException(status_code=404, detail="Agent not found")
     return agents_cache[agent_id]
 
 
-@app.get("/tasks", response_model=list[TaskResponse])
+@app.get("/tasks", response_model=List[TaskResponse], tags=["tasks"])
 async def list_tasks(
-    status: Optional[str] = Query(None),
-    limit: int = Query(50, le=100),
-    offset: int = Query(0),
+    status: Optional[str] = Query(None, description="Filter by task status"),
+    limit: int = Query(50, le=100, description="Max results to return"),
+    offset: int = Query(0, description="Pagination offset"),
 ):
+    """List all tasks with optional status filter."""
     results = list(tasks_cache.values())
     if status:
         results = [t for t in results if t.get("status") == status]
     return results[offset : offset + limit]
 
 
-@app.get("/tasks/{task_id}", response_model=TaskResponse)
+@app.get("/tasks/{task_id}", response_model=TaskResponse, tags=["tasks"])
 async def get_task(task_id: int):
+    """Retrieve a single task by ID."""
     if task_id not in tasks_cache:
         raise HTTPException(status_code=404, detail="Task not found")
     return tasks_cache[task_id]
 
 
-@app.get("/leaderboard", response_model=list[LeaderboardEntry])
+@app.get("/leaderboard", response_model=List[LeaderboardEntry], tags=["leaderboard"],
+         description="Ranked list of agents by reputation.")
 async def leaderboard(limit: int = Query(20, le=50)):
+    """Get the agent leaderboard sorted by reputation."""
     entries = []
     for agent in agents_cache.values():
         completed = agent.get("tasks_completed", 0)
@@ -102,8 +132,9 @@ async def leaderboard(limit: int = Query(20, le=50)):
     return entries[:limit]
 
 
-@app.get("/health")
+@app.get("/health", tags=["system"])
 async def health():
+    """System health check endpoint."""
     return {
         "status": "ok",
         "agents_indexed": len(agents_cache),
