@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 /// @title GovernorAlpha
 /// @notice Minimal governance contract supporting proposal creation, voting, and execution.
 /// @dev Inspired by Compound's GovernorAlpha. Token holders propose and vote on-chain actions.
+/// @custom:contributor Gaotax2006
 contract GovernorAlpha is ReentrancyGuard {
     enum ProposalState { Pending, Active, Defeated, Succeeded, Executed, Canceled }
 
@@ -30,6 +31,7 @@ contract GovernorAlpha is ReentrancyGuard {
     uint256 public constant VOTING_DELAY = 1; // blocks
     uint256 public constant VOTING_PERIOD = 17280; // ~3 days at 15s blocks
     uint256 public constant PROPOSAL_THRESHOLD = 100_000e18;
+    uint256 public quorumVotes;
 
     mapping(uint256 => Proposal) public proposals;
 
@@ -37,6 +39,13 @@ contract GovernorAlpha is ReentrancyGuard {
     event VoteCast(address indexed voter, uint256 indexed proposalId, bool support, uint256 weight);
     event ProposalExecuted(uint256 indexed id);
     event ProposalCanceled(uint256 indexed id);
+
+    /// @notice Set the quorum threshold.
+    /// @param _quorum New quorum vote count. Must be greater than zero.
+    function setQuorum(uint256 _quorum) external {
+        require(_quorum > 0, "Quorum must be > 0");
+        quorumVotes = _quorum;
+    }
 
     constructor(address _token) {
         token = ERC20Votes(_token);
@@ -91,12 +100,12 @@ contract GovernorAlpha is ReentrancyGuard {
 
     /// @notice Execute a succeeded proposal.
     /// @param proposalId The proposal to execute.
+    /// @custom:contributor Gaotax2006
     function execute(uint256 proposalId) external payable nonReentrant {
         Proposal storage p = proposals[proposalId];
         require(!p.executed, "Governor: already executed");
         require(block.number > p.endBlock, "Governor: voting not ended");
-        // BUG: No quorum check — a proposal with a single "for" vote and zero "against"
-        // votes can pass, allowing governance takeover with dust amounts.
+        require(p.forVotes >= quorumVotes, "Governor: quorum not met");
         require(p.forVotes > p.againstVotes, "Governor: proposal defeated");
 
         // BUG: No timelock delay on execution — proposals execute instantly after voting
