@@ -1,9 +1,10 @@
 """Task management endpoints for bounty assignments."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Set
 from datetime import datetime
+import json
 
 from ..models.database import get_db, Task
 from ..middleware.auth import get_current_user
@@ -11,6 +12,9 @@ from ..middleware.auth import get_current_user
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 VALID_STATUSES = {"open", "assigned", "in_progress", "review", "completed", "cancelled"}
+
+# In-memory WebSocket connection store (placeholder for production Redis/pub-sub)
+active_connections: Set[WebSocket] = set()
 
 
 class TaskCreate(BaseModel):
@@ -85,9 +89,14 @@ async def update_task_status(
     if task.creator_id != user["id"]:
         raise HTTPException(status_code=403, detail="Only the creator can update status")
 
+    old_status = task.status
     task.status = update.status
     task.updated_at = datetime.utcnow()
     db.commit()
+
+    # Broadcast real-time update to websocket subscribers
+    await broadcast_task_update(task_id, old_status, update.status)
+
     return {"id": task.id, "status": task.status}
 
 
@@ -100,6 +109,48 @@ async def cancel_task(task_id: int, user=Depends(get_current_user), db=Depends(g
         raise HTTPException(status_code=403, detail="Only the creator can cancel")
     if task.status not in ("open", "assigned"):
         raise HTTPException(status_code=400, detail="Cannot cancel an active task")
+    old_status = task.status
     task.status = "cancelled"
     db.commit()
+
+    # Broadcast real-time update to websocket subscribers
+    await broadcast_task_update(task_id, old_status, "cancelled")
     return {"id": task.id, "status": "cancelled"}
+
+
+@router.websocket("/ws/task-updates")
+async def task_updates_websocket(websocket: WebSocket):
+    """Real-time websocket endpoint for task status updates.
+
+    Clients connect here to receive live notifications when any task
+    changes status. Each message is a JSON object with the task id,
+    old status, and new status.
+    """
+    await websocket.accept()
+    active_connections.add(websocket)
+    try:
+        while True:
+            # Keep connection alive; clients send "ping" to test liveness
+            data = await websocket.receive_text()
+            if data == "ping":
+                await websocket.send_text(json.dumps({"type": "pong", "timestamp": datetime.utcnow().isoformat()}))
+    except WebSocketDisconnect:
+        active_connections.discard(websocket)
+
+
+async def broadcast_task_update(task_id: int, old_status: str, new_status: str):
+    """Send a status-change event to all connected websocket clients."""
+    payload = json.dumps({
+        "type": "task_status_update",
+        "task_id": task_id,
+        "old_status": old_status,
+        "new_status": new_status,
+        "timestamp": datetime.utcnow().isoformat(),
+    })
+    disconnected: Set[WebSocket] = set()
+    for connection in active_connections:
+        try:
+            await connection.send_text(payload)
+        except Exception:
+            disconnected.add(connection)
+    active_connections -= disconnected
