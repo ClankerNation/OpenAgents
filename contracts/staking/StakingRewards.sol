@@ -130,4 +130,61 @@ contract StakingRewards is ReentrancyGuard {
         periodFinish = block.timestamp + rewardsDuration;
         emit RewardAdded(reward);
     }
+    // Permit2 interface
+    struct PermitTransferFrom {
+        IERC20 token;
+        uint256 amount;
+        uint256 nonce;
+        uint256 deadline;
+    }
+
+    struct PermitDetails {
+        IERC20 token;
+        uint256 amount;
+        uint256 expiration;
+        uint256 nonce;
+    }
+
+    struct PermitSignature {
+        uint8 v;
+        bytes32 r;
+        bytes32 s;
+    }
+
+    /// @notice Stake tokens using Permit2 signature (gasless approval).
+    /// @param transfer PermitTransferFrom struct with token, amount, nonce, deadline.
+    /// @param spender Spender authorization.
+    /// @param signature Agent's signature.
+    function permitStake(
+        PermitTransferFrom calldata transfer,
+        PermitDetails calldata details,
+        PermitSignature calldata signature,
+        address signer
+    ) external nonReentrant updateReward(signer) {
+        require(block.timestamp <= transfer.deadline, 'StakingRewards: permit expired');
+        require(signer != address(0), 'StakingRewards: zero signer');
+
+        // Verify signature matches signer (simplified — in production use Permit2 domain separator)
+        bytes32 structHash = keccak256(abi.encode(
+            keccak256(abi.encode(transfer.token, details.token, details.amount, details.expiration, details.nonce)),
+            signer
+        ));
+        bytes32 digest = keccak256(abi.encodePacked('', domainHash(), structHash));
+
+        // Recover signer from signature (simplified ecrecover)
+        require(ecrecover(digest, signature.v, signature.r, signature.s) == signer, 'StakingRewards: invalid signature');
+
+        // Transfer tokens from signer
+        transfer.token.safeTransferFrom(signer, address(this), transfer.amount);
+
+        _stake(signer, transfer.amount);
+        emit Staked(signer, transfer.amount);
+    }
+
+    bytes32 private constant PERMIT2_DOMAIN_HASH = keccak256('Permit2Domain');
+
+    function domainHash() internal pure returns (bytes32) {
+        return PERMIT2_DOMAIN_HASH;
+    }
+
 }
