@@ -37,6 +37,13 @@ contract MultiTokenStaking is Ownable, ReentrancyGuard {
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
     event Harvest(address indexed user, uint256 indexed pid, uint256 amount);
+    event PendingOwnerUpdated(address indexed newPendingOwner);
+    event AdminTransferAccepted(address indexed newOwner);
+
+    // Time-locked admin transfer
+    address public pendingOwner;
+    uint256 public constant ADMIN_TRANSFER_DELAY = 48 hours;
+    mapping(address => uint256) public pendingOwnerTimestamp;
 
     // BUG: Missing zero-address validation — rewardToken can be set to address(0),
     // causing all reward transfers to silently burn tokens or revert unpredictably.
@@ -143,5 +150,24 @@ contract MultiTokenStaking is Ownable, ReentrancyGuard {
             accRewardPerShare += reward * 1e12 / pool.totalStaked;
         }
         return user.amount * accRewardPerShare / 1e12 - user.rewardDebt;
+    }
+
+    /// @notice Start a time-locked admin transfer.
+    /// @param newOwner Address of the new owner.
+    function transferOwnership(address newOwner) external override onlyOwner {
+        require(newOwner != address(0), "Ownable: zero address");
+        pendingOwner = newOwner;
+        pendingOwnerTimestamp[newOwner] = block.timestamp;
+        emit PendingOwnerUpdated(newOwner);
+    }
+
+    /// @notice Accept ownership after the timelock delay has elapsed.
+    function acceptOwnership() external {
+        require(msg.sender == pendingOwner, "MultiTokenStaking: not pending owner");
+        require(block.timestamp >= pendingOwnerTimestamp[pendingOwner] + ADMIN_TRANSFER_DELAY,
+            "MultiTokenStaking: timelock not elapsed");
+        _transferOwnership(pendingOwner);
+        pendingOwner = address(0);
+        emit AdminTransferAccepted(pendingOwner);
     }
 }

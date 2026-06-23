@@ -31,6 +31,13 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
     event Withdraw(address indexed user, uint256 assets, uint256 sharesBurned);
     event StrategyAdded(uint256 indexed strategyId, address target);
     event StrategyAllocated(uint256 indexed strategyId, uint256 amount);
+    event PendingOwnerUpdated(address indexed newPendingOwner);
+    event AdminTransferAccepted(address indexed newOwner);
+
+    // Time-locked admin transfer
+    address public pendingOwner;
+    uint256 public constant ADMIN_TRANSFER_DELAY = 48 hours;
+    mapping(address => uint256) public pendingOwnerTimestamp;
 
     constructor(address _asset) Ownable(msg.sender) {
         asset = IERC20(_asset);
@@ -126,5 +133,24 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
     function previewDeposit(uint256 amount) external view returns (uint256) {
         if (totalShares == 0) return amount;
         return (amount * totalShares) / totalAssets();
+    }
+
+    /// @notice Start a time-locked admin transfer.
+    /// @param newOwner Address of the new owner.
+    function transferOwnership(address newOwner) external override onlyOwner {
+        require(newOwner != address(0), "Ownable: zero address");
+        pendingOwner = newOwner;
+        pendingOwnerTimestamp[newOwner] = block.timestamp;
+        emit PendingOwnerUpdated(newOwner);
+    }
+
+    /// @notice Accept ownership after the timelock delay has elapsed.
+    function acceptOwnership() external {
+        require(msg.sender == pendingOwner, "YieldAggregator: not pending owner");
+        require(block.timestamp >= pendingOwnerTimestamp[pendingOwner] + ADMIN_TRANSFER_DELAY,
+            "YieldAggregator: timelock not elapsed");
+        _transferOwnership(pendingOwner);
+        pendingOwner = address(0);
+        emit AdminTransferAccepted(pendingOwner);
     }
 }
