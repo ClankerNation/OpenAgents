@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./AgentRegistry.sol";
 
-contract TaskRouter {
+contract TaskRouter is ReentrancyGuard {
     AgentRegistry public registry;
 
     enum TaskStatus { Open, Assigned, Completed, Disputed, Cancelled }
@@ -16,6 +18,8 @@ contract TaskRouter {
         uint256 deadline;
         TaskStatus status;
         bytes result;
+        uint256 payout;
+        address claimedBy;
     }
 
     mapping(uint256 => Task) public tasks;
@@ -26,6 +30,7 @@ contract TaskRouter {
     event TaskAssigned(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskCompleted(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskDisputed(uint256 indexed taskId);
+    event PayoutClaimed(uint256 indexed taskId, address indexed agent, uint256 amount);
 
     constructor(address _registry, uint256 _platformFee) {
         registry = AgentRegistry(_registry);
@@ -66,7 +71,7 @@ contract TaskRouter {
         emit TaskAssigned(taskId, agentId);
     }
 
-    function completeTask(uint256 taskId, bytes calldata result) external {
+    function completeTask(uint256 taskId, bytes calldata result) external nonReentrant {
         Task storage task = tasks[taskId];
         require(task.status == TaskStatus.Assigned, "Not assigned");
 
@@ -79,19 +84,40 @@ contract TaskRouter {
         uint256 fee = task.reward * platformFee / 10000;
         uint256 payout = task.reward - fee;
 
-        (bool success, ) = msg.sender.call{value: payout}("");
-        require(success, "Payout failed");
+        // Store claimable amount for pull pattern — avoids push to contracts
+        // without receive/fallback that would revert the entire transaction
+        task.payout = payout;
+        task.claimedBy = agent.owner;
 
         emit TaskCompleted(taskId, task.assignedAgent);
     }
 
-    function cancelTask(uint256 taskId) external {
+    /// @notice Claim payout for a completed task.
+    /// @param taskId ID of the completed task.
+    function claimPayout(uint256 taskId) external nonReentrant {
+        Task storage task = tasks[taskId];
+        require(task.status == TaskStatus.Completed, "Task not completed");
+        require(msg.sender == task.claimedBy, "Not the claiming agent");
+        require(task.payout > 0, "No payout to claim");
+
+        uint256 payout = task.payout;
+        task.payout = 0;
+
+        // Safe ETH transfer: use call with gas stipend
+        // If recipient reverts, only this call fails — not others
+        (bool success, ) = payable(msg.sender).call{value: payout}("");
+        require(success, "Payout failed");
+
+        emit PayoutClaimed(taskId, msg.sender, payout);
+    }
+
+    function cancelTask(uint256 taskId) external nonReentrant {
         Task storage task = tasks[taskId];
         require(task.creator == msg.sender, "Not creator");
         require(task.status == TaskStatus.Open, "Cannot cancel");
 
         task.status = TaskStatus.Cancelled;
-        (bool success, ) = msg.sender.call{value: task.reward}("");
+        (bool success, ) = payable(task.creator).call{value: task.reward}("");
         require(success, "Refund failed");
     }
 
