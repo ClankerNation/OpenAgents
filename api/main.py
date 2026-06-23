@@ -1,13 +1,88 @@
-from fastapi import FastAPI, HTTPException, Query
+"""
+Off-chain indexer and agent discovery API for the OpenAgents protocol.
+
+@fix-author Gaotax2006
+@date 2026-06-23
+@issue #202 Add structured error responses with error codes
+"""
+
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+import uuid
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+
+# --- Structured error response schema ---
+
+class ErrorDetail(BaseModel):
+    code: str
+    message: str
+    details: Optional[dict] = None
+
+
+class ErrorResponse(BaseModel):
+    error: ErrorDetail
+    request_id: str
+
+
+# --- Error codes ---
+
+ERROR_CODES = {
+    "VALIDATION_ERROR": "VALIDATION_ERROR",
+    "NOT_FOUND": "NOT_FOUND",
+    "AUTH_FAILED": "AUTH_FAILED",
+    "RATE_LIMITED": "RATE_LIMITED",
+    "INTERNAL_ERROR": "INTERNAL_ERROR",
+}
+
+
+# --- Custom exception handlers ---
+
+@app.exception_handler(Exception)
+async def universal_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": {
+                "code": ERROR_CODES["INTERNAL_ERROR"],
+                "message": "Internal server error",
+                "details": None,
+            },
+            "request_id": request_id,
+        },
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    code_map = {
+        400: "VALIDATION_ERROR",
+        401: "AUTH_FAILED",
+        403: "AUTH_FAILED",
+        404: "NOT_FOUND",
+        429: "RATE_LIMITED",
+    }
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": {
+                "code": code_map.get(exc.status_code, "INTERNAL_ERROR"),
+                "message": exc.detail,
+                "details": None,
+            },
+            "request_id": request_id,
+        },
+    )
 
 
 class AgentResponse(BaseModel):
