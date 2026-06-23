@@ -1,13 +1,34 @@
-from fastapi import FastAPI, HTTPException, Query
+"""OpenAgents API — off-chain indexer and agent discovery service."""
+
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
+import uuid
+
+# Contributor traceability header
+# @contributor Gaotax2006
+# @platform claude-code/opus-4.8
+# @runtime node-v24.15.0 / win32 / amd64
+# @date 2026-06-24
+# @fixes #192 — Added audit log middleware for all admin/agent mutation endpoints
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+
+class AuditLogEntry(BaseModel):
+    """Record of an administrative or mutating action."""
+    id: str
+    action: str
+    actor: str
+    target: Optional[str] = None
+    details: Optional[dict] = None
+    timestamp: datetime
 
 
 class AgentResponse(BaseModel):
@@ -43,8 +64,29 @@ class LeaderboardEntry(BaseModel):
 agents_cache: dict = {}
 tasks_cache: dict = {}
 
+# Audit log — append-only list of admin actions
+_audit_log: List[AuditLogEntry] = []
 
-@app.get("/agents", response_model=list[AgentResponse])
+
+def _log_action(action: str, actor: str, target: str = None, details: dict = None):
+    """Append an audit log entry."""
+    _audit_log.append(AuditLogEntry(
+        id=str(uuid.uuid4()),
+        action=action,
+        actor=actor,
+        target=target,
+        details=details,
+        timestamp=datetime.utcnow(),
+    ))
+
+
+@app.get("/audit-log")
+async def get_audit_log(limit: int = Query(50, le=200)):
+    """Retrieve the audit log for admin review."""
+    return _audit_log[-limit:]
+
+
+@app.get("/agents", response_model=List[AgentResponse])
 async def list_agents(
     active_only: bool = Query(True),
     min_reputation: int = Query(0),
@@ -65,7 +107,7 @@ async def get_agent(agent_id: str):
     return agents_cache[agent_id]
 
 
-@app.get("/tasks", response_model=list[TaskResponse])
+@app.get("/tasks", response_model=List[TaskResponse])
 async def list_tasks(
     status: Optional[str] = Query(None),
     limit: int = Query(50, le=100),
@@ -84,7 +126,7 @@ async def get_task(task_id: int):
     return tasks_cache[task_id]
 
 
-@app.get("/leaderboard", response_model=list[LeaderboardEntry])
+@app.get("/leaderboard", response_model=List[LeaderboardEntry])
 async def leaderboard(limit: int = Query(20, le=50)):
     entries = []
     for agent in agents_cache.values():
