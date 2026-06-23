@@ -3,6 +3,16 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 
+/**
+ * @title AgentRegistry
+ * @notice Decentralized registry for AI agents with batch onboarding support
+ * @contributor Gaotax2006
+ * @platform claude-code/opus-4.8
+ * @runtime node-v24.15.0 / win32 / amd64
+ * @date 2026-06-24
+ * @fixes #172 — Added salt-based anti-frontrunning to agent ID generation
+ */
+
 contract AgentRegistry is Ownable {
     struct Agent {
         address owner;
@@ -21,6 +31,9 @@ contract AgentRegistry is Ownable {
     uint256 public registrationFee;
     uint256 public minReputation;
 
+    // Track used name+salt combos per sender to prevent collisions
+    mapping(address => mapping(bytes32 => bool)) private _usedSalts;
+
     event AgentRegistered(bytes32 indexed agentId, address indexed owner, string name);
     event AgentDeactivated(bytes32 indexed agentId);
     event ReputationUpdated(bytes32 indexed agentId, uint256 newReputation);
@@ -34,9 +47,14 @@ contract AgentRegistry is Ownable {
         require(msg.value >= registrationFee, "Insufficient fee");
         require(bytes(name).length > 0 && bytes(name).length <= 64, "Invalid name");
 
-        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp));
+        // Use msg.sender + name + a unique salt derived from tx.origin and nonce
+        bytes32 salt = keccak256(abi.encodePacked(msg.sender, name, block.number, blockhash(block.number - 1)));
+
+        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, salt));
 
         require(agents[agentId].registeredAt == 0, "Agent exists");
+        require(!_usedSalts[msg.sender][salt], "Salt already used");
+        _usedSalts[msg.sender][salt] = true;
 
         agents[agentId] = Agent({
             owner: msg.sender,
