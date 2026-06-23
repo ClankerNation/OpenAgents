@@ -113,15 +113,18 @@ contract CompoundVault is Ownable, ReentrancyGuard {
     }
 
     /// @notice Compound harvested rewards by converting and re-depositing.
-    /// @dev In production this would swap rewardToken -> baseToken via a DEX.
-    ///      Simplified here to direct deposit of reward token balance.
-    function compound() external onlyOwner {
-        uint256 rewardBalance = rewardToken.balanceOf(address(this));
-        if (rewardBalance == 0) return;
+    /// @dev Calls harvest() to settle rewards and fees, then compounds the
+    ///      remaining reward balance into vault shares by increasing totalDeposited.
+    function compound() external onlyOwner nonReentrant {
+        // Harvest first to settle rewards and handle fees
+        uint256 profit = harvest();
 
-        // In a real implementation, this would swap via a DEX router.
-        // For this contract, we assume baseToken == rewardToken or an oracle price.
-        uint256 compoundAmount = (rewardBalance * lastPricePerShare) / 1e18;
+        // Re-check balance after harvest (fees may have been transferred out)
+        uint256 remainingReward = rewardToken.balanceOf(address(this));
+        if (remainingReward == 0) return;
+
+        // Convert remaining rewards to base token equivalent and re-deposit
+        uint256 compoundAmount = (remainingReward * lastPricePerShare) / 1e18;
 
         totalDeposited += compoundAmount;
         lastPricePerShare = totalShares > 0 ? (totalDeposited * 1e18) / totalShares : 1e18;
