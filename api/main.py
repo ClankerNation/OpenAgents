@@ -1,7 +1,8 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Dict, Set
 from datetime import datetime
+import asyncio
 
 app = FastAPI(
     title="OpenAgents API",
@@ -110,3 +111,76 @@ async def health():
         "tasks_indexed": len(tasks_cache),
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+
+# WebSocket store: {client_id: {"tasks": set(task_ids)}}
+_active_connections: Dict[str, dict] = {}
+
+
+async def broadcast_task_update(task_id: int, update_data: dict):
+    """Broadcast a task update to all connected WebSocket clients subscribed to that task."""
+    dead_clients = []
+    for client_id, conn in _active_connections.items():
+        if task_id in conn["tasks"]:
+            try:
+                await conn["websocket"].send_json({"type": "task_update", "task_id": task_id, **update_data})
+            except Exception:
+                dead_clients.append(client_id)
+    # Clean up dead connections
+    for cid in dead_clients:
+        _active_connections.pop(cid, None)
+
+
+@app.websocket("/tasks/ws")
+async def websocket_task_updates(websocket: WebSocket):
+    """WebSocket endpoint for real-time task status updates.
+
+    Clients connect via ws://host/tasks/ws and can subscribe to specific
+    task IDs using JSON messages. Task status changes are broadcast
+    to all subscribed clients in real time.
+
+    ## Protocol
+    - Subscribe:  {"type":"subscribe","task_id":123}
+    - Unsubscribe: {"type":"unsubscribe","task_id":123}
+    - Updates:    {"type":"task_update","task_id":123,"status":"completed",...}
+    - Pings:      {"type":"ping","timestamp":"..."} (every 30s)
+    """
+    await websocket.accept()
+    client_id = str(id(websocket))
+    _active_connections[client_id] = {"tasks": set(), "websocket": websocket}
+
+    try:
+        while True:
+            data = await websocket.receive_text()
+            msg = None
+            try:
+                import json
+                msg = json.loads(data)
+            except Exception:
+                pass
+
+            if msg and msg.get("type") == "subscribe":
+                _active_connections[client_id]["tasks"].add(msg["task_id"])
+                await websocket.send_text('{"type":"subscribed","task_id":' + str(msg["task_id"]) + '}')
+            elif msg and msg.get("type") == "unsubscribe":
+                _active_connections[client_id]["tasks"].discard(msg["task_id"])
+                await websocket.send_text('{"type":"unsubscribed","task_id":' + str(msg["task_id"]) + '}')
+            else:
+                # Send heartbeat ping every 30 seconds if no message received
+                await websocket.send_text('{"type":"ping","timestamp":"' + datetime.utcnow().isoformat() + '"}')
+                await asyncio.sleep(30)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        _active_connections.pop(client_id, None)
+
+
+@app.on_event("shutdown")
+async def cleanup_websockets():
+    """Clean up all WebSocket connections on shutdown."""
+    for client_id in list(_active_connections.keys()):
+        conn = _active_connections[client_id]
+        ws = conn.get("websocket")
+        if ws:
+            await ws.close()
+    _active_connections.clear()
