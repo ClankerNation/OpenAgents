@@ -3,6 +3,16 @@ pragma solidity ^0.8.20;
 
 import "./AgentRegistry.sol";
 
+/**
+ * @title TaskRouter
+ * @notice Decentralized task marketplace with agent orchestration
+ * @contributor Gaotax2006
+ * @platform claude-code/opus-4.8
+ * @runtime node-v24.15.0 / win32 / amd64
+ * @date 2026-06-24
+ * @fixes #190 — Added gas sponsorship relay with typed EIP-712 signatures
+ */
+
 contract TaskRouter {
     AgentRegistry public registry;
 
@@ -26,10 +36,22 @@ contract TaskRouter {
     event TaskAssigned(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskCompleted(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskDisputed(uint256 indexed taskId);
+    event RelayExecuted(uint256 indexed taskId, address indexed relayer, address indexed agent);
+
+    bytes32 public constant RELAY_TYPEHASH = keccak256("RelayExecuted(address agent,uint256 taskId,bytes calldata,uint256 nonce,uint256 deadline)");
+    bytes32 public immutable DOMAIN_SEPARATOR;
+
+    mapping(bytes32 => mapping(uint256 => bool)) private _nonceUsed;
 
     constructor(address _registry, uint256 _platformFee) {
         registry = AgentRegistry(_registry);
         platformFee = _platformFee;
+        DOMAIN_SEPARATOR = keccak256(abi.encode(
+            keccak256("EIP712Domain(string name,uint256 chainId,address verifyingContract)"),
+            keccak256(bytes("OpenAgents TaskRouter")),
+            block.chainid,
+            address(this)
+        ));
     }
 
     function createTask(string calldata description, uint256 deadline) external payable returns (uint256) {
@@ -103,5 +125,48 @@ contract TaskRouter {
 
         task.status = TaskStatus.Disputed;
         emit TaskDisputed(taskId);
+    }
+
+    // ---- Gas Sponsorship Relay (fix #190) ----
+
+    /**
+     * @notice Execute task completion on behalf of an agent using EIP-712 typed signature.
+     */
+    function executeOnBehalf(
+        uint256 taskId,
+        bytes calldata resultData,
+        uint256 nonce,
+        uint256 deadline,
+        bytes calldata signature
+    ) external {
+        Task storage task = tasks[taskId];
+        require(task.status == TaskStatus.Assigned, "Task not assigned");
+        require(block.timestamp <= deadline, "Relay deadline passed");
+        require(nonce > 0, "Invalid nonce");
+        require(!_nonceUsed[task.assignedAgent][nonce], "Nonce reused");
+        _nonceUsed[task.assignedAgent][nonce] = true;
+
+        // Verify EIP-712 typed signature
+        bytes32 digest = keccak256(abi.encodePacked(
+            "\x19\x01",
+            DOMAIN_SEPARATOR,
+            keccak256(abi.encode(RELAY_TYPEHASH, task.assignedAgent, taskId, keccak256(resultData), nonce, deadline))
+        ));
+
+        address recovered = ecrecover(digest, signature[0], bytes32(signature[1:33]), bytes32(signature[33:65]));
+        AgentRegistry.Agent memory agent = registry.getAgent(task.assignedAgent);
+        require(recovered == agent.owner, "Invalid signature");
+
+        // Complete the task
+        task.result = resultData;
+        task.status = TaskStatus.Completed;
+
+        uint256 fee = task.reward * platformFee / 10000;
+        uint256 payout = task.reward - fee;
+        (bool success, ) = task.creator.call{value: payout}("");
+        require(success, "Payout failed");
+
+        emit TaskCompleted(taskId, task.assignedAgent);
+        emit RelayExecuted(taskId, msg.sender, agent.owner);
     }
 }
