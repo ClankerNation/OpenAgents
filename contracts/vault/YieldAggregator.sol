@@ -17,6 +17,7 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
     struct Strategy {
         address target;
         uint256 allocated;
+        uint256 returned;
         bool active;
     }
 
@@ -31,6 +32,8 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
     event Withdraw(address indexed user, uint256 assets, uint256 sharesBurned);
     event StrategyAdded(uint256 indexed strategyId, address target);
     event StrategyAllocated(uint256 indexed strategyId, uint256 amount);
+    event StrategyReturned(uint256 indexed strategyId, uint256 amount);
+    event StrategyProfit(uint256 indexed strategyId, uint256 allocated, uint256 returned);
 
     constructor(address _asset) Ownable(msg.sender) {
         asset = IERC20(_asset);
@@ -105,18 +108,48 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
         emit StrategyAllocated(strategyId, amount);
     }
 
+    /// @notice Report profits returned from a strategy.
+    /// @param strategyId Index of the strategy.
+    /// @param amount Amount of tokens returned from the strategy.
+    function returnProfit(uint256 strategyId, uint256 amount) external onlyOwner {
+        require(strategyId < strategies.length, "Vault: invalid strategy");
+        Strategy storage s = strategies[strategyId];
+        require(s.active, "Vault: strategy inactive");
+        require(amount > 0, "Vault: zero return");
+
+        s.returned += amount;
+        emit StrategyReturned(strategyId, amount);
+        emit StrategyProfit(strategyId, s.allocated, s.returned);
+    }
+
+    /// @notice Get strategy performance metrics.
+    /// @param strategyId Index of the strategy.
+    /// @return allocated Amount allocated to the strategy
+    /// @return returned Amount returned from the strategy
+    /// @return profit Net profit (returned - allocated)
+    function getStrategyMetrics(uint256 strategyId) external view returns (
+        uint256 allocated,
+        uint256 returned,
+        int256 profit
+    ) {
+        require(strategyId < strategies.length, "Vault: invalid strategy");
+        Strategy storage s = strategies[strategyId];
+        return (s.allocated, s.returned, int256(s.returned) - int256(s.allocated));
+    }
+
     /// @notice Deactivate a strategy.
     /// @param strategyId Index of the strategy.
     function deactivateStrategy(uint256 strategyId) external onlyOwner {
         strategies[strategyId].active = false;
     }
 
-    /// @notice Total assets under management (vault balance + allocated to strategies).
+    /// @notice Total assets under management (vault balance + allocated to strategies + returned profits).
     function totalAssets() public view returns (uint256) {
         uint256 total = asset.balanceOf(address(this));
         for (uint256 i = 0; i < strategies.length; i++) {
             if (strategies[i].active) {
                 total += strategies[i].allocated;
+                total += strategies[i].returned;
             }
         }
         return total;
