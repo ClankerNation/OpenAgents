@@ -15,6 +15,12 @@ contract AgentToken is ERC20, ERC20Burnable {
     bytes32 public constant PERMIT_TYPEHASH = keccak256(
         "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
     );
+    bytes32 public constant PERMIT2_TYPEHASH = keccak256(
+        "PermitTransferFrom(address permittedToken,uint256 allowance,uint256 nonce,uint256 deadline)"
+    );
+    bytes32 public constant PERMIT_ALLOWANCE_TYPEHASH = keccak256(
+        "PermitAllowance(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
+    );
     bytes32 public immutable DOMAIN_SEPARATOR;
     mapping(address => uint256) public nonces;
 
@@ -71,8 +77,7 @@ contract AgentToken is ERC20, ERC20Burnable {
         bytes32 r,
         bytes32 s
     ) external {
-        // BUG: Deadline is not checked — expired permits are still accepted, allowing
-        // old signatures to be used indefinitely. Should require(block.timestamp <= deadline).
+        require(block.timestamp <= deadline, "AgentToken: permit expired");
         bytes32 structHash = keccak256(abi.encode(
             PERMIT_TYPEHASH,
             _owner,
@@ -88,4 +93,80 @@ contract AgentToken is ERC20, ERC20Burnable {
 
         _approve(_owner, spender, value);
     }
+
+    /// @notice Permit2-style permit: transfer tokens via signature (SPEND from owner).
+    /// @param permitTransferFrom Signed permit data for token transfer.
+    /// @param signer Address that signed the permit.
+    /// @param to Address to receive tokens.
+    /// @param amount Amount to transfer.
+    function permitTransferFrom(
+        PermitTransferFrom calldata permitTransferFrom,
+        address signer,
+        address to,
+        uint256 amount
+    ) external {
+        require(block.timestamp <= permitTransferFrom.deadline, "AgentToken: permit expired");
+        require(signer != address(0), "AgentToken: invalid signer");
+
+        bytes32 structHash = keccak256(abi.encode(
+            PERMIT2_TYPEHASH,
+            permitTransferFrom.permittedToken,
+            permitTransferFrom.allowance,
+            permitTransferFrom.nonce,
+            permitTransferFrom.deadline
+        ));
+
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
+        address recoveredAddress = ecrecover(digest, permitTransferFrom.v, permitTransferFrom.r, permitTransferFrom.s);
+        require(recoveredAddress == signer, "AgentToken: invalid signature");
+
+        nonces[signer]++;
+        _transfer(signer, to, amount);
+    }
+
+    /// @notice Permit2-style permit: set allowance via signature.
+    /// @param permitAllowance Signed permit data for allowance.
+    /// @param signer Address that signed the permit.
+    function permitAllowance(PermitAllowanceTransfer calldata permitAllowance, address signer) external {
+        require(block.timestamp <= permitAllowance.deadline, "AgentToken: permit expired");
+        require(signer != address(0), "AgentToken: invalid signer");
+
+        bytes32 structHash = keccak256(abi.encode(
+            PERMIT_ALLOWANCE_TYPEHASH,
+            permitAllowance.owner,
+            permitAllowance.spender,
+            permitAllowance.value,
+            nonces[signer]++,
+            permitAllowance.deadline
+        ));
+
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
+        address recoveredAddress = ecrecover(digest, permitAllowance.v, permitAllowance.r, permitAllowance.s);
+        require(recoveredAddress == signer, "AgentToken: invalid signature");
+
+        _approve(signer, permitAllowance.spender, permitAllowance.value);
+    }
+}
+
+/// @notice Permit data for direct token transfer via signature.
+struct PermitTransferFrom {
+    address permittedToken;
+    uint256 allowance;
+    uint256 nonce;
+    uint256 deadline;
+    uint8 v;
+    bytes32 r;
+    bytes32 s;
+}
+
+/// @notice Permit data for setting allowance via signature.
+struct PermitAllowanceTransfer {
+    address owner;
+    address spender;
+    uint256 value;
+    uint256 nonce;
+    uint256 deadline;
+    uint8 v;
+    bytes32 r;
+    bytes32 s;
 }
