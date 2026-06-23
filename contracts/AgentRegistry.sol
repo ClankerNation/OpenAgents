@@ -21,6 +21,9 @@ contract AgentRegistry is Ownable {
     uint256 public registrationFee;
     uint256 public minReputation;
 
+    // Per-owner nonce for deterministic, front-running-resistant agent IDs
+    mapping(address => uint256) public ownerNonces;
+
     event AgentRegistered(bytes32 indexed agentId, address indexed owner, string name);
     event AgentDeactivated(bytes32 indexed agentId);
     event ReputationUpdated(bytes32 indexed agentId, uint256 newReputation);
@@ -34,7 +37,12 @@ contract AgentRegistry is Ownable {
         require(msg.value >= registrationFee, "Insufficient fee");
         require(bytes(name).length > 0 && bytes(name).length <= 64, "Invalid name");
 
-        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp));
+        // Deterministic ID via per-owner nonce prevents frontrunning:
+        // attacker cannot predict victim's nonce, thus cannot pre-compute ID
+        uint256 nonce = ownerNonces[msg.sender];
+        ownerNonces[msg.sender] = nonce + 1;
+
+        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, nonce));
 
         require(agents[agentId].registeredAt == 0, "Agent exists");
 
