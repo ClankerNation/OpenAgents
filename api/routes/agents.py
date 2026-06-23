@@ -1,7 +1,10 @@
 """Agent CRUD endpoints for the OpenAgents platform."""
 
+import ipaddress
+from urllib.parse import urlparse
+
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional
 from datetime import datetime
 
@@ -16,6 +19,75 @@ class AgentCreate(BaseModel):
     description: Optional[str] = None
     model_type: str = "gpt-4"
     config: Optional[dict] = None
+    endpoint: Optional[str] = None
+
+    @field_validator("endpoint")
+    @classmethod
+    def validate_endpoint_url(cls, v: Optional[str]) -> Optional[str]:
+        """Validate endpoint URL to prevent SSRF attacks.
+
+        SSRF protection checks:
+        - Only http/https protocols allowed
+        - URL must be well-formed
+        - Resolved IP must not be private/reserved/loopback/link-local
+        """
+        if v is None:
+            return v
+
+        parsed = urlparse(v)
+
+        # Only allow http and https schemes
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(
+                f"Endpoint URL must use http or https scheme, got '{parsed.scheme}'"
+            )
+
+        hostname = parsed.hostname
+        if hostname is None:
+            raise ValueError("Endpoint URL must contain a valid hostname")
+
+        # Check if hostname is an IP address (direct IP = SSRF risk)
+        try:
+            ip = ipaddress.ip_address(hostname)
+            if cls._is_private_ip(ip):
+                raise ValueError(
+                    f"Endpoint URL points to a private/reserved IP address ({hostname}), "
+                    "which is blocked to prevent SSRF attacks"
+                )
+        except ValueError:
+            # Hostname is a domain name, resolve it and check IPs
+            import socket
+
+            try:
+                addr_info = socket.getaddrinfo(hostname, None)
+                for family, _, _, _, sockaddr in addr_info:
+                    ip_str = sockaddr[0]
+                    try:
+                        ip_obj = ipaddress.ip_address(ip_str)
+                        if cls._is_private_ip(ip_obj):
+                            raise ValueError(
+                                f"Endpoint URL resolves to a private/reserved IP address "
+                                f"({ip_str}), which is blocked to prevent SSRF attacks"
+                            )
+                    except ValueError as e:
+                        if "private/reserved" in str(e):
+                            raise
+            except socket.gaierror:
+                raise ValueError(f"Could not resolve hostname '{hostname}'")
+
+        return v
+
+    @staticmethod
+    def _is_private_ip(ip) -> bool:
+        """Check if an IP address is private/reserved/loopback/link-local."""
+        return (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        )
 
 
 class AgentUpdate(BaseModel):
