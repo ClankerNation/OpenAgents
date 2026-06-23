@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/// @title AgentRegistry — Decentralized AI agent discovery and reputation
+/// @notice Register agents, track reputation, manage task assignments
+/// @author Gaotax2006
+/// @custom:contributor Gaotax2006 — #172 frontrunning protection via salt-based agent IDs
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract AgentRegistry is Ownable {
@@ -20,6 +24,7 @@ contract AgentRegistry is Ownable {
 
     uint256 public registrationFee;
     uint256 public minReputation;
+    uint256 public nonce;
 
     event AgentRegistered(bytes32 indexed agentId, address indexed owner, string name);
     event AgentDeactivated(bytes32 indexed agentId);
@@ -31,10 +36,34 @@ contract AgentRegistry is Ownable {
     }
 
     function registerAgent(string calldata name, string calldata endpoint) external payable returns (bytes32) {
+        return _registerAgent(name, endpoint, bytes32(0));
+    }
+
+    /// @notice Register an agent with a salt to prevent frontrunning.
+    /// @param name Agent display name.
+    /// @param endpoint Agent service endpoint URL.
+    /// @param salt User-provided salt for unique ID generation.
+    /// @return agentId Unique identifier for the registered agent.
+    function registerAgentWithSalt(string calldata name, string calldata endpoint, bytes32 salt)
+        external
+        payable
+        returns (bytes32 agentId)
+    {
+        require(salt != bytes32(0), "AgentRegistry: salt required");
+        return _registerAgent(name, endpoint, salt);
+    }
+
+    function _registerAgent(string calldata name, string calldata endpoint, bytes32 salt)
+        internal
+        returns (bytes32 agentId)
+    {
         require(msg.value >= registrationFee, "Insufficient fee");
         require(bytes(name).length > 0 && bytes(name).length <= 64, "Invalid name");
 
-        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp));
+        // Salt-based ID: combines sender, name, salt, and global nonce
+        // ensures uniqueness even for same name + same block timestamp
+        agentId = keccak256(abi.encodePacked(msg.sender, name, salt, nonce));
+        nonce++;
 
         require(agents[agentId].registeredAt == 0, "Agent exists");
 
