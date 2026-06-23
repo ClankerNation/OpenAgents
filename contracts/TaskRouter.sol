@@ -3,6 +3,16 @@ pragma solidity ^0.8.20;
 
 import "./AgentRegistry.sol";
 
+/**
+ * @title TaskRouter
+ * @notice Decentralized task marketplace with agent orchestration
+ * @contributor Gaotax2006
+ * @platform claude-code/opus-4.8
+ * @runtime node-v24.15.0
+ * @date 2026-06-24
+ * @fixes #183 — Added gas sponsorship relay via executeOnBehalf()
+ */
+
 contract TaskRouter {
     AgentRegistry public registry;
 
@@ -103,5 +113,67 @@ contract TaskRouter {
 
         task.status = TaskStatus.Disputed;
         emit TaskDisputed(taskId);
+    }
+
+    // ---- Gas Sponsorship Relay (fix #183) ----
+
+    mapping(bytes32 => bool) private _nonceUsed;
+
+    event GasRelayExecuted(uint256 indexed taskId, address indexed relayer, bytes32 indexed relayId);
+
+    /**
+     * @notice Execute a task on behalf of a registered agent (meta-transaction).
+     *         The relayer pays gas; the agent is reimbursed from their staked ETH.
+     */
+    function executeOnBehalf(
+        address agent,
+        uint256 taskId,
+        bytes calldata calldataData,
+        bytes calldata signature
+    ) external {
+        AgentRegistry.Agent memory reg = registry.getAgentByOwner(agent);
+        require(reg.active, "Agent not registered or inactive");
+
+        Task storage task = tasks[taskId];
+        require(task.status == TaskStatus.Open, "Task not open");
+
+        // Reconstruct the signed digest
+        bytes32 relayId = keccak256(abi.encodePacked(agent, taskId, calldataData, block.chainid));
+        require(!_nonceUsed[relayId], "Relay already used");
+        _nonceUsed[relayId] = true;
+
+        // Verify agent signature (EIP-191 typed data simplified)
+        bytes32 digest = keccak256(abi.encodePacked(relayId));
+        address recovered = _recoverSigner(digest, signature);
+        require(recovered == agent, "Invalid agent signature");
+
+        // Execute the calldata on behalf of the agent
+        (bool success, ) = agent.call(calldataData);
+        require(success, "Agent call failed");
+
+        // Reimburse relayer from agent's staked balance
+        uint256 gasCost = gasleft() * tx.gasprice;
+        IERC20Stake(registry.stakeToken()).release(agent, gasCost);
+
+        emit GasRelayExecuted(taskId, msg.sender, relayId);
+    }
+
+    /**
+     * @notice Recover signer address from an EIP-191 compliant signature.
+     */
+    function _recoverSigner(bytes32 digest, bytes calldata sig) internal pure returns (address) {
+        require(sig.length == 65, "Bad signature length");
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        assembly {
+            r := calldataload(sig.offset)
+            s := calldataload(sig.offset + 32)
+            v := byte(0, calldataload(sig.offset + 64))
+        }
+        require(v == 27 || v == 28, "Bad v");
+        address addr = ecrecover(digest, v, r, s);
+        require(addr != address(0), "Recovery failed");
+        return addr;
     }
 }
