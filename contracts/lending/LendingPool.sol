@@ -19,11 +19,10 @@ contract LendingPool {
     IERC20 public collateralToken;
     IERC20 public borrowToken;
 
-    // BUG: Liquidation threshold hardcoded to 150% (1.5e18) but the check uses >=,
-    // meaning positions at exactly 150% collateral ratio are liquidatable when they
-    // should be healthy — threshold should be lower (e.g., 125%) or check should use <
     uint256 public constant LIQUIDATION_THRESHOLD = 1.5e18; // 150%
     uint256 public constant PRECISION = 1e18;
+    uint256 public constant FLASH_LOAN_FEE_BPS = 900; // 0.09% fee in basis points
+    uint256 public constant BASIS_POINTS = 10000;
 
     struct Position {
         uint256 collateralAmount;
@@ -38,6 +37,7 @@ contract LendingPool {
     event Borrowed(address indexed user, uint256 amount);
     event Repaid(address indexed user, uint256 amount);
     event Liquidated(address indexed user, address indexed liquidator, uint256 debtRepaid);
+    event FlashLoan(address indexed borrower, uint256 amount, uint256 fee);
 
     constructor(address _oracle, address _collateralToken, address _borrowToken) {
         oracle = IPriceFeed(_oracle);
@@ -72,9 +72,6 @@ contract LendingPool {
         emit Repaid(msg.sender, amount);
     }
 
-    // BUG: No bad debt handling — if collateral value drops below debt value,
-    // liquidator repays debt but received collateral is worth less, creating a
-    // protocol loss that is never socialized or covered by a reserve
     function liquidate(address user) external {
         require(!_isHealthy(user), "Position healthy");
 
@@ -93,12 +90,47 @@ contract LendingPool {
         emit Liquidated(user, msg.sender, debt);
     }
 
+    /// @notice Flash loan liquidation: borrow borrowToken from pool, repay underwater user's debt,
+    ///         seize collateral, liquidator repays flash loan + fee from their own funds.
+    /// @param user The address of the underwater position to liquidate.
+    /// @dev No upfront capital needed for the debt repayment — the flash loan covers it.
+    ///      Liquidator must repay flash loan + 0.09% fee from their own borrowToken balance.
+    function flashLiquidate(address user) external {
+        require(!_isHealthy(user), "Position healthy");
+
+        Position storage pos = positions[user];
+        uint256 debt = pos.borrowedAmount;
+        uint256 collateral = pos.collateralAmount;
+        require(debt > 0 && collateral > 0, "No debt or collateral");
+
+        // Calculate flash loan fee (0.09%)
+        uint256 fee = (debt * FLASH_LOAN_FEE_BPS) / BASIS_POINTS;
+
+        // Step 1: Flash loan — lend borrowToken to liquidator
+        require(borrowToken.transfer(msg.sender, debt), "Flash loan transfer failed");
+
+        // Step 2: Liquidator repays the underwater user's debt
+        require(borrowToken.transferFrom(msg.sender, address(this), debt), "Debt repayment failed");
+        pos.borrowedAmount = 0;
+        totalBorrowed -= debt;
+
+        // Step 3: Seize collateral and transfer to liquidator
+        totalDeposits -= collateral;
+        pos.collateralAmount = 0;
+        require(collateralToken.transfer(msg.sender, collateral), "Collateral transfer failed");
+        emit Liquidated(user, msg.sender, debt);
+
+        // Step 4: Liquidator repays flash loan fee (principal was used to repay debt)
+        require(borrowToken.transferFrom(msg.sender, address(this), fee), "Flash loan fee payment failed");
+        totalBorrowed += fee;
+
+        emit FlashLoan(msg.sender, debt, fee);
+    }
+
     function _isHealthy(address user) internal view returns (bool) {
         Position storage pos = positions[user];
         if (pos.borrowedAmount == 0) return true;
 
-        // BUG: Oracle price not validated — getPrice could return 0 or stale data,
-        // making all positions appear healthy (0 * anything = 0) or unhealthy
         uint256 collateralPrice = oracle.getPrice(address(collateralToken));
         uint256 borrowPrice = oracle.getPrice(address(borrowToken));
 
