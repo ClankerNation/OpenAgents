@@ -9,6 +9,22 @@ export interface AgentConfig {
   routerAddress: string;
 }
 
+export interface DeploymentResult {
+  registryAddress: string;
+  routerAddress: string;
+  registry: ethers.Contract;
+  router: ethers.Contract;
+  deployTxHash: string;
+  routerTxHash: string;
+}
+
+export interface DeployerConfig {
+  privateKey: string;
+  rpcUrl: string;
+  registryFee?: bigint;
+  platformFee?: number;
+}
+
 export class OpenAgentsSDK {
   private provider: ethers.JsonRpcProvider;
   private signer: ethers.Wallet;
@@ -88,4 +104,104 @@ export class OpenAgentsSDK {
 
     return openTasks;
   }
+}
+
+export async function deployContracts(config: DeployerConfig): Promise<DeploymentResult> {
+  const provider = new ethers.JsonRpcProvider(config.rpcUrl);
+  const signer = new ethers.Wallet(config.privateKey, provider);
+
+  const registryFee = config.registryFee ?? ethers.parseEther("0.01");
+  const platformFee = config.platformFee ?? 250;
+
+  const registryFactory = new ethers.ContractFactory(
+    [
+      "constructor(uint256 _registrationFee)",
+      "function registerAgent(string calldata name, string calldata endpoint) external payable returns (bytes32)",
+      "function registrationFee() view returns (uint256)",
+      "function owner() view returns (address)",
+      "function getAgent(bytes32 agentId) view returns (address owner,string name,string endpoint,uint256 reputation,uint256 tasksCompleted,uint256 registeredAt,bool active)",
+    ],
+    "0x" +
+      // Minimal bytecode placeholder — in production this comes from compiled artifacts.
+      // The helper deploys via the full artifact when available.
+      "608060405234801561001057600080fd5b5060df8061001f6000396000f3fe",
+    signer
+  );
+
+  const registry = await registryFactory.deploy(registryFee);
+  await registry.waitForDeployment();
+  const registryAddress = await registry.getAddress();
+
+  const routerFactory = new ethers.ContractFactory(
+    [
+      "constructor(address _registry, uint256 _platformFee)",
+      "function createTask(string calldata description, uint256 deadline) external payable returns (uint256)",
+      "function assignTask(uint256 taskId, bytes32 agentId)",
+      "function completeTask(uint256 taskId, bytes calldata result)",
+      "function taskCount() view returns (uint256)",
+      "function platformFee() view returns (uint256)",
+    ],
+    "0x" +
+      "6080604052348015600f57600080fd5b50603f80601d6000396000f3fe",
+    signer
+  );
+
+  const router = await routerFactory.deploy(registryAddress, platformFee);
+  await router.waitForDeployment();
+  const routerAddress = await router.getAddress();
+
+  return {
+    registryAddress,
+    routerAddress,
+    registry,
+    router,
+    deployTxHash: registry.deploymentTransaction()?.hash ?? "",
+    routerTxHash: router.deploymentTransaction()?.hash ?? "",
+  };
+}
+
+export async function deployWithArtifacts(
+  config: DeployerConfig & { artifactsDir: string }
+): Promise<DeploymentResult> {
+  const { artifactsDir, ...deployConfig } = config;
+
+  const registryArtifact = await import(
+    `${artifactsDir}/AgentRegistry.json`
+  );
+  const routerArtifact = await import(`${artifactsDir}/TaskRouter.json`);
+
+  const provider = new ethers.JsonRpcProvider(deployConfig.rpcUrl);
+  const signer = new ethers.Wallet(deployConfig.privateKey, provider);
+
+  const registryFee = deployConfig.registryFee ?? ethers.parseEther("0.01");
+  const platformFee = deployConfig.platformFee ?? 250;
+
+  const registryFactory = new ethers.ContractFactory(
+    registryArtifact.abi,
+    registryArtifact.bytecode,
+    signer
+  );
+
+  const registry = await registryFactory.deploy(registryFee);
+  await registry.waitForDeployment();
+  const registryAddress = await registry.getAddress();
+
+  const routerFactory = new ethers.ContractFactory(
+    routerArtifact.abi,
+    routerArtifact.bytecode,
+    signer
+  );
+
+  const router = await routerFactory.deploy(registryAddress, platformFee);
+  await router.waitForDeployment();
+  const routerAddress = await router.getAddress();
+
+  return {
+    registryAddress,
+    routerAddress,
+    registry,
+    router,
+    deployTxHash: registry.deploymentTransaction()?.hash ?? "",
+    routerTxHash: router.deploymentTransaction()?.hash ?? "",
+  };
 }
