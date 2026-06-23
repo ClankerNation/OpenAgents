@@ -21,12 +21,21 @@ export interface RpcProviderConfig {
   headers?: Record<string, string>;
 }
 
+/**
+ * @contributor Gaotax2006
+ * @platform claude-code/opus-4.8
+ * @runtime node-v24.15.0 / win32 / amd64
+ * @date 2026-06-24
+ * @fixes #160 — Batch response matching by id, partial failure handling, timeout, batch limit
+ */
+
 export class RpcProvider {
   private url: string;
   private chainId: number;
   private retryOptions: RetryOptions;
   private headers: Record<string, string>;
   private requestId = 0;
+  private static readonly MAX_BATCH_SIZE = 100;
 
   constructor(config: RpcProviderConfig) {
     this.url = config.url;
@@ -44,31 +53,49 @@ export class RpcProvider {
     };
 
     return withRetry(async () => {
-      // BUG: No timeout — fetch can hang indefinitely if the RPC node is unresponsive
-      const res = await fetch(this.url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...this.headers },
-        body: JSON.stringify(request),
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
 
-      const json = await res.json();
+      try {
+        const res = await fetch(this.url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...this.headers },
+          body: JSON.stringify(request),
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
 
-      // BUG: Error response is not type-checked — json.error could have unexpected
-      // shape and json.result is returned even when error is present
-      if (json.error) {
-        throw new Error(`RPC error ${json.error.code}: ${json.error.message}`);
+        const json: JsonRpcResponse = await res.json();
+
+        if (json.error) {
+          throw new Error(`RPC error ${json.error.code}: ${json.error.message}`);
+        }
+        if (json.id !== request.id) {
+          throw new Error("Response ID mismatch");
+        }
+
+        return json.result;
+      } catch (e) {
+        clearTimeout(timeoutId);
+        throw e;
       }
-
-      return json.result;
     }, this.retryOptions);
   }
 
+  /**
+   * Execute batch RPC calls. Responses are matched by id (not sorted),
+   * and partial failures are reported rather than silently dropping results.
+   */
   async batchCall(
     calls: Array<{ method: string; params: unknown[] }>
-  ): Promise<unknown[]> {
-    // BUG: No limit on batch size — sending thousands of calls in one batch
-    // can exceed the node's gas/payload limit and fail silently or OOM
-    const requests: JsonRpcRequest[] = calls.map((c) => ({
+  ): Promise<(unknown | Error)[]> {
+    // Limit batch size to prevent node overload
+    const limited = calls.slice(0, RpcProvider.MAX_BATCH_SIZE);
+    if (limited.length !== calls.length) {
+      console.warn(`Batch call limited to ${RpcProvider.MAX_BATCH_SIZE} (requested ${calls.length})`);
+    }
+
+    const requests: JsonRpcRequest[] = limited.map((c) => ({
       jsonrpc: "2.0" as const,
       id: ++this.requestId,
       method: c.method,
@@ -82,9 +109,29 @@ export class RpcProvider {
     });
 
     const responses: JsonRpcResponse[] = await res.json();
-    return responses
-      .sort((a, b) => a.id - b.id)
-      .map((r) => r.result);
+
+    // Build a map of id -> response for O(1) matching
+    const responseMap = new Map<number, JsonRpcResponse>();
+    for (const resp of responses) {
+      responseMap.set(resp.id, resp);
+    }
+
+    // Match responses to requests by id (not sort!)
+    const results: (unknown | Error)[] = [];
+    for (const req of requests) {
+      const resp = responseMap.get(req.id);
+      if (!resp) {
+        results.push(new Error(`No response for request id ${req.id}`));
+        continue;
+      }
+      if (resp.error) {
+        results.push(new Error(`RPC error for ${req.method}: ${resp.error.message}`));
+      } else {
+        results.push(resp.result);
+      }
+    }
+
+    return results;
   }
 
   async getBlockNumber(): Promise<number> {
