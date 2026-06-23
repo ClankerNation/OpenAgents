@@ -1,21 +1,68 @@
 """Agent CRUD endpoints for the OpenAgents platform."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional
 from datetime import datetime
+import re
+import socket
+import httpx
 
 from ..models.database import get_db, Agent
 from ..middleware.auth import get_current_user
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
+# Allow only public, non-loopback, non-private IP ranges
+_PRIVATE_IPS = re.compile(
+    r"^https?://(127\.\d{1,3}\.\d{1,3}\.\d{1,3}"  # loopback
+    r"|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"              # 10/8
+    r"|172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"   # 172.16-31/12
+    r"|192\.168\.\d{1,3}\.\d{1,3}"                  # 192.168/16
+    r"|169\.254\.\d{1,3}\.\d{1,3}"                  # link-local
+    r"|::1"                                         # IPv6 loopback
+    r"|fe80:"                                       # IPv6 link-local
+    r"|127\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}"    # IPv4-mapped
+    r")(:\d+)?$"
+)
+
+# Strict URL regex: scheme://host[:port]/path
+_URL_RE = re.compile(
+    r"^https?://"
+    r"[A-Za-z0-9]([A-Za-z0-9\-]*[A-Za-z0-9])?"  # host
+    r"(\.[A-Za-z0-9]([A-Za-z0-9\-]*[A-Za-z0-9])?)*"  # subdomains
+    r"(:\d{1,5})?"                                # optional port
+    r"(/[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%{}]*)?$"  # optional path
+)
+
 
 class AgentCreate(BaseModel):
-    name: str  # BUG: No validation — name can contain SQL injection, XSS, or be empty
+    """Schema for registering a new agent."""
+
+    name: str
     description: Optional[str] = None
     model_type: str = "gpt-4"
     config: Optional[dict] = None
+    endpoint: str  # HTTP(S) URL where the agent listens for tasks
+
+    @field_validator("name")
+    @classmethod
+    def name_not_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Agent name must not be empty")
+        if len(v) > 128:
+            raise ValueError("Agent name must be <= 128 characters")
+        return v
+
+    @field_validator("endpoint")
+    @classmethod
+    def validate_endpoint(cls, v: str) -> str:
+        """Validate URL format, scheme, and SSRF protection."""
+        if not _URL_RE.match(v):
+            raise ValueError("Endpoint must be a valid HTTP/HTTPS URL")
+        if _PRIVATE_IPS.match(v):
+            raise ValueError("Endpoint must not resolve to a private or loopback IP")
+        return v.lower()
 
 
 class AgentUpdate(BaseModel):
@@ -31,13 +78,14 @@ async def create_agent(agent: AgentCreate, user=Depends(get_current_user), db=De
         description=agent.description,
         model_type=agent.model_type,
         config=agent.config or {},
+        endpoint=agent.endpoint,
         owner_id=user["id"],
         created_at=datetime.utcnow(),
     )
     db.add(new_agent)
     db.commit()
     db.refresh(new_agent)
-    return {"id": new_agent.id, "name": new_agent.name, "owner": user["address"]}
+    return {"id": new_agent.id, "name": new_agent.name, "owner": user["address"], "endpoint": new_agent.endpoint}
 
 
 @router.get("/")
