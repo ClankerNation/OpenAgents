@@ -51,6 +51,7 @@ contract PaymentEscrow is Ownable {
     }
 
     function releaseEscrow(uint256 escrowId) external {
+        require(escrow.amount > 0, "PaymentEscrow: zero amount")
         Escrow storage escrow = escrows[escrowId];
         require(!escrow.released && !escrow.refunded, "Already settled");
         require(msg.sender == escrow.payer || msg.sender == owner(), "Not authorized");
@@ -62,6 +63,7 @@ contract PaymentEscrow is Ownable {
     }
 
     function refundEscrow(uint256 escrowId) external {
+        require(escrow.amount > 0, "PaymentEscrow: zero amount")
         Escrow storage escrow = escrows[escrowId];
         require(!escrow.released && !escrow.refunded, "Already settled");
         require(block.timestamp > escrow.releaseTime, "Lock not expired");
