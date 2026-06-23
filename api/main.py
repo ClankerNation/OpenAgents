@@ -1,7 +1,9 @@
 from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional
 from datetime import datetime
+import ipaddress
+import re
 
 app = FastAPI(
     title="OpenAgents API",
@@ -19,6 +21,28 @@ class AgentResponse(BaseModel):
     tasks_completed: int
     registered_at: datetime
     active: bool
+
+    @field_validator("endpoint")
+    @classmethod
+    def validate_endpoint(cls, v: str) -> str:
+        """Validate endpoint URL format and block SSRF targets."""
+        if not v or not v.startswith(("http://", "https://")):
+            raise ValueError("Endpoint must start with http:// or https://")
+
+        # Extract host from URL
+        host = v.replace("http://", "").replace("https://", "").split("/")[0].split(":")[0]
+
+        # Block localhost and private IPs
+        try:
+            ip = ipaddress.ip_address(host)
+            if ip.is_private or ip.is_loopback or ip.is_reserved:
+                raise ValueError("Endpoint cannot point to private/internal IP")
+        except ValueError:
+            # Not an IP — it's a domain name, check for common SSRF patterns
+            if host.startswith("127.") or host == "localhost" or host.endswith(".internal"):
+                raise ValueError("Endpoint cannot point to internal host")
+
+        return v
 
 
 class TaskResponse(BaseModel):
