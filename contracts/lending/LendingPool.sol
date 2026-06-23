@@ -140,6 +140,54 @@ contract LendingPool {
         return collateralValue >= (borrowValue * LIQUIDATION_THRESHOLD) / PRECISION;
     }
 
+
+    /// @notice Deposit collateral using Permit2 signature (gasless approval).
+    /// @param amount Amount of collateral tokens to deposit.
+    /// @param deadline Timestamp after which the permit expires.
+    /// @param v ECDSA recovery byte.
+    /// @param r ECDSA r value.
+    /// @param s ECDSA s value.
+    function depositWithPermit2(
+        uint256 amount,
+        uint256 deadline,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) external {
+        require(amount > 0, "Zero amount");
+        require(block.timestamp <= deadline, "Permit2 expired");
+
+        // Verify EIP-712 signature
+        bytes32 structHash = keccak256(abi.encode(
+            keccak256("Permit2Deposit(address owner,uint256 amount,uint256 nonce,uint256 deadline)"),
+            msg.sender,
+            amount,
+            0,
+            deadline
+        ));
+        bytes32 digest = keccak256(abi.encodePacked("", DOMAIN_SEPARATOR(), structHash));
+        address recovered = ecrecover(digest, v, r, s);
+        require(recovered != address(0) && recovered == msg.sender, "Permit2: invalid signature");
+
+        // Transfer tokens (caller must have approved this contract)
+        require(collateralToken.transferFrom(msg.sender, address(this), amount), "Transfer failed");
+        positions[msg.sender].collateralAmount += amount;
+        totalDeposits += amount;
+        emit Deposited(msg.sender, amount);
+    }
+
+    /// @notice Domain separator for Permit2 deposit signatures.
+    /// @return The EIP-712 domain separator.
+    function DOMAIN_SEPARATOR() public view returns (bytes32) {
+        return keccak256(abi.encode(
+            keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+            keccak256(bytes("LendingPool")),
+            keccak256(bytes("1")),
+            block.chainid,
+            address(this)
+        ));
+    }
+
     function getPosition(address user) external view returns (uint256 collateral, uint256 debt) {
         Position storage pos = positions[user];
         return (pos.collateralAmount, pos.borrowedAmount);
