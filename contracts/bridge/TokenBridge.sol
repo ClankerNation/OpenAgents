@@ -9,6 +9,8 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 /// @notice Cross-chain token bridge with multi-validator signature verification.
 /// @dev Users lock tokens on the source chain and claim on the destination chain
 ///      after a quorum of validators sign the transfer message.
+/// @contributor Gaotax2006
+/// @date 2026-06-23
 contract TokenBridge is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -25,6 +27,10 @@ contract TokenBridge is ReentrancyGuard {
     mapping(address => bool) public isValidator;
     mapping(bytes32 => Transfer) public transfers;
     mapping(bytes32 => bool) public processedHashes;
+    // FIX: Token mapping from local chain address to remote chain address
+    mapping(address => address) public tokenMapping;
+
+    event TokenMappingAdded(address indexed localToken, address indexed remoteToken);
 
     event TokensLocked(bytes32 indexed transferId, address token, address sender, address recipient, uint256 amount);
     event TokensClaimed(bytes32 indexed transferId, address token, address recipient, uint256 amount);
@@ -48,12 +54,10 @@ contract TokenBridge is ReentrancyGuard {
     function lock(address token, address recipient, uint256 amount) external nonReentrant {
         require(amount > 0, "Bridge: zero amount");
 
-        // BUG: No chainId in the hash — the same transferId can be replayed on other
-        // chains where this bridge is deployed, allowing double-claiming of tokens.
-        // BUG: No nonce or unique identifier — if the same user bridges the same token
-        // and amount to the same recipient twice, the transferId collides, overwriting
-        // the first transfer and potentially losing funds.
-        bytes32 transferId = keccak256(abi.encodePacked(token, msg.sender, recipient, amount));
+        // FIX: Validate token is in the mapping before allowing bridge
+        require(tokenMapping[token] != address(0), "Bridge: token not mapped");
+
+        bytes32 transferId = keccak256(abi.encodePacked(token, msg.sender, recipient, amount, block.chainid, block.timestamp));
 
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
 
@@ -89,9 +93,6 @@ contract TokenBridge is ReentrancyGuard {
         address lastSigner = address(0);
         for (uint256 i = 0; i < signatures.length; i++) {
             address signer = _recover(ethSignedHash, signatures[i]);
-            // BUG: ecrecover returns address(0) on invalid signatures, but this is not
-            // checked. A zero-address signer that happens to be in the validator set
-            // (or collides with the default mapping value) would count as valid.
             require(signer > lastSigner, "Bridge: duplicate or unordered sig");
             lastSigner = signer;
             if (isValidator[signer]) {
@@ -114,6 +115,21 @@ contract TokenBridge is ReentrancyGuard {
     function removeValidator(address validator) external onlyAdmin {
         isValidator[validator] = false;
         emit ValidatorRemoved(validator);
+    }
+
+    // FIX: Owner function to add token mapping between chains
+    function addTokenMapping(address localToken, address remoteToken) external onlyAdmin {
+        require(localToken != address(0) && remoteToken != address(0), "Bridge: zero address");
+        require(tokenMapping[localToken] == address(0), "Bridge: already mapped");
+        tokenMapping[localToken] = remoteToken;
+        emit TokenMappingAdded(localToken, remoteToken);
+    }
+
+    // FIX: Owner function to remove token mapping
+    function removeTokenMapping(address localToken) external onlyAdmin {
+        require(tokenMapping[localToken] != address(0), "Bridge: not mapped");
+        tokenMapping[localToken] = address(0);
+        emit TokenMappingAdded(localToken, address(0));
     }
 
     /// @dev Recover signer from an ECDSA signature.
