@@ -9,6 +9,16 @@ export interface AgentConfig {
   routerAddress: string;
 }
 
+/**
+ * Result of deploying a contract via the SDK.
+ */
+export interface DeployResult {
+  address: string;
+  transactionHash: string;
+  blockNumber: number;
+  contract: ethers.Contract;
+}
+
 export class OpenAgentsSDK {
   private provider: ethers.JsonRpcProvider;
   private signer: ethers.Wallet;
@@ -18,6 +28,29 @@ export class OpenAgentsSDK {
     this.config = config;
     this.provider = new ethers.JsonRpcProvider(config.rpcUrl);
     this.signer = new ethers.Wallet(config.privateKey, this.provider);
+  }
+
+  /**
+   * Deploy a contract from ABI + bytecode with optional constructor args.
+   * Waits for deployment confirmation and returns the deployed contract instance.
+   */
+  async deployContract(
+    abi: any[],
+    bytecode: string,
+    args: any[] = [],
+    overrides: ethers.Overrides = {}
+  ): Promise<DeployResult> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const deploymentTx = await factory.deploy(...args, overrides);
+    const receipt = await deploymentTx.waitForDeployment();
+    const address = await receipt.getAddress();
+
+    return {
+      address,
+      transactionHash: receipt.hash,
+      blockNumber: receipt.blockNumber ?? 0,
+      contract: factory.attach(address),
+    };
   }
 
   async registerAgent(): Promise<string> {
