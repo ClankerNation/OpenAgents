@@ -20,6 +20,18 @@ export class OpenAgentsSDK {
     this.signer = new ethers.Wallet(config.privateKey, this.provider);
   }
 
+  getSigner(): ethers.Signer {
+    return this.signer;
+  }
+
+  getProvider(): ethers.JsonRpcProvider {
+    return this.provider;
+  }
+
+  getConfig(): AgentConfig {
+    return this.config;
+  }
+
   async registerAgent(): Promise<string> {
     const registry = new ethers.Contract(
       this.config.registryAddress,
@@ -89,3 +101,6 @@ export class OpenAgentsSDK {
     return openTasks;
   }
 }
+
+export { deployContract } from "./deploy.js";
+export type { DeploymentReceipt, DeployOptions, DeployResult } from "./deploy.js";
