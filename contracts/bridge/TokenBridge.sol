@@ -46,6 +46,10 @@ contract TokenBridge is ReentrancyGuard {
     /// @param recipient Destination address on the target chain.
     /// @param amount Amount of tokens to bridge.
     function lock(address token, address recipient, uint256 amount) external nonReentrant {
+        require(token != address(0), "Bridge: zero token address");
+        require(recipient != address(0), "Bridge: zero recipient");
+        // Validate token is a real ERC20 contract (has code)
+        require(token.code.length > 0, "Bridge: token not a contract")
         require(amount > 0, "Bridge: zero amount");
 
         // BUG: No chainId in the hash — the same transferId can be replayed on other
@@ -82,7 +86,8 @@ contract TokenBridge is ReentrancyGuard {
         bytes32 messageHash = keccak256(abi.encodePacked(token, recipient, amount));
         bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
 
-        require(!processedHashes[messageHash], "Bridge: already processed");
+        require(token != address(0), "Bridge: zero token address");
+        require(!processedHashes[messageHash], "Bridge: already processed")
         require(signatures.length >= requiredSignatures, "Bridge: insufficient sigs");
 
         uint256 validSigs = 0;
