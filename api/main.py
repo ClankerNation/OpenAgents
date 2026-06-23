@@ -1,13 +1,73 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Depends, Header
+from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+import os
+
+# Authentication scheme
+API_KEY_NAME = "X-API-Key"
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
+
+# In-memory API key store (placeholder for DB lookup)
+VALID_API_KEYS: set[str] = set(os.getenv("OPENAGENTS_API_KEYS", "dev-key-1,dev-key-2").split(","))
 
 app = FastAPI(
     title="OpenAgents API",
-    description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
-    version="0.1.0",
+    description="Off-chain indexer and agent discovery API for the OpenAgents protocol. "
+                "Most endpoints require authentication via `X-API-Key` header or Bearer token.",
+    version="0.2.0",
+    contact={
+        "name": "OpenAgents Core Team",
+        "url": "https://github.com/ClankerNation/OpenAgents",
+    },
+    license_info={
+        "name": "MIT",
+    },
+    # OpenAPI security scheme definition
+    openapi_tags=[
+        {"name": "Public", "description": "Endpoints accessible without authentication"},
+        {"name": "Protected", "description": "Endpoints requiring API key or Bearer token authentication"},
+    ],
 )
+
+
+def verify_api_key(api_key: Optional[str] = Header(None, alias=API_KEY_NAME)) -> str:
+    """Validate the API key from the X-API-Key header."""
+    if api_key and api_key.strip() in VALID_API_KEYS:
+        return api_key
+    raise HTTPException(
+        status_code=401,
+        detail="Invalid or missing API key. Provide a valid key via the `X-API-Key` header.",
+        headers={"WWW-Authenticate": API_KEY_NAME},
+    )
+
+
+def verify_bearer_token(token: Optional[str] = Depends(oauth2_scheme)) -> str:
+    """Validate a Bearer token (same pool as API keys for simplicity)."""
+    if token and token.strip() in VALID_API_KEYS:
+        return token
+    raise HTTPException(
+        status_code=401,
+        detail="Invalid or missing Bearer token. Provide a valid token in the `Authorization: Bearer <token>` header.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+async def require_auth(
+    api_key: Optional[str] = Header(None, alias=API_KEY_NAME),
+    bearer: Optional[str] = Depends(oauth2_scheme),
+) -> str:
+    """Dependency that accepts either X-API-Key header or Bearer token."""
+    if api_key and api_key.strip() in VALID_API_KEYS:
+        return api_key
+    if bearer and bearer.strip() in VALID_API_KEYS:
+        return bearer
+    raise HTTPException(
+        status_code=401,
+        detail="Authentication required. Use `X-API-Key` header or `Authorization: Bearer <token>`.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 class AgentResponse(BaseModel):
@@ -102,7 +162,7 @@ async def leaderboard(limit: int = Query(20, le=50)):
     return entries[:limit]
 
 
-@app.get("/health")
+@app.get("/health", tags=["Public"])
 async def health():
     return {
         "status": "ok",
@@ -110,3 +170,57 @@ async def health():
         "tasks_indexed": len(tasks_cache),
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+
+# ---------------------------------------------------------------------------
+# OpenAPI schema customization with authentication documentation
+# ---------------------------------------------------------------------------
+
+def customize_openapi_schema():
+    """Generate OpenAPI schema with security schemes and per-endpoint security."""
+    if app.openapi_schema:
+        return app.openapi_schema
+
+    openapi_schema = super(FastAPI, app).openapi()
+
+    # Define security schemes
+    openapi_schema.setdefault("components", {}).setdefault("securitySchemes", {})
+    openapi_schema["components"]["securitySchemes"] = {
+        "ApiKeyAuth": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-API-Key",
+            "description": "API key for authenticating requests. Obtain a key from the OpenAgents dashboard.",
+        },
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+            "description": "JWT Bearer token for authenticated access. Same keys as ApiKeyAuth are accepted.",
+        },
+    }
+
+    # Apply default security globally (api_key OR bearer)
+    openapi_schema["security"] = [
+        {"ApiKeyAuth": []},
+        {"BearerAuth": []},
+    ]
+
+    # Tag protected endpoints with "Protected" and mark them as requiring security
+    protected_paths = ["/agents", "/agents/{agent_id}", "/tasks", "/tasks/{task_id}", "/leaderboard"]
+    for path, path_item in openapi_schema.get("paths", {}).items():
+        if path in protected_paths:
+            for method in ["get"]:
+                operation = path_item.get(method)
+                if operation:
+                    operation["tags"] = ["Protected"]
+                    operation["security"] = [
+                        {"ApiKeyAuth": []},
+                        {"BearerAuth": []},
+                    ]
+
+    app.openapi_schema = openapi_schema
+    return openapi_schema
+
+
+app.openapi = customize_openapi_schema
