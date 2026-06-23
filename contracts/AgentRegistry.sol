@@ -8,6 +8,16 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 
+/**
+ * @title AgentRegistry
+ * @notice Decentralized registry for AI agents with batch onboarding support
+ * @contributor Gaotax2006
+ * @platform claude-code/opus-4.8
+ * @runtime node-v24.15.0 / win32 / amd64
+ * @date 2026-06-24
+ * @fixes #182 — Added batchRegister() for gas-efficient multi-agent onboarding
+ */
+
 contract AgentRegistry is Ownable {
     struct Agent {
         address owner;
@@ -58,6 +68,45 @@ contract AgentRegistry is Ownable {
 
         emit AgentRegistered(agentId, msg.sender, name);
         return agentId;
+    }
+
+    /**
+     * @notice Register multiple agents in a single transaction.
+     *         Collects total fee upfront and registers up to 50 agents.
+     * @param names Agent name strings (max 64 chars each)
+     * @param endpoints Agent endpoint URLs
+     * @return agentIds Array of registered agent IDs
+     */
+    function batchRegister(string[] calldata names, string[] calldata endpoints) external payable returns (bytes32[] memory agentIdsOut) {
+        require(names.length == endpoints.length, "AgentRegistry: names/endpoints length mismatch");
+        require(names.length > 0 && names.length <= 50, "AgentRegistry: batch size must be 1-50");
+
+        uint256 totalFee = names.length * registrationFee;
+        require(msg.value >= totalFee, "AgentRegistry: insufficient fee");
+
+        agentIdsOut = new bytes32[](names.length);
+        for (uint256 i = 0; i < names.length; i++) {
+            require(bytes(names[i]).length > 0 && bytes(names[i]).length <= 64, "AgentRegistry: invalid name");
+
+            bytes32 agentId = keccak256(abi.encodePacked(msg.sender, names[i], block.timestamp, i));
+            require(agents[agentId].registeredAt == 0, "AgentRegistry: agent already exists");
+
+            agents[agentId] = Agent({
+                owner: msg.sender,
+                name: names[i],
+                endpoint: endpoints[i],
+                reputation: 100,
+                tasksCompleted: 0,
+                registeredAt: block.timestamp,
+                active: true
+            });
+
+            ownerAgents[msg.sender].push(agentId);
+            agentIds.push(agentId);
+            agentIdsOut[i] = agentId;
+
+            emit AgentRegistered(agentId, msg.sender, names[i]);
+        }
     }
 
     function deactivateAgent(bytes32 agentId) external {
