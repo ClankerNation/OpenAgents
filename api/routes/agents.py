@@ -1,7 +1,7 @@
 """Agent CRUD endpoints for the OpenAgents platform."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, HttpUrl, field_validator
 from typing import Optional
 from datetime import datetime
 
@@ -16,6 +16,16 @@ class AgentCreate(BaseModel):
     description: Optional[str] = None
     model_type: str = "gpt-4"
     config: Optional[dict] = None
+    endpoint: Optional[HttpUrl] = None
+
+    @field_validator("endpoint")
+    @classmethod
+    def validate_endpoint_url(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        if not v.startswith("https://"):
+            raise ValueError("endpoint must use HTTPS protocol")
+        return v
 
 
 class AgentUpdate(BaseModel):

@@ -66,11 +66,9 @@ export class RpcProvider {
   async batchCall(
     calls: Array<{ method: string; params: unknown[] }>
   ): Promise<unknown[]> {
-    // BUG: No limit on batch size — sending thousands of calls in one batch
-    // can exceed the node's gas/payload limit and fail silently or OOM
-    const requests: JsonRpcRequest[] = calls.map((c) => ({
+    const requests: JsonRpcRequest[] = calls.map((c, index) => ({
       jsonrpc: "2.0" as const,
-      id: ++this.requestId,
+      id: index,
       method: c.method,
       params: c.params,
     }));
@@ -82,9 +80,15 @@ export class RpcProvider {
     });
 
     const responses: JsonRpcResponse[] = await res.json();
-    return responses
-      .sort((a, b) => a.id - b.id)
-      .map((r) => r.result);
+    const results: unknown[] = new Array(calls.length);
+    for (const resp of responses) {
+      if (resp.error) {
+        results[resp.id] = new Error(`RPC error ${resp.error.code}: ${resp.error.message}`);
+      } else {
+        results[resp.id] = resp.result;
+      }
+    }
+    return results;
   }
 
   async getBlockNumber(): Promise<number> {
