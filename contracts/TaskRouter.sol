@@ -104,4 +104,70 @@ contract TaskRouter {
         task.status = TaskStatus.Disputed;
         emit TaskDisputed(taskId);
     }
+    // Gas sponsorship relay
+    mapping(bytes32 => bool) public executedHashes;
+    mapping(address => uint256) public agentNonces;
+
+    event TaskRelayed(uint256 indexed taskId, address indexed relayer, bytes32 indexed agentId);
+
+    /// @notice Execute a task on behalf of an agent using gas sponsorship.
+    /// @param taskId The task to complete.
+    /// @param result The task result bytes.
+    /// @param nonce Agent's current nonce for replay protection.
+    /// @param signature Agent's ECDSA signature over the task data.
+    function executeOnBehalf(
+        uint256 taskId,
+        bytes calldata result,
+        uint256 nonce,
+        bytes calldata signature
+    ) external {
+        Task storage task = tasks[taskId];
+        require(task.status == TaskStatus.Assigned, "TaskRouter: not assigned");
+
+        AgentRegistry.Agent memory agent = registry.getAgent(task.assignedAgent);
+        require(agent.active, "TaskRouter: agent not active");
+
+        // Replay protection via nonce
+        require(agentNonces[agent.owner] == nonce, "TaskRouter: invalid nonce");
+        agentNonces[agent.owner] = nonce + 1;
+
+        // Signature verification
+        bytes32 structHash = keccak256(abi.encode(taskId, result.length, nonce));
+        bytes32 digest = keccak256(abi.encodePacked("", domainSeparator(), structHash));
+        address signer = recoverSigner(signature, digest);
+        require(signer == agent.owner, "TaskRouter: invalid agent signature");
+
+        // Relayer pays gas, agent is reimbursed from reward
+        task.result = result;
+        task.status = TaskStatus.Completed;
+
+        uint256 fee = task.reward * platformFee / 10000;
+        uint256 payout = task.reward - fee;
+
+        (bool success, ) = agent.owner.call{value: payout}("");
+        require(success, "TaskRouter: payout failed");
+
+        emit TaskCompleted(taskId, task.assignedAgent);
+        emit TaskRelayed(taskId, msg.sender, task.assignedAgent);
+    }
+
+    bytes32 private _domainSeparator;
+
+    function domainSeparator() internal view returns (bytes32) {
+        return _domainSeparator;
+    }
+
+    function recoverSigner(bytes calldata signature, bytes32 digest) internal pure returns (address) {
+        require(signature.length == 65, "TaskRouter: invalid signature length");
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        assembly {
+            r := mload(add(signature, 32))
+            s := mload(add(signature, 64))
+            v := byte(0, mload(add(signature, 96)))
+        }
+        return ecrecover(digest, v, r, s);
+    }
+
 }
