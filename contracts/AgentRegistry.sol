@@ -3,6 +3,17 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 
+/**
+ * @title AgentRegistry
+ * @notice Decentralized registry for AI agents with counter-based IDs
+ * @contributor Gaotax2006
+ * @platform claude-code/opus-4.8
+ * @runtime node-v24.15.0 / win32 / amd64
+ * @date 2026-06-24
+ * @fixes #169 — Replace hash-based agent ID with incrementing counter to prevent
+ *              mempool frontrunning attacks
+ */
+
 contract AgentRegistry is Ownable {
     struct Agent {
         address owner;
@@ -20,6 +31,7 @@ contract AgentRegistry is Ownable {
 
     uint256 public registrationFee;
     uint256 public minReputation;
+    uint256 public agentCounter; // Incrementing counter for unique agent IDs
 
     event AgentRegistered(bytes32 indexed agentId, address indexed owner, string name);
     event AgentDeactivated(bytes32 indexed agentId);
@@ -34,7 +46,9 @@ contract AgentRegistry is Ownable {
         require(msg.value >= registrationFee, "Insufficient fee");
         require(bytes(name).length > 0 && bytes(name).length <= 64, "Invalid name");
 
-        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp));
+        // Use incrementing counter instead of hash to prevent mempool frontrunning
+        uint256 counter = agentCounter++;
+        bytes32 agentId = keccak256(abi.encodePacked(name, counter, block.number));
 
         require(agents[agentId].registeredAt == 0, "Agent exists");
 
