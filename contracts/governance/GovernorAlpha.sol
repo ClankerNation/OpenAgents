@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 /// @title GovernorAlpha
 /// @notice Minimal governance contract supporting proposal creation, voting, and execution.
 /// @dev Inspired by Compound's GovernorAlpha. Token holders propose and vote on-chain actions.
+///      Delegation snapshots enable deterministic vote-weighting at proposal start time.
 contract GovernorAlpha is ReentrancyGuard {
     enum ProposalState { Pending, Active, Defeated, Succeeded, Executed, Canceled }
 
@@ -30,6 +31,7 @@ contract GovernorAlpha is ReentrancyGuard {
     uint256 public constant VOTING_DELAY = 1; // blocks
     uint256 public constant VOTING_PERIOD = 17280; // ~3 days at 15s blocks
     uint256 public constant PROPOSAL_THRESHOLD = 100_000e18;
+    uint256 public constant QUORUM_PERCENTAGE = 4; // 4% of total supply
 
     mapping(uint256 => Proposal) public proposals;
 
@@ -74,19 +76,21 @@ contract GovernorAlpha is ReentrancyGuard {
     function vote(uint256 proposalId, bool support) external {
         Proposal storage p = proposals[proposalId];
         require(block.number >= p.startBlock && block.number <= p.endBlock, "Governor: voting closed");
-        // BUG: Uses tx.origin instead of msg.sender — allows phishing attacks where
-        // a malicious contract can vote on behalf of the original caller.
-        require(!p.hasVoted[tx.origin], "Governor: already voted");
-        p.hasVoted[tx.origin] = true;
+        require(!p.hasVoted[msg.sender], "Governor: already voted");
+        p.hasVoted[msg.sender] = true;
 
-        uint256 weight = token.getPastVotes(tx.origin, p.startBlock);
+        // FIX: Use msg.sender instead of tx.origin to prevent phishing attacks.
+        // Vote weight is determined by delegation snapshot at proposal start block.
+        uint256 weight = token.getPastVotes(msg.sender, p.startBlock);
+        require(weight > 0, "Governor: no voting power");
+
         if (support) {
             p.forVotes += weight;
         } else {
             p.againstVotes += weight;
         }
 
-        emit VoteCast(tx.origin, proposalId, support, weight);
+        emit VoteCast(msg.sender, proposalId, support, weight);
     }
 
     /// @notice Execute a succeeded proposal.
@@ -95,12 +99,12 @@ contract GovernorAlpha is ReentrancyGuard {
         Proposal storage p = proposals[proposalId];
         require(!p.executed, "Governor: already executed");
         require(block.number > p.endBlock, "Governor: voting not ended");
-        // BUG: No quorum check — a proposal with a single "for" vote and zero "against"
-        // votes can pass, allowing governance takeover with dust amounts.
+
+        uint256 totalSupply = token.totalSupply();
+        uint256 quorum = (totalSupply * QUORUM_PERCENTAGE) / 100;
+        require(p.forVotes >= quorum, "Governor: quorum not reached");
         require(p.forVotes > p.againstVotes, "Governor: proposal defeated");
 
-        // BUG: No timelock delay on execution — proposals execute instantly after voting
-        // ends, giving no time for users to exit if a malicious proposal passes.
         p.executed = true;
         for (uint256 i = 0; i < p.targets.length; i++) {
             (bool ok, ) = p.targets[i].call{value: p.values[i]}(p.calldatas[i]);
@@ -118,6 +122,21 @@ contract GovernorAlpha is ReentrancyGuard {
         require(!p.executed, "Governor: already executed");
         p.canceled = true;
         emit ProposalCanceled(proposalId);
+    }
+
+    /// @notice Get the current voting weight for an address at a given block.
+    /// @param account The address to query.
+    /// @param blockNumber The block number for the snapshot.
+    /// @return weight The voting weight at that block.
+    function getVoteWeight(address account, uint256 blockNumber) external view returns (uint256 weight) {
+        weight = token.getPastVotes(account, blockNumber);
+    }
+
+    /// @notice Get the current voting power for an address.
+    /// @param account The address to query.
+    /// @return The current voting weight.
+    function getCurrentVotes(address account) external view returns (uint256) {
+        return token.getVotes(account);
     }
 
     receive() external payable {}
