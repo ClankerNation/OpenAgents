@@ -1,4 +1,7 @@
-from fastapi import FastAPI, HTTPException, Query
+"""OpenAgents API — off-chain indexer and agent discovery service."""
+
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -8,6 +11,13 @@ app = FastAPI(
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+
+class ErrorResponse(BaseModel):
+    """Structured error response used consistently across all endpoints."""
+    code: str          # e.g. VALIDATION_ERROR, NOT_FOUND, AUTH_FAILED
+    message: str       # Human-readable description
+    details: Optional[dict] = None  # Extra context (field errors, etc.)
 
 
 class AgentResponse(BaseModel):
@@ -44,6 +54,33 @@ agents_cache: dict = {}
 tasks_cache: dict = {}
 
 
+# ---------------------------------------------------------------------------
+# Custom exception handler — ensures every error returns {code, message, details}
+# ---------------------------------------------------------------------------
+
+@app.exception_handler(HTTPException)
+async def structured_http_exception_handler(request: Request, exc: HTTPException):
+    """Map FastAPI HTTPException to our consistent error schema."""
+    code_map = {
+        400: "VALIDATION_ERROR",
+        401: "AUTH_FAILED",
+        403: "FORBIDDEN",
+        404: "NOT_FOUND",
+        422: "VALIDATION_ERROR",
+        429: "RATE_LIMITED",
+        500: "INTERNAL_ERROR",
+    }
+    code = code_map.get(exc.status_code, "INTERNAL_ERROR")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"code": code, "message": exc.detail, "details": {}},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
 @app.get("/agents", response_model=list[AgentResponse])
 async def list_agents(
     active_only: bool = Query(True),
@@ -61,7 +98,7 @@ async def list_agents(
 @app.get("/agents/{agent_id}", response_model=AgentResponse)
 async def get_agent(agent_id: str):
     if agent_id not in agents_cache:
-        raise HTTPException(status_code=404, detail="Agent not found")
+        raise HTTPException(status_code=404, detail="NOT_FOUND: Agent not found")
     return agents_cache[agent_id]
 
 
@@ -80,7 +117,7 @@ async def list_tasks(
 @app.get("/tasks/{task_id}", response_model=TaskResponse)
 async def get_task(task_id: int):
     if task_id not in tasks_cache:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise HTTPException(status_code=404, detail="NOT_FOUND: Task not found")
     return tasks_cache[task_id]
 
 
