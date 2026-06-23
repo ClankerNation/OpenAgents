@@ -89,3 +89,80 @@ export class OpenAgentsSDK {
     return openTasks;
   }
 }
+
+/**
+ * Contract deployment helper for the OpenAgents SDK.
+ * Provides deployContract() and deployWithArtifacts() utilities.
+ */
+export interface DeploymentReceipt {
+  contractAddress: string;
+  transactionHash: string;
+  blockNumber: number;
+  gasUsed: bigint;
+  deployer: string;
+  abi: unknown[];
+  bytecode: string;
+}
+
+export interface DeployOptions {
+  /** Constructor arguments for the contract */
+  constructorArgs?: unknown[];
+  /** Override gas limit */
+  gasLimit?: number;
+  /** Override nonce */
+  nonce?: number;
+}
+
+/**
+ * Deploy a contract using raw ABI and bytecode.
+ * @param signer ethers Signer to deploy with
+ * @param abi Contract ABI array
+ * @param bytecode Contract bytecode (0x-prefixed hex string)
+ * @param options Optional deployment parameters
+ * @returns DeploymentReceipt with contract address and tx details
+ */
+export async function deployContract(
+  signer: ethers.Signer,
+  abi: unknown[],
+  bytecode: string,
+  options: DeployOptions = {}
+): Promise<DeploymentReceipt> {
+  const { constructorArgs = [], gasLimit, nonce } = options;
+
+  const factory = new ethers.ContractFactory(abi, bytecode, signer);
+
+  const deploymentTx = nonce !== undefined
+    ? await factory.deploy(...constructorArgs, { nonce, gasLimit })
+    : await factory.deploy(...constructorArgs, { gasLimit });
+
+  const receipt = await deploymentTx.deploymentTransaction()?.wait();
+
+  if (!receipt) {
+    throw new Error("Contract deployment transaction was not confirmed");
+  }
+
+  return {
+    contractAddress: deploymentTx.target as string,
+    transactionHash: deploymentTx.hash,
+    blockNumber: receipt.blockNumber,
+    gasUsed: receipt.gasUsed,
+    deployer: await signer.getAddress(),
+    abi,
+    bytecode,
+  };
+}
+
+/**
+ * Deploy a contract using Hardhat artifacts (ABI + bytecode from compilation).
+ * @param signer ethers Signer to deploy with
+ * @param artifact Hardhat-style artifact object with abi and bytecode
+ * @param options Optional deployment parameters
+ * @returns DeploymentReceipt with contract address and tx details
+ */
+export async function deployWithArtifacts(
+  signer: ethers.Signer,
+  artifact: { abi: unknown[]; bytecode: string },
+  options: DeployOptions = {}
+): Promise<DeploymentReceipt> {
+  return deployContract(signer, artifact.abi, artifact.bytecode, options);
+}
