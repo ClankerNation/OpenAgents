@@ -1,13 +1,36 @@
+"""OpenAgents API — off-chain indexer and agent discovery service."""
+
+import os
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+# CORS origins from env var, default to allow all for development
+_CORS_ORIGINS = os.getenv("CORS_ALLOW_ORIGINS", "*").split(",")
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+# Add CORS middleware (fix #166)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-API-Key"],
+)
+
+# Contributor traceability header
+# @contributor Gaotax2006
+# @platform claude-code/opus-4.8
+# @runtime node-v24.15.0 / win32 / amd64
+# @date 2026-06-24
+# @fixes #166 — Added CORSMiddleware with configurable origins from env var
 
 
 class AgentResponse(BaseModel):
