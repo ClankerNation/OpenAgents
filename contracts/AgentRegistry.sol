@@ -1,9 +1,19 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "./TimelockedOwnable.sol";
 
-contract AgentRegistry is Ownable {
+/**
+ * @title AgentRegistry
+ * @notice Registry for autonomous agents with reputation tracking and batch operations.
+ * @contributor Gaotax2006
+ * @platform claude-code/opus-4.8
+ * @runtime node-v24.15.0 / win32 / amd64
+ * @date 2026-06-25
+ * @fixes #146 — Extends TimelockedOwnable for time-locked admin transfers
+ * @fixes #145 — Add batchRegister for gas-efficient multi-agent onboarding
+ */
+contract AgentRegistry is TimelockedOwnable {
     struct Agent {
         address owner;
         string name;
@@ -20,12 +30,14 @@ contract AgentRegistry is Ownable {
 
     uint256 public registrationFee;
     uint256 public minReputation;
+    uint256 public constant MAX_BATCH_SIZE = 50;
 
     event AgentRegistered(bytes32 indexed agentId, address indexed owner, string name);
+    event AgentBatchRegistered(bytes32 indexed agentId, address indexed owner, string name, uint256 batchSize);
     event AgentDeactivated(bytes32 indexed agentId);
     event ReputationUpdated(bytes32 indexed agentId, uint256 newReputation);
 
-    constructor(uint256 _registrationFee) Ownable(msg.sender) {
+    constructor(uint256 _registrationFee) TimelockedOwnable(msg.sender) {
         registrationFee = _registrationFee;
         minReputation = 0;
     }
@@ -53,6 +65,43 @@ contract AgentRegistry is Ownable {
 
         emit AgentRegistered(agentId, msg.sender, name);
         return agentId;
+    }
+
+    /// @notice Register multiple agents in a single transaction.
+    /// @param names Array of agent names (max 50).
+    /// @param endpoints Array of agent endpoints.
+    /// @return agentIds Array of registered agent IDs.
+    function batchRegister(string[] calldata names, string[] calldata endpoints) external payable returns (bytes32[] memory agentIds) {
+        require(names.length == endpoints.length, "AgentRegistry: array length mismatch");
+        require(names.length > 0 && names.length <= MAX_BATCH_SIZE, "AgentRegistry: invalid batch size");
+
+        uint256 totalFee = registrationFee * names.length;
+        require(msg.value >= totalFee, "AgentRegistry: insufficient fee");
+
+        agentIds = new bytes32[](names.length);
+
+        for (uint256 i = 0; i < names.length; i++) {
+            require(bytes(names[i]).length > 0 && bytes(names[i]).length <= 64, "AgentRegistry: invalid name");
+
+            bytes32 agentId = keccak256(abi.encodePacked(msg.sender, names[i], block.timestamp, i));
+
+            require(agents[agentId].registeredAt == 0, "AgentRegistry: agent exists");
+
+            agents[agentId] = Agent({
+                owner: msg.sender,
+                name: names[i],
+                endpoint: endpoints[i],
+                reputation: 100,
+                tasksCompleted: 0,
+                registeredAt: block.timestamp,
+                active: true
+            });
+
+            ownerAgents[msg.sender].push(agentId);
+            agentIds.push(agentId);
+
+            emit AgentBatchRegistered(agentId, msg.sender, names[i], names.length);
+        }
     }
 
     function deactivateAgent(bytes32 agentId) external {
