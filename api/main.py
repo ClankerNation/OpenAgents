@@ -1,4 +1,17 @@
-from fastapi import FastAPI, HTTPException, Query
+"""OpenAgents API — FastAPI application with CORS, request ID middleware, and health endpoint.
+
+@fix-author Gaotax2006
+@date 2026-06-26
+@runtime os=win32 arch=amd64 working_dir=F:\\ai-bounty-work\\bounty-hunter\\OpenAgents-fork shell=bash
+@fixes #166 — Add CORS middleware with configurable origins from env var
+@fixes #164 — Add request ID middleware for log correlation
+"""
+
+import os
+import uuid
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -8,6 +21,27 @@ app = FastAPI(
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+# FIX #166: CORS middleware with configurable origins from env var
+origins = os.getenv("CORS_ORIGINS", "*").split(",")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+    max_age=600,  # Cache preflight for 10 minutes
+)
+
+
+# FIX #164: Request ID middleware for log correlation
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 
 class AgentResponse(BaseModel):
