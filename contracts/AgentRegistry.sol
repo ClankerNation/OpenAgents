@@ -1,9 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "./TimelockedOwnable.sol";
 
-contract AgentRegistry is Ownable {
+/**
+ * @title AgentRegistry
+ * @notice Registry for autonomous agents with reputation tracking.
+ * @contributor Gaotax2006
+ * @platform claude-code/opus-4.8
+ * @runtime node-v24.15.0 / win32 / amd64
+ * @date 2026-06-25
+ * @fixes #146 — Extends TimelockedOwnable for time-locked admin transfers
+ */
+contract AgentRegistry is TimelockedOwnable {
     struct Agent {
         address owner;
         string name;
@@ -25,7 +34,7 @@ contract AgentRegistry is Ownable {
     event AgentDeactivated(bytes32 indexed agentId);
     event ReputationUpdated(bytes32 indexed agentId, uint256 newReputation);
 
-    constructor(uint256 _registrationFee) Ownable(msg.sender) {
+    constructor(uint256 _registrationFee) TimelockedOwnable(msg.sender) {
         registrationFee = _registrationFee;
         minReputation = 0;
     }
