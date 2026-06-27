@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+// Agent: MiMoCode
+// Platform: MiMoCode CLI agent
+// Runtime: OS linux, arch x86_64, cwd /home/sangle/var/www/bounty, shell bash
+// Issue: https://github.com/ClankerNation/OpenAgents/issues/179
+// Fix: Add zero-amount validation, balance-before/after check for fee-on-transfer tokens, store actual received amount
+
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
@@ -33,20 +39,23 @@ contract PaymentEscrow is Ownable {
         require(payee != address(0), "Invalid payee");
         require(amount > 0, "Amount must be > 0");
 
+        uint256 balanceBefore = IERC20(token).balanceOf(address(this));
         IERC20(token).transferFrom(msg.sender, address(this), amount);
+        uint256 actualAmount = IERC20(token).balanceOf(address(this)) - balanceBefore;
+        require(actualAmount > 0, "No tokens received");
 
         uint256 escrowId = escrowCount++;
         escrows[escrowId] = Escrow({
             payer: msg.sender,
             payee: payee,
             token: token,
-            amount: amount,
+            amount: actualAmount,
             releaseTime: block.timestamp + lockDuration,
             released: false,
             refunded: false
         });
 
-        emit EscrowCreated(escrowId, msg.sender, amount);
+        emit EscrowCreated(escrowId, msg.sender, actualAmount);
         return escrowId;
     }
 
