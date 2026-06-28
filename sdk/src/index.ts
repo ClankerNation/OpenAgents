@@ -1,4 +1,4 @@
-import { ethers } from "ethers";
+import { ethers, Contract, ContractEvent, Listener } from "ethers";
 
 export interface AgentConfig {
   name: string;
@@ -7,6 +7,11 @@ export interface AgentConfig {
   rpcUrl: string;
   registryAddress: string;
   routerAddress: string;
+  wsUrl?: string;
+}
+
+export interface EventSubscription {
+  unsubscribe: () => void;
 }
 
 export class OpenAgentsSDK {
@@ -87,5 +92,74 @@ export class OpenAgentsSDK {
     }
 
     return openTasks;
+  }
+
+  subscribeToEvents(
+    contractAddress: string,
+    abi: string[],
+    eventName: string,
+    callback: (event: any) => void,
+    filter?: Record<string, any>
+  ): EventSubscription {
+    const wsUrl = this.config.wsUrl || this.config.rpcUrl.replace("https", "wss");
+    const wsProvider = new ethers.WebSocketProvider(wsUrl);
+    const contract = new Contract(contractAddress, abi, wsProvider);
+
+    let listener: Listener = (...args: any[]) => {
+      const event = args[args.length - 1];
+      if (filter) {
+        for (const [key, value] of Object.entries(filter)) {
+          if (event.args[key] !== value) return;
+        }
+      }
+      callback({
+        name: event.fragment.name,
+        args: event.args,
+        blockNumber: event.log.blockNumber,
+        transactionHash: event.log.transactionHash,
+      });
+    };
+
+    contract.on(eventName, listener);
+
+    return {
+      unsubscribe: () => {
+        contract.off(eventName, listener);
+        wsProvider.destroy();
+      },
+    };
+  }
+
+  async subscribeToEventsWithReconnect(
+    contractAddress: string,
+    abi: string[],
+    eventName: string,
+    callback: (event: any) => void,
+    filter?: Record<string, any>,
+    maxRetries: number = 5
+  ): Promise<EventSubscription> {
+    let retries = 0;
+    let subscription: EventSubscription | null = null;
+
+    const connect = () => {
+      subscription = this.subscribeToEvents(
+        contractAddress,
+        abi,
+        eventName,
+        (event) => {
+          retries = 0;
+          callback(event);
+        },
+        filter
+      );
+    };
+
+    connect();
+
+    return {
+      unsubscribe: () => {
+        subscription?.unsubscribe();
+      },
+    };
   }
 }
