@@ -14,6 +14,14 @@ export interface EventSubscription {
   unsubscribe: () => void;
 }
 
+export interface DeploymentReceipt {
+  address: string;
+  txHash: string;
+  gasUsed: bigint;
+  blockNumber: number;
+  contract: ethers.Contract;
+}
+
 export class OpenAgentsSDK {
   private provider: ethers.JsonRpcProvider;
   private signer: ethers.Wallet;
@@ -160,6 +168,37 @@ export class OpenAgentsSDK {
       unsubscribe: () => {
         subscription?.unsubscribe();
       },
+    };
+  }
+
+  async deployContract(
+    abi: string[],
+    bytecode: string,
+    args: any[] = [],
+    confirmations: number = 1
+  ): Promise<DeploymentReceipt> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const contract = await factory.deploy(...args);
+    const deployTx = contract.deploymentTransaction();
+
+    if (!deployTx) {
+      throw new Error("Deployment transaction failed");
+    }
+
+    const receipt = await deployTx.wait(confirmations);
+
+    if (!receipt) {
+      throw new Error("Deployment receipt not found");
+    }
+
+    const address = await contract.getAddress();
+
+    return {
+      address,
+      txHash: receipt.hash,
+      gasUsed: receipt.gasUsed,
+      blockNumber: receipt.blockNumber,
+      contract,
     };
   }
 }
