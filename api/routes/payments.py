@@ -1,14 +1,19 @@
 """Payment and escrow endpoints for bounty payouts."""
 
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from ..models.database import get_db, Payment, Task
 from ..middleware.auth import get_current_user
 
 router = APIRouter(prefix="/payments", tags=["payments"])
+
+logger = logging.getLogger(__name__)
+
+ESCROW_GRACE_PERIOD_DAYS = 30
 
 
 class EscrowDeposit(BaseModel):
@@ -103,4 +108,40 @@ async def payment_history(
     return {
         "sent": [{"id": p.id, "amount": p.amount, "status": p.status} for p in sent],
         "received": [{"id": p.id, "amount": p.amount, "status": p.status} for p in received],
+    }
+
+
+@router.post("/process-expired")
+async def process_expired_escrows(
+    user=Depends(get_current_user),
+    db=Depends(get_db),
+):
+    cutoff_date = datetime.utcnow() - timedelta(days=ESCROW_GRACE_PERIOD_DAYS)
+
+    all_escrowed = db.query(Payment).filter(Payment.status == "escrowed").all()
+
+    expired_payments = [p for p in all_escrowed if p.created_at < cutoff_date]
+
+    if not expired_payments:
+        return {"processed": 0, "message": "No expired escrows found"}
+
+    refunded_count = 0
+    for payment in expired_payments:
+        payment.status = "refunded"
+        payment.to_address = payment.from_address
+        payment.claimed_at = datetime.utcnow()
+
+        logger.info(
+            f"Auto-refunded escrow: payment_id={payment.id}, "
+            f"amount={payment.amount}, from={payment.from_address}, "
+            f"created={payment.created_at}"
+        )
+        refunded_count += 1
+
+    db.commit()
+
+    return {
+        "processed": refunded_count,
+        "cutoff_date": cutoff_date.isoformat(),
+        "grace_period_days": ESCROW_GRACE_PERIOD_DAYS,
     }
