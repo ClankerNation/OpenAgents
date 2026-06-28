@@ -1,12 +1,25 @@
 /**
  * ABI encoding/decoding utilities for EVM-compatible contract interactions.
+ *
+ * Supports fixed types (uint256, address, bytes32, bool) and dynamic types
+ * (string, bytes, arrays, tuples) following the Ethereum ABI specification.
  */
 
-export type AbiType = "uint256" | "address" | "bytes32" | "string" | "bool";
+export type AbiType =
+  | "uint256"
+  | "address"
+  | "bytes32"
+  | "string"
+  | "bool"
+  | "bytes"
+  | "uint256[]"
+  | "address[]"
+  | "string[]"
+  | "bytes[]";
 
 export interface AbiParam {
   type: AbiType;
-  value: string | number | bigint | boolean;
+  value: string | number | bigint | boolean | (string | number | bigint)[];
 }
 
 export function encodeUint256(value: bigint | number): string {
@@ -85,4 +98,87 @@ export function functionSelector(signature: string): string {
 export function packCalldata(selector: string, params: AbiParam[]): string {
   const encodedParams = encodeParams(params).slice(2);
   return selector + encodedParams;
+}
+
+export function decodeParameter(hex: string, type: AbiType): unknown {
+  const cleaned = hex.startsWith("0x") ? hex.slice(2) : hex;
+
+  switch (type) {
+    case "uint256":
+      return decodeUint256(cleaned);
+    case "address":
+      return decodeAddress(cleaned);
+    case "bytes32":
+      return "0x" + cleaned.slice(0, 64);
+    case "bool":
+      return decodeBool(cleaned);
+    case "string":
+      return decodeString(cleaned);
+    case "bytes":
+      return decodeBytes(cleaned);
+    case "uint256[]":
+      return decodeDynamicArray(cleaned, "uint256") as bigint[];
+    case "address[]":
+      return decodeDynamicArray(cleaned, "address") as string[];
+    case "string[]":
+      return decodeDynamicArray(cleaned, "string") as string[];
+    case "bytes[]":
+      return decodeDynamicArray(cleaned, "bytes") as Uint8Array[];
+    default:
+      throw new Error(`Unsupported type: ${type}`);
+  }
+}
+
+function decodeString(hex: string): string {
+  const offset = parseInt(hex.slice(0, 64), 16) * 2;
+  const length = parseInt(hex.slice(offset, offset + 64), 16) * 2;
+  const data = hex.slice(offset + 64, offset + 64 + length);
+  const bytes = new Uint8Array(data.match(/.{1,2}/g)!.map((b) => parseInt(b, 16)));
+  return new TextDecoder().decode(bytes);
+}
+
+function decodeBytes(hex: string): Uint8Array {
+  const offset = parseInt(hex.slice(0, 64), 16) * 2;
+  const length = parseInt(hex.slice(offset, offset + 64), 16) * 2;
+  const data = hex.slice(offset + 64, offset + 64 + length);
+  const bytes = new Uint8Array(data.match(/.{1,2}/g)!.map((b) => parseInt(b, 16)));
+  return bytes;
+}
+
+function decodeDynamicArray(hex: string, elementType: string): unknown[] {
+  const offset = parseInt(hex.slice(0, 64), 16) * 2;
+  const length = parseInt(hex.slice(offset, offset + 64), 16);
+  const results: unknown[] = [];
+  let currentOffset = offset + 64;
+
+  for (let i = 0; i < length; i++) {
+    const slot = hex.slice(currentOffset, currentOffset + 64);
+    results.push(decodeParameter("0x" + slot, elementType as AbiType));
+    currentOffset += 64;
+  }
+
+  return results;
+}
+
+function decodeTuple(hex: string, types: AbiType[]): unknown[] {
+  const results: unknown[] = [];
+  let offset = 0;
+
+  for (const type of types) {
+    const slot = hex.slice(offset, offset + 64);
+    if (isDynamicType(type)) {
+      const dynOffset = parseInt(slot, 16) * 2;
+      results.push(decodeParameter("0x" + hex.slice(dynOffset, dynOffset + 64), type));
+      offset += 64;
+    } else {
+      results.push(decodeParameter("0x" + slot, type));
+      offset += 64;
+    }
+  }
+
+  return results;
+}
+
+function isDynamicType(type: AbiType): boolean {
+  return ["string", "bytes", "string[]", "bytes[]", "uint256[]", "address[]"].includes(type);
 }
