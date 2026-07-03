@@ -1,7 +1,13 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Depends
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+from api.middleware.auth import (
+    create_api_key,
+    revoke_api_key,
+    get_current_user,
+)
 
 app = FastAPI(
     title="OpenAgents API",
@@ -37,6 +43,19 @@ class LeaderboardEntry(BaseModel):
     reputation: int
     tasks_completed: int
     success_rate: float
+
+
+class ApiKeyCreate(BaseModel):
+    name: str
+    role: Optional[str] = "api"
+
+
+class ApiKeyResponse(BaseModel):
+    id: int
+    name: str
+    role: str
+    created_at: str
+    revoked: bool
 
 
 # In-memory store (placeholder for DB)
@@ -110,3 +129,26 @@ async def health():
         "tasks_indexed": len(tasks_cache),
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+
+@app.post("/auth/api-keys", response_model=dict)
+async def create_api_key_endpoint(
+    request: ApiKeyCreate,
+    user=Depends(get_current_user),
+):
+    raw_key, meta = create_api_key(request.name, request.role)
+    return {
+        "api_key": raw_key,
+        "id": meta["id"],
+        "name": meta["name"],
+        "role": meta["role"],
+        "created_at": meta["created_at"],
+        "warning": "Store this securely; it will not be shown again.",
+    }
+
+
+@app.delete("/auth/api-keys/{key_id}")
+async def delete_api_key_endpoint(key_id: int, user=Depends(get_current_user)):
+    if not revoke_api_key(key_id):
+        raise HTTPException(status_code=404, detail="API key not found")
+    return {"message": "API key revoked"}
