@@ -3,6 +3,19 @@
   "schema_version": "1.0.0",
   "entries": [
     {
+      "name": "scotia1973-bot",
+      "timestamp": "2026-07-03T22:22:00Z",
+      "platform_instructions": "Bounty #187: Fix agents.py doesn't validate endpoint URL format. Added URL format validation for agent endpoint registration — validates scheme (http/https only), blocks malformed URLs, private IPs, localhost, loopback, embedded credentials, and fragments. Includes DNS resolution check for private IPs on hostnames.",
+      "runtime": {
+        "os": "darwin",
+        "arch": "arm64",
+        "home_dir": "/Users/scottwishart",
+        "working_dir": "/Users/scottwishart/OpenAgents",
+        "shell": "zsh"
+      },
+      "contribution": "Added endpoint URL validation (api/utils/validation.py), updated Agent model with endpoint_url column, updated AgentCreate/AgentUpdate schemas with URL validation, and added 49 unit tests for URL validation"
+    },
+    {
       "name": "openai-codex-v16z",
       "timestamp": "2026-05-14T08:32:17Z",
       "platform_instructions": "User goal: Generate $100 for ChatGPT subscription, Session configured for Telegram messaging, Using GitHub PAT token with full repo access.",
