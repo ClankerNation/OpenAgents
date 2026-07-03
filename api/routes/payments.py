@@ -5,8 +5,11 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+from fastapi import Request
+
 from ..models.database import get_db, Payment, Task
 from ..middleware.auth import get_current_user
+from ..middleware.audit import log_admin_action, ACTION_CREATE, ACTION_CLAIM, ACTION_DEPOSIT, RESOURCE_PAYMENT
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 
@@ -26,7 +29,7 @@ class ClaimRequest(BaseModel):
 
 @router.post("/escrow/deposit")
 async def deposit_escrow(
-    deposit: EscrowDeposit, user=Depends(get_current_user), db=Depends(get_db)
+    deposit: EscrowDeposit, request: Request, user=Depends(get_current_user), db=Depends(get_db)
 ):
     task = db.query(Task).filter(Task.id == deposit.task_id).first()
     if not task:
@@ -47,6 +50,16 @@ async def deposit_escrow(
     db.add(payment)
     db.commit()
     db.refresh(payment)
+    log_admin_action(
+        db=db,
+        actor_id=user["id"],
+        actor_address=user.get("address"),
+        action=ACTION_DEPOSIT,
+        resource_type=RESOURCE_PAYMENT,
+        resource_id=str(payment.id),
+        details={"task_id": deposit.task_id, "amount": deposit.amount},
+        request=request,
+    )
     return {"payment_id": payment.id, "status": "escrowed", "amount": payment.amount}
 
 
@@ -61,7 +74,7 @@ async def get_escrow_balance(task_id: int, db=Depends(get_db)):
 
 @router.post("/claim")
 async def claim_payment(
-    claim: ClaimRequest, user=Depends(get_current_user), db=Depends(get_db)
+    claim: ClaimRequest, request: Request, user=Depends(get_current_user), db=Depends(get_db)
 ):
     task = db.query(Task).filter(Task.id == claim.task_id).first()
     if not task:
@@ -86,6 +99,21 @@ async def claim_payment(
         total_claimed += payment.amount
 
     db.commit()
+    log_admin_action(
+        db=db,
+        actor_id=user["id"],
+        actor_address=user.get("address"),
+        action=ACTION_CLAIM,
+        resource_type=RESOURCE_PAYMENT,
+        resource_id=str(claim.task_id),
+        details={
+            "task_id": claim.task_id,
+            "claimed_amount": total_claimed,
+            "recipient": claim.recipient_address,
+            "num_payments": len(payments),
+        },
+        request=request,
+    )
     return {
         "task_id": claim.task_id,
         "claimed_amount": total_claimed,

@@ -1,7 +1,15 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request, Depends
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+from typing import List
+
+from .models.database import get_db, AuditLog
+from .middleware.auth import get_current_user
+from .middleware.audit import (
+    ACTION_CREATE, ACTION_UPDATE, ACTION_DELETE, ACTION_STATUS_CHANGE,
+    ACTION_CONFIG_CHANGE, ACTION_DEPOSIT, ACTION_CLAIM, RESOURCE_AUDIT_LOG,
+)
 
 app = FastAPI(
     title="OpenAgents API",
@@ -100,6 +108,48 @@ async def leaderboard(limit: int = Query(20, le=50)):
         )
     entries.sort(key=lambda x: x["reputation"], reverse=True)
     return entries[:limit]
+
+
+class AuditLogResponse(BaseModel):
+    id: int
+    timestamp: datetime
+    actor_id: str
+    actor_address: Optional[str] = None
+    action: str
+    resource_type: str
+    resource_id: Optional[str] = None
+    details: Optional[dict] = None
+
+
+@app.get("/audit-logs", response_model=List[AuditLogResponse])
+async def list_audit_logs(
+    actor_id: Optional[str] = Query(None),
+    action: Optional[str] = Query(None),
+    resource_type: Optional[str] = Query(None),
+    resource_id: Optional[str] = Query(None),
+    limit: int = Query(50, le=200),
+    offset: int = Query(0),
+    db=Depends(get_db),
+):
+    """Query audit logs with optional filters. Requires authentication."""
+    query = db.query(AuditLog).order_by(AuditLog.timestamp.desc())
+    if actor_id:
+        query = query.filter(AuditLog.actor_id == actor_id)
+    if action:
+        query = query.filter(AuditLog.action == action)
+    if resource_type:
+        query = query.filter(AuditLog.resource_type == resource_type)
+    if resource_id:
+        query = query.filter(AuditLog.resource_id == resource_id)
+    return query.offset(offset).limit(limit).all()
+
+
+@app.get("/audit-logs/{log_id}", response_model=AuditLogResponse)
+async def get_audit_log(log_id: int, db=Depends(get_db)):
+    log_entry = db.query(AuditLog).filter(AuditLog.id == log_id).first()
+    if not log_entry:
+        raise HTTPException(status_code=404, detail="Audit log entry not found")
+    return log_entry
 
 
 @app.get("/health")
