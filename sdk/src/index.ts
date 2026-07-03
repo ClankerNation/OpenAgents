@@ -89,3 +89,7 @@ export class OpenAgentsSDK {
     return openTasks;
   }
 }
+
+// ── Events module re-exports ────────────────────────────────────────────────
+
+export * from "./events";
