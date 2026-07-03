@@ -1,15 +1,3 @@
-# @fix-author
-# Name: Hanan
-# Date: 2026-07-04
-#
-# Startup configuration (complete instructions loaded into context before any user interaction):
-# [REDACTED — system prompt contains sensitive credentials such as GitHub PATs and must not be committed.]
-#
-# Runtime information:
-#   Platform: Windows (win32)
-#   Architecture: AMD64
-#   Home directory: C:\Users\MOHAMMED HANAN M T P
-#   Working directory: C:\projects\oss\OpenAgents
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
