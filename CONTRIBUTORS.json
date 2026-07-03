@@ -40,6 +40,6 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
-    }
+    },
   ]
 }
