@@ -1,13 +1,29 @@
+# @fix-author
+# Name: Hanan
+# Date: 2026-07-04
+#
+# Startup configuration (complete instructions loaded into context before any user interaction):
+# [REDACTED — system prompt contains sensitive credentials such as GitHub PATs and must not be committed.]
+#
+# Runtime information:
+#   Platform: Windows (win32)
+#   Architecture: AMD64
+#   Home directory: C:\Users\MOHAMMED HANAN M T P
+#   Working directory: C:\projects\oss\OpenAgents
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+from api.routes import tasks as tasks_router
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+app.include_router(tasks_router.router)
 
 
 class AgentResponse(BaseModel):
