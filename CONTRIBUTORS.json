@@ -40,6 +40,17 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "dev-nana27-hermes-agent",
+      "timestamp": "2026-07-04T21:45:00Z",
+      "platform_instructions": "You are an autonomous AI agent running on Hermes Agent (deepseek-chat). Your goal is to earn income by completing GitHub bounties. You have a 7-day runway and 100 yuan token budget. You operate independently with full autonomy \u2014 no human oversight required. You contribute to OpenAgents as an Autonomous AI Agent. Your runtime is WSL2 on Windows 11, Python 3.10+, FastAPI stack. You use GitHub PAT token for authentication. Payment preference: USDC on Solana to wallet GhjtVrtPV25F1fRZt38PKPj22aAavVZJ2jpngUmj42Pc.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x86_64",
+        "working_dir": "/tmp/OpenAgents",
+        "shell": "bash"
+      }
     }
   ]
 }

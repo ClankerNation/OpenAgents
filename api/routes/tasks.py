@@ -1,12 +1,15 @@
-"""Task management endpoints for bounty assignments."""
+"""Task management endpoints for bounty assignments with WebSocket support."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+import asyncio
+import json
 
 from ..models.database import get_db, Task
 from ..middleware.auth import get_current_user
+from .websocket_manager import manager, heartbeat_loop
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -40,6 +43,14 @@ async def create_task(task: TaskCreate, user=Depends(get_current_user), db=Depen
     db.add(new_task)
     db.commit()
     db.refresh(new_task)
+
+    # Broadcast task creation
+    await manager.broadcast_task_update(
+        new_task.id,
+        "created",
+        {"title": new_task.title, "status": new_task.status, "reward_amount": new_task.reward_amount},
+    )
+
     return {"id": new_task.id, "status": new_task.status}
 
 
@@ -85,9 +96,18 @@ async def update_task_status(
     if task.creator_id != user["id"]:
         raise HTTPException(status_code=403, detail="Only the creator can update status")
 
+    old_status = task.status
     task.status = update.status
     task.updated_at = datetime.utcnow()
     db.commit()
+
+    # Broadcast status change
+    await manager.broadcast_task_update(
+        task_id,
+        "status_changed",
+        {"old_status": old_status, "new_status": update.status},
+    )
+
     return {"id": task.id, "status": task.status}
 
 
@@ -102,4 +122,81 @@ async def cancel_task(task_id: int, user=Depends(get_current_user), db=Depends(g
         raise HTTPException(status_code=400, detail="Cannot cancel an active task")
     task.status = "cancelled"
     db.commit()
+
+    # Broadcast cancellation
+    await manager.broadcast_task_update(
+        task_id,
+        "cancelled",
+        {"status": "cancelled"},
+    )
+
     return {"id": task.id, "status": "cancelled"}
+
+
+@router.websocket("/ws")
+async def task_websocket(websocket: WebSocket):
+    """WebSocket endpoint for real-time task updates.
+
+    Protocol:
+    - Connect: opens the WebSocket
+    - Subscribe: {"type": "subscribe", "task_id": <int>}
+    - Unsubscribe: {"type": "unsubscribe", "task_id": <int>}
+    - UnsubscribeAll: {"type": "unsubscribe_all"}
+    - Server sends: {"type": "task_update", "event": "...", "task_id": ..., "data": {...}, "timestamp": "..."}
+    - Server sends: {"type": "heartbeat", "timestamp": "..."} every 30 seconds
+    """
+    client_id = await manager.connect(websocket)
+
+    # Start heartbeat loop
+    heartbeat_task = asyncio.create_task(heartbeat_loop(client_id))
+
+    try:
+        while True:
+            try:
+                data = await websocket.receive_json()
+            except json.JSONDecodeError:
+                await websocket.send_json({"type": "error", "message": "Invalid JSON"})
+                continue
+
+            msg_type = data.get("type")
+
+            if msg_type == "subscribe":
+                task_id = data.get("task_id")
+                if task_id is None or not isinstance(task_id, int):
+                    await websocket.send_json({"type": "error", "message": "task_id must be an integer"})
+                    continue
+                manager.subscribe(client_id, task_id)
+                await websocket.send_json({
+                    "type": "subscribed",
+                    "task_id": task_id,
+                })
+
+            elif msg_type == "unsubscribe":
+                task_id = data.get("task_id")
+                if task_id is None or not isinstance(task_id, int):
+                    await websocket.send_json({"type": "error", "message": "task_id must be an integer"})
+                    continue
+                manager.unsubscribe(client_id, task_id)
+                await websocket.send_json({
+                    "type": "unsubscribed",
+                    "task_id": task_id,
+                })
+
+            elif msg_type == "unsubscribe_all":
+                manager.unsubscribe_all(client_id)
+                await websocket.send_json({"type": "unsubscribed_all"})
+
+            else:
+                await websocket.send_json({
+                    "type": "error",
+                    "message": f"Unknown message type: {msg_type}. Valid types: subscribe, unsubscribe, unsubscribe_all",
+                })
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger = __import__("logging").getLogger(__name__)
+        logger.error(f"WebSocket error for client {client_id}: {e}")
+    finally:
+        heartbeat_task.cancel()
+        manager.disconnect(client_id)
