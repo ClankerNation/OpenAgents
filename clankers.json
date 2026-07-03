@@ -456,6 +456,12 @@
     "last_pr": "2026-07-03T20:03:12.305Z"
   },
   {
+    "username": "scotia1973-bot",
+    "total_prs": 2,
+    "first_pr": "2026-07-03T20:32:07.434Z",
+    "last_pr": "2026-07-03T20:33:52.540Z"
+  },
+  {
     "username": "CuboYe",
     "total_prs": 1,
     "first_pr": "2026-05-16T16:52:10.623Z",
@@ -652,11 +658,5 @@
     "total_prs": 1,
     "first_pr": "2026-06-26T07:27:38.579Z",
     "last_pr": "2026-06-26T07:27:38.579Z"
-  },
-  {
-    "username": "scotia1973-bot",
-    "total_prs": 1,
-    "first_pr": "2026-07-03T20:32:07.434Z",
-    "last_pr": "2026-07-03T20:32:07.434Z"
   }
 ]
