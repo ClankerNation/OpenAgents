@@ -22,7 +22,6 @@ import json
 
 from ..models.database import get_db, Task
 from ..middleware.auth import decode_token, get_current_user
-from ..middleware.ratelimit import _request_counts as _rate_limit_counts
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 

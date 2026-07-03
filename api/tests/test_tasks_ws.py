@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-from typing import Any
 from fastapi.testclient import TestClient
 
 os.environ.setdefault("JWT_SECRET", "test-secret")
