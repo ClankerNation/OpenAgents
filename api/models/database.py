@@ -2,11 +2,11 @@
 
 from sqlalchemy import (
     create_engine, Column, Integer, String, Float, Text, JSON,
-    ForeignKey, DateTime, Enum as SAEnum,
+    ForeignKey, DateTime, Enum as SAEnum, Boolean, Index,
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./openagents.db")
@@ -28,12 +28,32 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    address = Column(String(42), unique=True, nullable=False)
+    address = Column(String(42), unique=True, nullable=False, index=True)
     username = Column(String(64), unique=True, nullable=True)
-    # BUG: No index on address — wallet lookups on every auth request do full table scans
-    created_at = Column(DateTime, default=datetime.utcnow)  # BUG: naive datetime, no timezone
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     agents = relationship("Agent", back_populates="owner")
+    api_keys = relationship("ApiKey", back_populates="user", cascade="all, delete-orphan")
+
+
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key_prefix = Column(String(8), nullable=False)  # First 8 chars for identification
+    key_hash = Column(String(64), nullable=False, index=True)
+    name = Column(String(128), nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    revoked_at = Column(DateTime, nullable=True)
+    last_used_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", back_populates="api_keys")
+
+    __table_args__ = (
+        Index("idx_api_keys_user_active", "user_id", "is_active"),
+    )
 
 
 class Agent(Base):
@@ -44,10 +64,9 @@ class Agent(Base):
     description = Column(Text, nullable=True)
     model_type = Column(String(32), default="gpt-4")
     config = Column(JSON, default=dict)
-    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    owner_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    # BUG: No cascade delete — deleting a user leaves orphaned agents
     owner = relationship("User", back_populates="agents")
     tasks = relationship("Task", back_populates="agent")
 
@@ -62,7 +81,7 @@ class Task(Base):
     status = Column(String(32), default="open")
     creator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     agent_id = Column(Integer, ForeignKey("agents.id"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, nullable=True)
     deadline = Column(DateTime, nullable=True)
 
@@ -80,7 +99,7 @@ class Payment(Base):
     amount = Column(Float, nullable=False)
     token_address = Column(String(42), default="0x0000000000000000000000000000000000000000")
     status = Column(String(32), default="pending")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     claimed_at = Column(DateTime, nullable=True)
 
     task = relationship("Task", back_populates="payments")
