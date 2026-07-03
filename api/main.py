@@ -1,7 +1,14 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+import json
+import logging
+
+from api.routes.ws_manager import manager
+from api.middleware.auth import decode_token
+
+logger = logging.getLogger("openagents.main")
 
 app = FastAPI(
     title="OpenAgents API",
@@ -110,3 +117,76 @@ async def health():
         "tasks_indexed": len(tasks_cache),
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+
+@app.websocket("/tasks/ws/tasks")
+async def task_updates_ws(websocket: WebSocket, token: str = ""):
+    """
+    WebSocket endpoint for real-time task status updates.
+
+    Query parameters:
+      - token: JWT access token for authentication.
+
+    Protocol:
+      1. Client connects with ?token=<jwt>
+      2. Server validates token and sends {"type": "connected", ...} welcome
+      3. Client may send {"type": "ping"} → server replies {"type": "pong"}
+      4. Server pushes task status changes as {"type": "task_update", ...}
+      5. Connection drops → manager.disconnect() is called
+    """
+    # -- Authenticate via query-param token --
+    if not token:
+        logger.warning("WebSocket rejected: no token provided")
+        await websocket.close(code=4001)
+        return
+
+    try:
+        payload = decode_token(token)
+        user_id = payload.get("sub")
+        if not user_id:
+            logger.warning("WebSocket rejected: no 'sub' in token")
+            await websocket.close(code=4001)
+            return
+    except HTTPException:
+        await websocket.close(code=4001)
+        return
+    except Exception:
+        logger.exception("WebSocket auth error")
+        await websocket.close(code=4001)
+        return
+
+    # -- Accept connection --
+    await manager.connect(websocket, user_id)
+
+    try:
+        # Send welcome message
+        await websocket.send_text(
+            json.dumps(
+                {
+                    "type": "connected",
+                    "user_id": user_id,
+                    "message": "Connected to task updates",
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+            )
+        )
+
+        # Main message loop — supports ping/pong keepalive
+        while True:
+            data = await websocket.receive_text()
+            msg = json.loads(data)
+            if msg.get("type") == "ping":
+                await websocket.send_text(
+                    json.dumps(
+                        {
+                            "type": "pong",
+                            "timestamp": datetime.utcnow().isoformat(),
+                        }
+                    )
+                )
+    except WebSocketDisconnect:
+        logger.info("WebSocket disconnected (client): user=%s", user_id)
+    except Exception:
+        logger.exception("WebSocket error: user=%s", user_id)
+    finally:
+        manager.disconnect(websocket)
