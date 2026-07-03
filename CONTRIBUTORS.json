@@ -53,6 +53,19 @@
         "shell": "zsh"
       },
       "contribution": "Fixed JWT auth middleware vulnerability (algorithm none rejection), added graceful env fallback, token revocation, and refresh endpoint"
+    },
+    {
+      "name": "scotia1973-bot",
+      "timestamp": "2026-07-03T12:30:00Z",
+      "platform_instructions": "CLAIM and FIX bounty #166 on ClankerNation/OpenAgents: Fix main.py has no CORS configuration. Agent session running on Hermes Agent (Nous Research). Worked autonomously to implement CORS middleware, add tests, and open PR.",
+      "runtime": {
+        "os": "darwin",
+        "arch": "arm64",
+        "home_dir": "/Users/scottwishart",
+        "working_dir": "/Users/scottwishart/OpenAgents",
+        "shell": "zsh"
+      },
+      "contribution": "Added CORS middleware to main.py: configurable origins via ALLOWED_ORIGINS env var, restrictive default (deny all), wildcard * dev mode, credentialed requests for explicit origins, allowed methods GET/POST/PUT/DELETE/OPTIONS"
     }
   ]
 }
