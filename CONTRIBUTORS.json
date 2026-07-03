@@ -43,29 +43,33 @@
     },
     {
       "name": "scotia1973-bot",
-      "timestamp": "2026-07-03T16:00:00Z",
-      "platform_instructions": "Finish and submit PR for bounty #202 on ClankerNation/OpenAgents: Add structured error responses with error codes",
+      "timestamp": "2026-07-03T18:00:00Z",
+      "platform_instructions": "CLAIM and FIX bounty #177 on ClankerNation/OpenAgents: Fix auth.py doesn't support API key authentication alongside JWT. $5,000 bounty.",
       "runtime": {
         "os": "darwin",
         "arch": "arm64",
         "home_dir": "/Users/scottwishart",
-        "working_dir": "/Users/scottwishart/openagents-bounty",
-        "shell": "zsh"
+        "working_dir": "/Users/scottwishart/OpenAgents",
+        "shell": "zsh",
+        "python": "3.11.15",
+        "toolchain": "uv"
       },
-      "contribution": "Added structured error responses with error codes (bounty #202): ErrorCode enum, APIError exception, build_error_response helper, StructuredErrorMiddleware, and migrated all routes/middleware from raw HTTPException to APIError"
+      "contribution": "Added dual authentication support (JWT + API key) to auth middleware (bounty #177)"
     },
     {
       "name": "scotia1973-bot",
-      "timestamp": "2026-07-03T22:18:00Z",
-      "platform_instructions": "CLAIM and FIX bounty #191 on ClankerNation/OpenAgents: Add contract deployment helpers to SDK. $6,000 bounty.\n\n1. Fork/clone repo\n2. Add contract deployment helpers (deployContract, gas estimation, ABI encoding)\n3. Create tests\n4. CONTRIBUTORS.json + metadata\n5. git commit, push, PR with /attempt #191\n\nDO NOT STOP until PR is submitted.\n\nCONTEXT:\nWe are scotia1973-bot on GitHub. ClankerNation/OpenAgents bounty #191 offers $6,000 for adding contract deployment helpers to the SDK.\n\nhttps://github.com/ClankerNation/OpenAgents/issues/191\n\nFile: sdk/src/utils/ — need to add helper functions for deploying smart contracts: deploy contract, estimate gas, encode constructor args, etc.\n\nFIX:\n- Add deployContract() helper that handles ABI encoding, gas estimation, and deployment\n- Add contract deployment utilities\n- Add @fix-author metadata block (check existing CONTRIBUTORS.json for format)\n- Register in CONTRIBUTORS.json\n- Add comprehensive tests\n\nYou MUST:\n1. Fork/clone repo\n2. Read the SDK structure in sdk/src/\n3. Implement contract deployment helpers\n4. Create tests\n5. CONTRIBUTORS.json + metadata\n6. git add, commit, push\n7. gh pr create with /attempt #191 in body\n8. Verify PR submitted\n\nCRITICAL: Actually commit, push, and PR. DO NOT STOP until PR is verified.\n\nWORKSPACE PATH:\n/Users/scottwishart\nUse this exact path for local repository/workdir operations unless the task explicitly says otherwise.\n\nComplete this task using the tools available to you. When finished, provide a clear, concise summary of:\n- What you did\n- What you found or accomplished\n- Any files you created or modified\n- Any issues encountered\n\nImportant workspace rule: Never assume a repository lives at /workspace/... or any other container-style path unless the task/context explicitly gives that path. If no exact local path is provided, discover it first before issuing git/workdir-specific commands.\n\nBe thorough but concise -- your response is returned to the parent agent as a summary.",
+      "timestamp": "2026-07-03T22:20:00Z",
+      "platform_instructions": "CLAIM and FIX bounty #196 on ClankerNation/OpenAgents: Add event subscription and decoding to SDK. $3,000 bounty.",
       "runtime": {
         "os": "darwin",
         "arch": "arm64",
         "home_dir": "/Users/scottwishart",
-        "working_dir": "/Users/scottwishart",
-        "shell": "zsh"
+        "working_dir": "/Users/scottwishart/OpenAgents",
+        "shell": "zsh",
+        "node": "v22.14.0",
+        "toolchain": "npm + vitest"
       },
-      "contribution": "Added contract deployment helpers to SDK (bounty #191): deployContract(), estimateDeployGas(), encodeConstructorArgs(), decodeConstructorArgs() with full types, DeployOverrides/DeployOptions, deployment receipt metadata, and comprehensive unit tests"
+      "contribution": "Added event subscription and decoding to SDK (bounty #196): EventSubscriptionManager, event log decoder (decodeEventLog, decodeEventLogs), event filtering, createEventFilter, and 27 tests"
     }
   ]
 }
