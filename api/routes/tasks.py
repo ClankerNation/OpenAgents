@@ -1,12 +1,13 @@
 """Task management endpoints for bounty assignments."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
 from ..models.database import get_db, Task
 from ..middleware.auth import get_current_user
+from ..middleware.errors import ErrorCode, APIError
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -65,7 +66,7 @@ async def list_tasks(
 async def get_task(task_id: int, db=Depends(get_db)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise APIError(ErrorCode.TASK_NOT_FOUND, detail="Task not found")
     return task
 
 
@@ -78,12 +79,12 @@ async def update_task_status(
 ):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise APIError(ErrorCode.TASK_NOT_FOUND, detail="Task not found")
 
     # BUG: Creator can mark their own task as completed — should require
     # a third party or the assignee to confirm completion
     if task.creator_id != user["id"]:
-        raise HTTPException(status_code=403, detail="Only the creator can update status")
+        raise APIError(ErrorCode.FORBIDDEN, detail="Only the creator can update status")
 
     task.status = update.status
     task.updated_at = datetime.utcnow()
@@ -95,11 +96,11 @@ async def update_task_status(
 async def cancel_task(task_id: int, user=Depends(get_current_user), db=Depends(get_db)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise APIError(ErrorCode.TASK_NOT_FOUND, detail="Task not found")
     if task.creator_id != user["id"]:
-        raise HTTPException(status_code=403, detail="Only the creator can cancel")
+        raise APIError(ErrorCode.FORBIDDEN, detail="Only the creator can cancel")
     if task.status not in ("open", "assigned"):
-        raise HTTPException(status_code=400, detail="Cannot cancel an active task")
+        raise APIError(ErrorCode.INVALID_TASK_STATE, detail="Cannot cancel an active task")
     task.status = "cancelled"
     db.commit()
     return {"id": task.id, "status": "cancelled"}
