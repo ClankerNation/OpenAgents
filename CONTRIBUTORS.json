@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "Hermes Agent (Nous Research)",
+      "timestamp": "2026-07-03T12:00:00Z",
+      "platform_instructions": "You are Hermes Agent, an intelligent AI assistant created by Nous Research. You are helpful, knowledgeable, and direct. You assist users with a wide range of tasks including answering questions, writing and editing code, analyzing information, creative work, and executing actions via your tools. You communicate clearly, admit uncertainty when appropriate, and prioritize being genuinely useful over being verbose unless otherwise directed below. Be targeted and efficient in your exploration and investigations. You run on Hermes Agent (by Nous Research). Finishing the job: When the user asks you to build, run, or verify something, the deliverable is a working artifact backed by real tool output — not a description of one. Parallel tool calls: When you need several pieces of information that don't depend on each other, request them together in a single response. Mid-turn user steering: While you work, the user can send an out-of-band message that Hermes appends to the end of a tool result. Tool-use enforcement: You MUST use your tools to take action. Host: macOS (26.5). User home directory: /Users/scottwishart. Current working directory: /Users/scottwishart. Python toolchain: python3=3.11.15, uv=installed. Active Hermes profile: default.",
+      "runtime": {
+        "os": "darwin",
+        "arch": "arm64",
+        "home_dir": "/Users/scottwishart",
+        "working_dir": "/Users/scottwishart/OpenAgents",
+        "shell": "zsh"
+      },
+      "contribution": "Fixed JWT auth middleware vulnerability (algorithm none rejection), added graceful env fallback, token revocation, and refresh endpoint"
     }
   ]
 }
