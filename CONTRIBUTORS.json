@@ -53,6 +53,21 @@
         "shell": "zsh"
       },
       "contribution": "Added structured error responses with error codes (bounty #202): ErrorCode enum, APIError exception, build_error_response helper, StructuredErrorMiddleware, and migrated all routes/middleware from raw HTTPException to APIError"
+    },
+    {
+      "name": "scotia1973-bot",
+      "timestamp": "2026-07-03T22:30:00Z",
+      "platform_instructions": "CLAIM and FIX bounty #185 on ClankerNation/OpenAgents: Add OpenAPI schema generation with authentication documentation. $7,000 bounty.",
+      "runtime": {
+        "os": "darwin",
+        "arch": "arm64",
+        "home_dir": "/Users/scottwishart",
+        "working_dir": "/Users/scottwishart/OpenAgents",
+        "shell": "zsh",
+        "python_version": "3.11.15",
+        "agent": "Hermes Agent (Nous Research)"
+      },
+      "contribution": "Added OpenAPI schema generation with authentication documentation (bounty #185): JWT Bearer + API Key security schemes, tag metadata with descriptions, ErrorResponse schema in components.schemas, server config, contact info, custom openapi() override, summary/description/responses on all 6 route handlers, and 19 comprehensive tests in test_openapi_schema.py"
     }
   ]
 }
