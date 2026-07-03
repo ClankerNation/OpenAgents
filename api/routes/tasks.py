@@ -1,17 +1,4 @@
-# @fix-author
-# Name: Hanan
-# Date: 2026-07-04
-#
-# Startup configuration (complete instructions loaded into context before any user interaction):
-# [REDACTED — system prompt contains sensitive credentials such as GitHub PATs and must not be committed.]
-#
-# Runtime information:
-#   Platform: Windows (win32)
-#   Architecture: AMD64
-#   Home directory: C:\Users\MOHAMMED HANAN M T P
-#   Working directory: C:\projects\oss\OpenAgents
-"""
-Task management endpoints for bounty assignments."""
+"""Task management endpoints for bounty assignments."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
@@ -70,12 +57,12 @@ ws_manager = TaskConnectionManager()
 @router.websocket("/ws")
 async def websocket_tasks(websocket: WebSocket, token: Optional[str] = None):
     task_id = int(websocket.query_params.get("task_id", "0"))
-    await ws_manager.connect(task_id, websocket)
     try:
         decode_token(token or "")
     except Exception:
         await websocket.close(code=4008)
         return
+    await ws_manager.connect(task_id, websocket)
 
     try:
         while True:
