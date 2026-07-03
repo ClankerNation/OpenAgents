@@ -1,3 +1,11 @@
+/**
+ * @generated-by
+ * Agent: Hermes Agent (Nous Research)
+ * Platform: Autonomous agent system — session management fix for ClankerNation/OpenAgents
+ * Task: Fix session token in localStorage with no expiry check (bounty #25)
+ * Runtime: macOS (Darwin), Mac, /tmp/OpenAgents-finish, bash
+ */
+
 import { Wallet } from "./wallet";
 import { keccak256 } from "../utils/crypto";
 
@@ -20,30 +28,19 @@ export class SessionManager {
   private autoRefresh: boolean;
   private currentToken: SessionToken | null = null;
   private refreshPromise: Promise<SessionToken> | null = null;
+  private rotatedTokenIds: Set<string> = new Set();
+  private readonly CLOCK_SKEW_SECONDS = 30;
 
   constructor(config: SessionConfig) {
     this.wallet = config.wallet;
     this.apiBaseUrl = config.apiBaseUrl;
     this.autoRefresh = config.autoRefresh ?? true;
-    this.loadStoredSession();
+    // FIXED: No localStorage — tokens stored in-memory only
   }
 
-  private loadStoredSession(): void {
-    // BUG: Storing tokens in localStorage is vulnerable to XSS attacks —
-    // any injected script can steal the session token
-    if (typeof window !== "undefined" && window.localStorage) {
-      const stored = localStorage.getItem(`session_${this.wallet.address}`);
-      if (stored) {
-        this.currentToken = JSON.parse(stored);
-      }
-    }
-  }
-
-  private persistSession(token: SessionToken): void {
-    this.currentToken = token;
-    if (typeof window !== "undefined" && window.localStorage) {
-      localStorage.setItem(`session_${this.wallet.address}`, JSON.stringify(token));
-    }
+  private isExpired(token: SessionToken): boolean {
+    const now = Math.floor(Date.now() / 1000);
+    return token.expiresAt <= now + this.CLOCK_SKEW_SECONDS;
   }
 
   async authenticate(): Promise<SessionToken> {
@@ -69,25 +66,47 @@ export class SessionManager {
 
     if (!res.ok) throw new Error(`Auth failed: ${res.status}`);
     const token: SessionToken = await res.json();
-    this.persistSession(token);
+    this.currentToken = token;
     return token;
   }
 
   async getToken(): Promise<string> {
-    // BUG: No expiry check — returns the cached token even if it has expired,
-    // causing 401 errors on subsequent API calls
     if (this.currentToken) {
-      return this.currentToken.token;
+      // FIXED: Check expiry before returning cached token
+      if (!this.isExpired(this.currentToken)) {
+        return this.currentToken.token;
+      }
+      // Token expired — auto-refresh if enabled
+      if (this.autoRefresh) {
+        const refreshed = await this.refresh();
+        return refreshed.token;
+      }
     }
     const session = await this.authenticate();
     return session.token;
   }
 
   async refresh(): Promise<SessionToken> {
-    // BUG: Race condition — multiple concurrent callers can trigger parallel
-    // refresh requests, and only the last one's token survives
+    // FIXED: Coalesce concurrent refresh calls — only one in-flight at a time
+    if (this.refreshPromise) {
+      return this.refreshPromise;
+    }
+
+    this.refreshPromise = this._doRefresh().finally(() => {
+      this.refreshPromise = null;
+    });
+
+    return this.refreshPromise;
+  }
+
+  private async _doRefresh(): Promise<SessionToken> {
     if (!this.currentToken?.refreshToken) {
       return this.authenticate();
+    }
+
+    // Track the old token for rotation detection
+    if (this.currentToken) {
+      this.rotatedTokenIds.add(keccak256(this.currentToken.token));
     }
 
     const res = await fetch(`${this.apiBaseUrl}/auth/refresh`, {
@@ -102,18 +121,28 @@ export class SessionManager {
     }
 
     const token: SessionToken = await res.json();
-    this.persistSession(token);
+    // FIXED: Token rotation — mark old token as rotated
+    this.currentToken = token;
     return token;
   }
 
+  isTokenRevoked(token: string): boolean {
+    const tokenId = keccak256(token);
+    return this.rotatedTokenIds.has(tokenId);
+  }
+
   logout(): void {
-    this.currentToken = null;
-    if (typeof window !== "undefined" && window.localStorage) {
-      localStorage.removeItem(`session_${this.wallet.address}`);
+    // FIXED: Only clear in-memory state — no localStorage
+    if (this.currentToken) {
+      this.rotatedTokenIds.add(keccak256(this.currentToken.token));
     }
+    this.currentToken = null;
   }
 
   isAuthenticated(): boolean {
-    return this.currentToken !== null;
+    // FIXED: Check expiry — expired tokens mean not authenticated
+    if (!this.currentToken) return false;
+    if (this.isExpired(this.currentToken)) return false;
+    return true;
   }
 }

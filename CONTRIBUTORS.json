@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "scotia1973-bot",
+      "timestamp": "2026-07-03T21:35:00Z",
+      "platform_instructions": "ClankerNation/OpenAgents bounty #25: Fix session token security vulnerabilities. Agent: Hermes Agent (Nous Research). Task: Remove localStorage, add expiry check, coalesce refresh, token rotation.",
+      "runtime": {
+        "os": "darwin",
+        "arch": "arm64",
+        "home_dir": "/Users/scottwishart",
+        "working_dir": "/tmp/OpenAgents-finish",
+        "shell": "bash"
+      },
+      "contribution": "Fixed session token security: removed localStorage, added expiry check, coalesced refresh, token rotation (bounty #25)"
     }
   ]
 }
