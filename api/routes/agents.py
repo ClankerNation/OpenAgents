@@ -1,6 +1,6 @@
 """Agent CRUD endpoints for the OpenAgents platform."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -37,6 +37,11 @@ async def create_agent(agent: AgentCreate, user=Depends(get_current_user), db=De
     db.add(new_agent)
     db.commit()
     db.refresh(new_agent)
+    log_action(
+        actor=user.get("address"),
+        action="create_agent",
+        target=f"agent:{new_agent.id}",
+    )
     return {"id": new_agent.id, "name": new_agent.name, "owner": user["address"]}
 
 
@@ -74,15 +79,27 @@ async def update_agent(
     for field, value in update.dict(exclude_unset=True).items():
         setattr(agent, field, value)
     db.commit()
+    log_action(
+        actor=user.get("address"),
+        action="update_agent",
+        target=f"agent:{agent_id}",
+    )
     return agent
 
 
 # BUG: No authentication — anyone can delete any agent
 @router.delete("/{agent_id}")
-async def delete_agent(agent_id: int, db=Depends(get_db)):
+async def delete_agent(agent_id: int, request: Request, db=Depends(get_db)):
     agent = db.query(Agent).filter(Agent.id == agent_id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     db.delete(agent)
     db.commit()
+    log_action(
+        actor=None,
+        action="delete_agent",
+        target=f"agent:{agent_id}",
+        ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
     return {"deleted": True}

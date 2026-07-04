@@ -3,11 +3,16 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+from api.routes import agents as agents_router
+from api.middleware.audit import log_action, get_audit_logs
+
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+app.include_router(agents_router.router)
 
 
 class AgentResponse(BaseModel):
@@ -110,3 +115,8 @@ async def health():
         "tasks_indexed": len(tasks_cache),
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+
+@app.get("/admin/audit-log")
+async def audit_log(limit: int = Query(100, le=1000)):
+    return {"entries": get_audit_logs(limit)}
