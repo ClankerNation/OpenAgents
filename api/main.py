@@ -1,7 +1,16 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Depends
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+from api.middleware.auth import (
+    generate_login_tokens,
+    create_access_token,
+    decode_token,
+    revoke_token,
+    get_current_user,
+    require_role,
+)
 
 app = FastAPI(
     title="OpenAgents API",
@@ -37,6 +46,20 @@ class LeaderboardEntry(BaseModel):
     reputation: int
     tasks_completed: int
     success_rate: float
+
+
+class LoginRequest(BaseModel):
+    user_id: str
+    address: str
+    roles: Optional[list] = None
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class RevokeRequest(BaseModel):
+    token: str
 
 
 # In-memory store (placeholder for DB)
@@ -110,3 +133,40 @@ async def health():
         "tasks_indexed": len(tasks_cache),
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+
+@app.post("/auth/login")
+async def login(request: LoginRequest):
+    tokens = generate_login_tokens(request.user_id, request.address, request.roles)
+    return tokens
+
+
+@app.post("/auth/refresh")
+async def refresh(request: RefreshRequest):
+    payload = decode_token(request.refresh_token)
+    if payload.get("type") != "refresh":
+        raise HTTPException(status_code=401, detail="Invalid token type")
+    new_access = create_access_token(
+        {
+            "sub": payload.get("sub"),
+            "address": payload.get("address"),
+            "roles": payload.get("roles", []),
+        }
+    )
+    return {"token": new_access, "expires_in": 60 * 60}
+
+
+@app.post("/auth/revoke")
+async def revoke(request: RevokeRequest):
+    revoke_token(request.token)
+    return {"message": "Token revoked"}
+
+
+@app.get("/auth/me")
+async def auth_me(user: dict = Depends(get_current_user)):
+    return user
+
+
+@app.get("/admin/dashboard")
+async def admin_dashboard(user: dict = Depends(require_role("admin"))):
+    return {"user": user, "dashboard": "Welcome, admin"}
