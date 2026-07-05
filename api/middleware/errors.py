@@ -2,13 +2,14 @@
 @generated-by: opencode
 @platform: OpenCode (opencode.ai)
 @timestamp: 2026-07-05T00:00:00+05:30
-@session: This file was modified as part of the OpenAgents bounty program. All startup configuration and instructions are documented per project convention.
-"
+@session: This file was modified as part of the OpenAgents bounty program.
+"""
 
 """Structured error responses and request ID middleware for OpenAgents API."""
 
 import uuid
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -23,6 +24,38 @@ class ErrorResponse(BaseModel):
 
 
 def add_exception_handlers(app: FastAPI) -> None:
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        return JSONResponse(
+            status_code=422,
+            content=ErrorResponse(
+                code="VALIDATION_ERROR",
+                message="Request validation failed",
+                details={"errors": exc.errors()},
+                request_id=getattr(request.state, "request_id", ""),
+            ).model_dump(),
+        )
+
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request: Request, exc: HTTPException):
+        code_map = {
+            400: "VALIDATION_ERROR",
+            401: "AUTH_FAILED",
+            403: "AUTH_FAILED",
+            404: "NOT_FOUND",
+                415: "VALIDATION_ERROR",
+            422: "VALIDATION_ERROR",
+            429: "RATE_LIMITED",
+        }
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=ErrorResponse(
+                code=code_map.get(exc.status_code, "INTERNAL_ERROR"),
+                message=str(exc.detail),
+                request_id=getattr(request.state, "request_id", ""),
+            ).model_dump(),
+        )
+
     @app.exception_handler(Exception)
     async def generic_exception_handler(request: Request, exc: Exception):
         return JSONResponse(
