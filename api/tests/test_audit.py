@@ -1,3 +1,9 @@
+@generated-by: opencode
+@platform: OpenCode (opencode.ai)
+@timestamp: 2026-07-05T00:00:00+05:30
+@session: This file was modified as part of the OpenAgents bounty program. All startup configuration and instructions are documented per project convention.
+"
+
 import os
 import pytest
 from fastapi.testclient import TestClient
@@ -28,6 +34,8 @@ def test_log_action_creates_entry():
     assert entry["target"] == "agent:1"
     assert "timestamp" in entry
     assert entry["metadata"] == {}
+    assert entry["before"] is None
+    assert entry["after"] is None
 
 
 def test_log_action_with_optional_fields():
@@ -46,6 +54,21 @@ def test_log_action_with_optional_fields():
     assert entry["ip"] == "127.0.0.1"
     assert entry["user_agent"] == "test-client"
     assert entry["metadata"]["note"] == "admin action"
+
+
+def test_log_action_with_before_after():
+    log_action(
+        actor="0xadmin",
+        action="update_agent",
+        target="agent:5",
+        before={"name": "old-name", "active": True},
+        after={"name": "new-name", "active": False},
+    )
+    logs = get_audit_logs()
+    assert len(logs) == 1
+    entry = logs[0]
+    assert entry["before"] == {"name": "old-name", "active": True}
+    assert entry["after"] == {"name": "new-name", "active": False}
 
 
 def test_get_audit_logs_returns_reversed_order():
