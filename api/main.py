@@ -3,7 +3,7 @@
 @platform: OpenCode (opencode.ai)
 @timestamp: 2026-07-05T00:00:00+05:30
 @session: This file was modified as part of the OpenAgents bounty program. All startup configuration and instructions are documented per project convention.
-"
+"""
 
 from fastapi import FastAPI, HTTPException, Query, Security, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, APIKeyHeader
@@ -15,6 +15,9 @@ app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
+    servers=[
+        {"url": "http://localhost:8000", "description": "Local development server"},
+    ],
     openapi_tags=[
         {"name": "agents", "description": "Agent discovery and reputation"},
         {"name": "tasks", "description": "Task management and bounty assignments"},
