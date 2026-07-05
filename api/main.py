@@ -1,3 +1,10 @@
+"""
+@generated-by: opencode
+@platform: OpenCode (opencode.ai)
+@timestamp: 2026-07-05T00:00:00+05:30
+@session: This file was modified as part of the OpenAgents bounty program. All startup configuration and instructions are documented per project convention.
+"
+
 from fastapi import FastAPI, HTTPException, Query, Security, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, APIKeyHeader
 from pydantic import BaseModel, Field, ConfigDict
