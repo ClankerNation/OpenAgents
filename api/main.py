@@ -110,3 +110,44 @@ async def health():
         "tasks_indexed": len(tasks_cache),
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+
+# Structured error responses with error codes
+from enum import Enum
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+class ErrorCode(str, Enum):
+    INVALID_INPUT = "INVALID_INPUT"
+    UNAUTHORIZED = "UNAUTHORIZED"
+    FORBIDDEN = "FORBIDDEN"
+    NOT_FOUND = "NOT_FOUND"
+    RATE_LIMITED = "RATE_LIMITED"
+    INTERNAL_ERROR = "INTERNAL_ERROR"
+    ESCROW_EXPIRED = "ESCROW_EXPIRED"
+
+class StructuredErrorResponse(BaseModel):
+    error_code: str
+    message: str
+    details: Optional[dict] = None
+
+@app.exception_handler(HTTPException)
+async def structured_error_handler(request: Request, exc: HTTPException):
+    """Return structured error responses with error codes."""
+    code_map = {
+        400: ErrorCode.INVALID_INPUT,
+        401: ErrorCode.UNAUTHORIZED,
+        403: ErrorCode.FORBIDDEN,
+        404: ErrorCode.NOT_FOUND,
+        429: ErrorCode.RATE_LIMITED,
+        500: ErrorCode.INTERNAL_ERROR,
+    }
+    error_code = code_map.get(exc.status_code, ErrorCode.INTERNAL_ERROR)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error_code": error_code.value,
+            "message": str(exc.detail),
+            "details": getattr(exc, "details", None),
+        },
+    )
