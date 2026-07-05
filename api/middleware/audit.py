@@ -1,4 +1,3 @@
-"""
 @generated-by: opencode
 @platform: OpenCode (opencode.ai)
 @timestamp: 2026-07-05T00:00:00+05:30
@@ -8,7 +7,7 @@
 """Audit logging utilities for admin actions."""
 
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 _audit_logs: List[Dict] = []
 _MAX_LOGS = 1000
@@ -21,6 +20,8 @@ def log_action(
     ip: Optional[str] = None,
     user_agent: Optional[str] = None,
     metadata: Optional[Dict] = None,
+    before: Optional[Dict[str, Any]] = None,
+    after: Optional[Dict[str, Any]] = None,
 ) -> Dict:
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -30,6 +31,8 @@ def log_action(
         "ip": ip,
         "user_agent": user_agent,
         "metadata": metadata or {},
+        "before": before,
+        "after": after,
     }
     _audit_logs.append(entry)
     if len(_audit_logs) > _MAX_LOGS:
