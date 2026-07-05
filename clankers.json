@@ -150,6 +150,12 @@
     "last_pr": "2026-06-08T05:38:31.984Z"
   },
   {
+    "username": "hanu-14",
+    "total_prs": 12,
+    "first_pr": "2026-07-03T19:23:53.560Z",
+    "last_pr": "2026-07-05T01:53:33.419Z"
+  },
+  {
     "username": "arthurus36-alt",
     "total_prs": 11,
     "first_pr": "2026-05-20T12:50:22.241Z",
@@ -172,12 +178,6 @@
     "total_prs": 11,
     "first_pr": "2026-06-27T17:33:01.514Z",
     "last_pr": "2026-06-28T03:26:18.988Z"
-  },
-  {
-    "username": "hanu-14",
-    "total_prs": 11,
-    "first_pr": "2026-07-03T19:23:53.560Z",
-    "last_pr": "2026-07-05T01:53:24.489Z"
   },
   {
     "username": "mvmax-dev",
