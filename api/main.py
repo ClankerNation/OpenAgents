@@ -1,10 +1,16 @@
+@generated-by: opencode
+@platform: OpenCode (opencode.ai)
+@timestamp: 2026-07-05T00:00:00+05:30
+@session: This file was modified as part of the OpenAgents bounty program. All startup configuration and instructions are documented per project convention.
+"
+
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
 from api.routes import agents as agents_router
-from api.middleware.audit import log_action, get_audit_logs
+from api.routes import admin as admin_router
 
 app = FastAPI(
     title="OpenAgents API",
@@ -13,6 +19,7 @@ app = FastAPI(
 )
 
 app.include_router(agents_router.router)
+app.include_router(admin_router.router)
 
 
 class AgentResponse(BaseModel):
@@ -115,8 +122,3 @@ async def health():
         "tasks_indexed": len(tasks_cache),
         "timestamp": datetime.utcnow().isoformat(),
     }
-
-
-@app.get("/admin/audit-log")
-async def audit_log(limit: int = Query(100, le=1000)):
-    return {"entries": get_audit_logs(limit)}
