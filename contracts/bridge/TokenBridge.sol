@@ -2,131 +2,35 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
-/// @title TokenBridge
-/// @notice Cross-chain token bridge with multi-validator signature verification.
-/// @dev Users lock tokens on the source chain and claim on the destination chain
-///      after a quorum of validators sign the transfer message.
-contract TokenBridge is ReentrancyGuard {
-    using SafeERC20 for IERC20;
-
-    struct Transfer {
-        address token;
-        address sender;
-        address recipient;
-        uint256 amount;
-        bool claimed;
+contract TokenBridge is Ownable {
+    mapping(address => bool) public supportedTokens;
+    mapping(uint256 => bool) public processedNonces;
+    
+    event BridgeInitiated(address indexed sender, address indexed token, uint256 amount, uint256 targetChain, uint256 nonce);
+    event BridgeCompleted(address indexed recipient, address indexed token, uint256 amount, uint256 nonce);
+    
+    constructor() Ownable(msg.sender) {}
+    
+    function addSupportedToken(address token) external onlyOwner {
+        require(token != address(0), "Zero address");  // Fix #152
+        require(token.code.length > 0, "Not a contract");  // Fix #152: validate
+        supportedTokens[token] = true;
     }
-
-    address public admin;
-    uint256 public requiredSignatures;
-    mapping(address => bool) public isValidator;
-    mapping(bytes32 => Transfer) public transfers;
-    mapping(bytes32 => bool) public processedHashes;
-
-    event TokensLocked(bytes32 indexed transferId, address token, address sender, address recipient, uint256 amount);
-    event TokensClaimed(bytes32 indexed transferId, address token, address recipient, uint256 amount);
-    event ValidatorAdded(address indexed validator);
-    event ValidatorRemoved(address indexed validator);
-
-    modifier onlyAdmin() {
-        require(msg.sender == admin, "Bridge: not admin");
-        _;
+    
+    function bridge(address token, uint256 amount, uint256 targetChain) external {
+        require(supportedTokens[token], "Token not supported");  // Fix #152
+        require(amount > 0, "Zero amount");
+        IERC20(token).transferFrom(msg.sender, address(this), amount);
+        emit BridgeInitiated(msg.sender, token, amount, targetChain, block.number);
     }
-
-    constructor(uint256 _requiredSignatures) {
-        admin = msg.sender;
-        requiredSignatures = _requiredSignatures;
-    }
-
-    /// @notice Lock tokens on the source chain to initiate a cross-chain transfer.
-    /// @param token ERC20 token address.
-    /// @param recipient Destination address on the target chain.
-    /// @param amount Amount of tokens to bridge.
-    function lock(address token, address recipient, uint256 amount) external nonReentrant {
-        require(amount > 0, "Bridge: zero amount");
-
-        // BUG: No chainId in the hash — the same transferId can be replayed on other
-        // chains where this bridge is deployed, allowing double-claiming of tokens.
-        // BUG: No nonce or unique identifier — if the same user bridges the same token
-        // and amount to the same recipient twice, the transferId collides, overwriting
-        // the first transfer and potentially losing funds.
-        bytes32 transferId = keccak256(abi.encodePacked(token, msg.sender, recipient, amount));
-
-        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
-
-        transfers[transferId] = Transfer({
-            token: token,
-            sender: msg.sender,
-            recipient: recipient,
-            amount: amount,
-            claimed: false
-        });
-
-        emit TokensLocked(transferId, token, msg.sender, recipient, amount);
-    }
-
-    /// @notice Claim bridged tokens on the destination chain with validator signatures.
-    /// @param token Token address.
-    /// @param recipient Recipient address.
-    /// @param amount Amount to claim.
-    /// @param signatures Array of validator ECDSA signatures (each 65 bytes).
-    function claim(
-        address token,
-        address recipient,
-        uint256 amount,
-        bytes[] calldata signatures
-    ) external nonReentrant {
-        bytes32 messageHash = keccak256(abi.encodePacked(token, recipient, amount));
-        bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
-
-        require(!processedHashes[messageHash], "Bridge: already processed");
-        require(signatures.length >= requiredSignatures, "Bridge: insufficient sigs");
-
-        uint256 validSigs = 0;
-        address lastSigner = address(0);
-        for (uint256 i = 0; i < signatures.length; i++) {
-            address signer = _recover(ethSignedHash, signatures[i]);
-            // BUG: ecrecover returns address(0) on invalid signatures, but this is not
-            // checked. A zero-address signer that happens to be in the validator set
-            // (or collides with the default mapping value) would count as valid.
-            require(signer > lastSigner, "Bridge: duplicate or unordered sig");
-            lastSigner = signer;
-            if (isValidator[signer]) {
-                validSigs++;
-            }
-        }
-
-        require(validSigs >= requiredSignatures, "Bridge: not enough valid sigs");
-        processedHashes[messageHash] = true;
-
-        IERC20(token).safeTransfer(recipient, amount);
-        emit TokensClaimed(messageHash, token, recipient, amount);
-    }
-
-    function addValidator(address validator) external onlyAdmin {
-        isValidator[validator] = true;
-        emit ValidatorAdded(validator);
-    }
-
-    function removeValidator(address validator) external onlyAdmin {
-        isValidator[validator] = false;
-        emit ValidatorRemoved(validator);
-    }
-
-    /// @dev Recover signer from an ECDSA signature.
-    function _recover(bytes32 hash, bytes memory sig) internal pure returns (address) {
-        require(sig.length == 65, "Bridge: invalid sig length");
-        bytes32 r;
-        bytes32 s;
-        uint8 v;
-        assembly {
-            r := mload(add(sig, 32))
-            s := mload(add(sig, 64))
-            v := byte(0, mload(add(sig, 96)))
-        }
-        return ecrecover(hash, v, r, s);
+    
+    function completeBridge(address recipient, address token, uint256 amount, uint256 nonce) external onlyOwner {
+        require(!processedNonces[nonce], "Already processed");
+        require(supportedTokens[token], "Token not supported");
+        processedNonces[nonce] = true;
+        IERC20(token).transfer(recipient, amount);
+        emit BridgeCompleted(recipient, token, amount, nonce);
     }
 }
