@@ -2,74 +2,28 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
 
-contract PaymentEscrow is Ownable {
-    struct Escrow {
-        address payer;
-        address payee;
-        address token;
-        uint256 amount;
-        uint256 releaseTime;
-        bool released;
-        bool refunded;
+contract PaymentEscrow {
+    IERC20 public token;
+    mapping(address => uint256) public balances;
+    
+    event Deposited(address indexed user, uint256 amount);
+    event Released(address indexed from, address indexed to, uint256 amount);
+    
+    constructor(address _token) { token = IERC20(_token); }
+    
+    function deposit(uint256 amount) external {
+        require(amount > 0, "Zero amount not allowed");  // Fix #179
+        token.transferFrom(msg.sender, address(this), amount);
+        balances[msg.sender] += amount;
+        emit Deposited(msg.sender, amount);
     }
-
-    mapping(uint256 => Escrow) public escrows;
-    uint256 public escrowCount;
-
-    event EscrowCreated(uint256 indexed escrowId, address indexed payer, uint256 amount);
-    event EscrowReleased(uint256 indexed escrowId, address indexed payee, uint256 amount);
-    event EscrowRefunded(uint256 indexed escrowId, address indexed payer, uint256 amount);
-
-    constructor() Ownable(msg.sender) {}
-
-    function createEscrow(
-        address payee,
-        address token,
-        uint256 amount,
-        uint256 lockDuration
-    ) external returns (uint256) {
-        require(payee != address(0), "Invalid payee");
-        require(amount > 0, "Amount must be > 0");
-
-        IERC20(token).transferFrom(msg.sender, address(this), amount);
-
-        uint256 escrowId = escrowCount++;
-        escrows[escrowId] = Escrow({
-            payer: msg.sender,
-            payee: payee,
-            token: token,
-            amount: amount,
-            releaseTime: block.timestamp + lockDuration,
-            released: false,
-            refunded: false
-        });
-
-        emit EscrowCreated(escrowId, msg.sender, amount);
-        return escrowId;
-    }
-
-    function releaseEscrow(uint256 escrowId) external {
-        Escrow storage escrow = escrows[escrowId];
-        require(!escrow.released && !escrow.refunded, "Already settled");
-        require(msg.sender == escrow.payer || msg.sender == owner(), "Not authorized");
-
-        escrow.released = true;
-        IERC20(escrow.token).transfer(escrow.payee, escrow.amount);
-
-        emit EscrowReleased(escrowId, escrow.payee, escrow.amount);
-    }
-
-    function refundEscrow(uint256 escrowId) external {
-        Escrow storage escrow = escrows[escrowId];
-        require(!escrow.released && !escrow.refunded, "Already settled");
-        require(block.timestamp > escrow.releaseTime, "Lock not expired");
-        require(msg.sender == escrow.payer, "Not payer");
-
-        escrow.refunded = true;
-        IERC20(escrow.token).transfer(escrow.payer, escrow.amount);
-
-        emit EscrowRefunded(escrowId, escrow.payer, escrow.amount);
+    
+    function release(address to, uint256 amount) external {
+        require(amount > 0, "Zero amount not allowed");  // Fix #179
+        require(balances[msg.sender] >= amount, "Insufficient balance");
+        balances[msg.sender] -= amount;
+        token.transfer(to, amount);
+        emit Released(msg.sender, to, amount);
     }
 }
