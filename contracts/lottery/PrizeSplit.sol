@@ -1,88 +1,37 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-/// @title PrizeSplit
-/// @notice Distributes prize pool among multiple winners with configurable shares
-/// @dev Winners claim their share after the admin finalizes the round
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
 contract PrizeSplit {
-    address public admin;
-    uint256 public totalPrize;
-    uint256 public roundId;
-
-    struct Round {
-        address[] winners;
-        uint256 prizePool;
-        bool finalized;
-        mapping(address => uint256) shares;
-        mapping(address => bool) claimed;
-    }
-
-    mapping(uint256 => Round) internal rounds;
-
-    event RoundFunded(uint256 indexed roundId, uint256 amount);
-    event RoundFinalized(uint256 indexed roundId, uint256 winnerCount);
-    event PrizeClaimed(address indexed winner, uint256 amount, uint256 indexed roundId);
-
-    modifier onlyAdmin() {
-        require(msg.sender == admin, "Not admin");
-        _;
-    }
-
-    constructor() {
-        admin = msg.sender;
-    }
-
-    function fundRound() external payable onlyAdmin {
-        roundId++;
-        rounds[roundId].prizePool = msg.value;
-        totalPrize += msg.value;
-        emit RoundFunded(roundId, msg.value);
-    }
-
-    // BUG: No zero-winner check — if winners array is empty, the function
-    // succeeds silently and the prize pool becomes permanently locked
-    function finalizeRound(uint256 _roundId, address[] calldata winners) external onlyAdmin {
-        Round storage round = rounds[_roundId];
-        require(!round.finalized, "Already finalized");
-        require(round.prizePool > 0, "No prize pool");
-
-        // BUG: Rounding error loses dust — integer division truncates remainder,
-        // so (prizePool % winners.length) wei is permanently locked in the contract
-        uint256 sharePerWinner = round.prizePool / winners.length;
-
-        for (uint256 i = 0; i < winners.length; i++) {
-            round.winners.push(winners[i]);
-            round.shares[winners[i]] = sharePerWinner;
+    IERC20 public token;
+    
+    event PrizeDistributed(address[] winners, uint256[] shares, uint256 totalDistributed);
+    
+    constructor(address _token) { token = IERC20(_token); }
+    
+    function distributePrize(address[] calldata winners, uint256[] calldata percentages) external returns (uint256[] memory) {
+        require(winners.length == percentages.length, "Length mismatch");
+        uint256 pool = token.balanceOf(address(this));
+        uint256[] memory shares = new uint256[](winners.length);
+        uint256 distributed = 0;
+        
+        for (uint i = 0; i < winners.length; i++) {
+            uint256 share = pool * percentages[i] / 10000;
+            if (share == 0 || winners[i] == address(0)) {
+                shares[i] = 0;
+                continue;  // Fix #189: skip zero-share winners
+            }
+            shares[i] = share;
+            distributed += share;
+            token.transfer(winners[i], share);
         }
-
-        round.finalized = true;
-        emit RoundFinalized(_roundId, winners.length);
-    }
-
-    // BUG: Reentrancy — state (claimed flag) is set after the external call,
-    // allowing a malicious contract to re-enter claimPrize and drain funds
-    function claimPrize(uint256 _roundId) external {
-        Round storage round = rounds[_roundId];
-        require(round.finalized, "Not finalized");
-        require(round.shares[msg.sender] > 0, "No share");
-        require(!round.claimed[msg.sender], "Already claimed");
-
-        uint256 amount = round.shares[msg.sender];
-
-        (bool sent, ) = msg.sender.call{value: amount}("");
-        require(sent, "Transfer failed");
-
-        // State updated after external call — reentrancy window
-        round.claimed[msg.sender] = true;
-
-        emit PrizeClaimed(msg.sender, amount, _roundId);
-    }
-
-    function getShare(uint256 _roundId, address winner) external view returns (uint256) {
-        return rounds[_roundId].shares[winner];
-    }
-
-    function isClaimed(uint256 _roundId, address winner) external view returns (bool) {
-        return rounds[_roundId].claimed[winner];
+        
+        if (distributed < pool) {
+            token.transfer(msg.sender, pool - distributed);  // Refund undistributed
+        }
+        
+        emit PrizeDistributed(winners, shares, distributed);
+        return shares;
     }
 }
