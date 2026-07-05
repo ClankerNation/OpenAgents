@@ -468,6 +468,12 @@
     "last_pr": "2026-07-03T23:41:37.809Z"
   },
   {
+    "username": "AMEOBIUS",
+    "total_prs": 2,
+    "first_pr": "2026-07-05T06:08:36.853Z",
+    "last_pr": "2026-07-05T06:51:19.769Z"
+  },
+  {
     "username": "CuboYe",
     "total_prs": 1,
     "first_pr": "2026-05-16T16:52:10.623Z",
@@ -664,11 +670,5 @@
     "total_prs": 1,
     "first_pr": "2026-06-26T07:27:38.579Z",
     "last_pr": "2026-06-26T07:27:38.579Z"
-  },
-  {
-    "username": "AMEOBIUS",
-    "total_prs": 1,
-    "first_pr": "2026-07-05T06:08:36.853Z",
-    "last_pr": "2026-07-05T06:08:36.853Z"
   }
 ]
