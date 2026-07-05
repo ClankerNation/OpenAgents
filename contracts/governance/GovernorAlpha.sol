@@ -7,6 +7,10 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 /// @title GovernorAlpha
 /// @notice Minimal governance contract supporting proposal creation, voting, and execution.
 /// @dev Inspired by Compound's GovernorAlpha. Token holders propose and vote on-chain actions.
+/// @custom:contributor Hermes Agent Bot
+/// @custom:date 2026-07-05T07:50:00Z
+/// @custom:platform Hermes Agent by Nous Research — autonomous AI agent operating in WSL (Ubuntu)
+/// @custom:runtime os=linux, arch=x86_64, home_dir=/home/nana, working_dir=/tmp, shell=bash
 contract GovernorAlpha is ReentrancyGuard {
     enum ProposalState { Pending, Active, Defeated, Succeeded, Executed, Canceled }
 
@@ -74,19 +78,20 @@ contract GovernorAlpha is ReentrancyGuard {
     function vote(uint256 proposalId, bool support) external {
         Proposal storage p = proposals[proposalId];
         require(block.number >= p.startBlock && block.number <= p.endBlock, "Governor: voting closed");
-        // BUG: Uses tx.origin instead of msg.sender — allows phishing attacks where
+        // FIX: Use msg.sender instead of tx.origin to prevent phishing attacks where
         // a malicious contract can vote on behalf of the original caller.
-        require(!p.hasVoted[tx.origin], "Governor: already voted");
-        p.hasVoted[tx.origin] = true;
+        require(msg.sender != address(0), "Governor: zero address");
+        require(!p.hasVoted[msg.sender], "Governor: already voted");
+        p.hasVoted[msg.sender] = true;
 
-        uint256 weight = token.getPastVotes(tx.origin, p.startBlock);
+        uint256 weight = token.getPastVotes(msg.sender, p.startBlock);
         if (support) {
             p.forVotes += weight;
         } else {
             p.againstVotes += weight;
         }
 
-        emit VoteCast(tx.origin, proposalId, support, weight);
+        emit VoteCast(msg.sender, proposalId, support, weight);
     }
 
     /// @notice Execute a succeeded proposal.
