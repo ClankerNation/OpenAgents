@@ -1,3 +1,8 @@
+// @generated-by: opencode
+// @platform: OpenCode (opencode.ai)
+// @timestamp: 2026-07-05T00:00:00+05:30
+// @session: This file was modified as part of the OpenAgents bounty program.
+
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
