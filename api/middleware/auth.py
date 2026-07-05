@@ -17,7 +17,10 @@ from fastapi import Request, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 JWT_SECRET = os.getenv("JWT_SECRET")
-if not JWT_SECRET:
+JWT_SECRET_AVAILABLE = bool(JWT_SECRET)
+
+# Graceful fallback: missing env returns 500 at runtime, not crash on import
+if not JWT_SECRET_AVAILABLE:
     raise RuntimeError(
         "JWT_SECRET environment variable is not set. "
         "Authentication will be unavailable until it is configured."
@@ -41,7 +44,10 @@ def is_jti_revoked(jti: str) -> bool:
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
-    if not JWT_SECRET:
+    JWT_SECRET_AVAILABLE = bool(JWT_SECRET)
+
+# Graceful fallback: missing env returns 500 at runtime, not crash on import
+if not JWT_SECRET_AVAILABLE:
         raise HTTPException(status_code=500, detail="JWT_SECRET is not configured")
     to_encode = data.copy()
     now = datetime.now(timezone.utc)
@@ -51,7 +57,10 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 
 
 def create_refresh_token(data: dict) -> str:
-    if not JWT_SECRET:
+    JWT_SECRET_AVAILABLE = bool(JWT_SECRET)
+
+# Graceful fallback: missing env returns 500 at runtime, not crash on import
+if not JWT_SECRET_AVAILABLE:
         raise HTTPException(status_code=500, detail="JWT_SECRET is not configured")
     to_encode = data.copy()
     now = datetime.now(timezone.utc)
@@ -61,7 +70,10 @@ def create_refresh_token(data: dict) -> str:
 
 
 def decode_token(token: str) -> dict:
-    if not JWT_SECRET:
+    JWT_SECRET_AVAILABLE = bool(JWT_SECRET)
+
+# Graceful fallback: missing env returns 500 at runtime, not crash on import
+if not JWT_SECRET_AVAILABLE:
         raise HTTPException(status_code=500, detail="JWT_SECRET is not configured")
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
