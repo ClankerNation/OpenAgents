@@ -30,7 +30,7 @@ contract AMMPool {
         tokenB = IERC20(_tokenB);
     }
 
-    // BUG: No minimum liquidity lock — first LP can add tiny liquidity then remove it all,
+    // BUG: No minimum liquidity lock -- first LP can add tiny liquidity then remove it all,
     // enabling a well-known inflation attack where attacker donates tokens to manipulate
     // share price and steal from the next depositor
     function addLiquidity(uint256 amountA, uint256 amountB) external returns (uint256 lpTokens) {
@@ -72,20 +72,28 @@ contract AMMPool {
         emit LiquidityRemoved(msg.sender, amountA, amountB);
     }
 
-    // BUG: Swap has no deadline parameter — transaction can sit in mempool and execute
-    // at a much later time when price has moved unfavorably (stale transaction attack)
-    // BUG: Fee truncates to zero for small swaps — (amountIn * 30) / 10000 rounds to 0
-    // when amountIn < 334, meaning tiny swaps pay no fee and can drain value over time
-    function swap(address tokenIn, uint256 amountIn, uint256 minAmountOut) external returns (uint256 amountOut) {
+    function swap(
+        address tokenIn,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint256 deadline
+    ) external returns (uint256 amountOut) {
+        require(block.timestamp <= deadline, "Deadline expired");
         require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
         require(amountIn > 0, "Zero input");
 
         bool isA = tokenIn == address(tokenA);
         (uint256 resIn, uint256 resOut) = isA ? (reserveA, reserveB) : (reserveB, reserveA);
 
-        uint256 amountInWithFee = amountIn * (10000 - FEE_BPS);
-        amountOut = (amountInWithFee * resOut) / (resIn * 10000 + amountInWithFee);
+        uint256 fee = (amountIn * FEE_BPS) / 10000;
+        if (fee == 0) {
+            fee = 1;
+        }
+        require(amountIn > fee, "Input too small");
 
+        uint256 amountInAfterFee = amountIn - fee;
+        uint256 amountInWithFee = amountInAfterFee * 10000;
+        amountOut = (amountInWithFee * resOut) / (resIn * 10000 + amountInWithFee);
         require(amountOut >= minAmountOut, "Slippage exceeded");
 
         IERC20 tIn = isA ? tokenA : tokenB;

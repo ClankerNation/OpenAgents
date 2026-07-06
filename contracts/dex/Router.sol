@@ -2,7 +2,12 @@
 pragma solidity ^0.8.20;
 
 interface IAMMPool {
-    function swap(address tokenIn, uint256 amountIn, uint256 minAmountOut) external returns (uint256);
+    function swap(
+        address tokenIn,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint256 deadline
+    ) external returns (uint256);
     function getReserves() external view returns (uint256, uint256);
     function tokenA() external view returns (address);
     function tokenB() external view returns (address);
@@ -38,19 +43,16 @@ contract Router {
         emit PoolRegistered(_tokenA, _tokenB, _pool);
     }
 
-    // BUG: No slippage protection — minAmountOut is passed as 0 to every intermediate hop,
-    // so a sandwich attacker can extract maximum value from multi-hop trades
-    // BUG: Path validation missing — no check that path[0] != path[path.length-1],
+    // BUG: Path validation missing -- no check that path[0] != path[path.length-1],
     // allowing circular swaps (A->B->A) that waste gas and may be used in attacks
-    // BUG: Intermediate amounts not validated — if a pool returns 0 from swap,
-    // subsequent hops proceed with 0 input, silently producing a 0-output trade
     function swapMultiHop(
         address[] calldata path,
         uint256 amountIn,
-        uint256 /* minAmountOut */
+        uint256 minAmountOut,
+        uint256 deadline
     ) external returns (uint256 amountOut) {
+        require(block.timestamp <= deadline, "Deadline expired");
         require(path.length >= 2, "Path too short");
-
         IERC20(path[0]).transferFrom(msg.sender, address(this), amountIn);
 
         uint256 currentAmount = amountIn;
@@ -64,8 +66,9 @@ contract Router {
 
             IERC20(tokenIn).approve(pool, currentAmount);
 
-            // Passes 0 as minAmountOut — no slippage protection on intermediate hops
-            currentAmount = IAMMPool(pool).swap(tokenIn, currentAmount, 0);
+            uint256 hopMinAmountOut = i == path.length - 2 ? minAmountOut : 1;
+            currentAmount = IAMMPool(pool).swap(tokenIn, currentAmount, hopMinAmountOut, deadline);
+            require(currentAmount > 0, "Zero output");
         }
 
         amountOut = currentAmount;
