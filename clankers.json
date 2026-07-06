@@ -420,6 +420,12 @@
     "last_pr": "2026-06-21T03:17:25.795Z"
   },
   {
+    "username": "EVM0x",
+    "total_prs": 3,
+    "first_pr": "2026-07-06T22:55:46.893Z",
+    "last_pr": "2026-07-06T23:20:46.362Z"
+  },
+  {
     "username": "OlegChep",
     "total_prs": 2,
     "first_pr": "2026-05-17T04:06:54.515Z",
@@ -472,12 +478,6 @@
     "total_prs": 2,
     "first_pr": "2026-07-02T12:14:44.426Z",
     "last_pr": "2026-07-02T14:15:13.295Z"
-  },
-  {
-    "username": "EVM0x",
-    "total_prs": 2,
-    "first_pr": "2026-07-06T22:55:46.893Z",
-    "last_pr": "2026-07-06T23:13:41.377Z"
   },
   {
     "username": "CuboYe",
