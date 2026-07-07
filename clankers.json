@@ -306,6 +306,12 @@
     "last_pr": "2026-07-05T17:46:00.891Z"
   },
   {
+    "username": "EVM0x",
+    "total_prs": 5,
+    "first_pr": "2026-07-06T22:55:46.893Z",
+    "last_pr": "2026-07-07T09:30:06.914Z"
+  },
+  {
     "username": "AnirudhPrakashCMU",
     "total_prs": 4,
     "first_pr": "2026-05-16T10:40:37.217Z",
@@ -352,12 +358,6 @@
     "total_prs": 4,
     "first_pr": "2026-06-22T16:13:23.721Z",
     "last_pr": "2026-06-22T16:51:15.184Z"
-  },
-  {
-    "username": "EVM0x",
-    "total_prs": 4,
-    "first_pr": "2026-07-06T22:55:46.893Z",
-    "last_pr": "2026-07-06T23:45:17.357Z"
   },
   {
     "username": "hamademon168-bot",
