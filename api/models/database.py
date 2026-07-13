@@ -81,9 +81,16 @@ class Payment(Base):
     token_address = Column(String(42), default="0x0000000000000000000000000000000000000000")
     status = Column(String(32), default="pending")
     created_at = Column(DateTime, default=datetime.utcnow)
+    release_time = Column(DateTime, default=datetime.utcnow)
     claimed_at = Column(DateTime, nullable=True)
 
     task = relationship("Task", back_populates="payments")
+
+    @property
+    def expired_at(self):
+        from datetime import timedelta
+        base = self.release_time if self.release_time else self.created_at
+        return base + timedelta(days=30)
 
 
 def init_db():
