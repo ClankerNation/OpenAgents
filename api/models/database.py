@@ -81,6 +81,8 @@ class Payment(Base):
     token_address = Column(String(42), default="0x0000000000000000000000000000000000000000")
     status = Column(String(32), default="pending")
     created_at = Column(DateTime, default=datetime.utcnow)
+    release_time = Column(DateTime, nullable=True)
+    expired_at = Column(DateTime, nullable=True)
     claimed_at = Column(DateTime, nullable=True)
 
     task = relationship("Task", back_populates="payments")

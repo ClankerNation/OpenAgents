@@ -10,6 +10,10 @@ app = FastAPI(
 )
 
 
+from routes.payments import router as payments_router
+
+app.include_router(payments_router)
+
 class AgentResponse(BaseModel):
     agent_id: str
     name: str
