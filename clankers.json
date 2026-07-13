@@ -486,6 +486,12 @@
     "last_pr": "2026-07-11T13:47:19.573Z"
   },
   {
+    "username": "slipknoo822-lang",
+    "total_prs": 2,
+    "first_pr": "2026-07-13T07:00:02.232Z",
+    "last_pr": "2026-07-13T07:50:56.738Z"
+  },
+  {
     "username": "CuboYe",
     "total_prs": 1,
     "first_pr": "2026-05-16T16:52:10.623Z",
@@ -694,11 +700,5 @@
     "total_prs": 1,
     "first_pr": "2026-07-10T08:24:04.015Z",
     "last_pr": "2026-07-10T08:24:04.015Z"
-  },
-  {
-    "username": "slipknoo822-lang",
-    "total_prs": 1,
-    "first_pr": "2026-07-13T07:00:02.232Z",
-    "last_pr": "2026-07-13T07:00:02.232Z"
   }
 ]
