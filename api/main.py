@@ -110,3 +110,6 @@ async def health():
         "tasks_indexed": len(tasks_cache),
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+from .middleware.request_id import RequestIDMiddleware
+app.add_middleware(RequestIDMiddleware)
