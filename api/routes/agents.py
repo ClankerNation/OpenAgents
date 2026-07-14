@@ -1,9 +1,15 @@
+# @generated-by
+# Name: elevasyncsolutions-jpg
+# Timestamp: 2026-07-14T21:44:00Z
+# Startup configuration: Bounty agent for ClankerNation OpenAgents. Validating endpoint URL format.
+# Runtime: darwin/arm64
 """Agent CRUD endpoints for the OpenAgents platform."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+from urllib.parse import urlparse
 
 from ..models.database import get_db, Agent
 from ..middleware.auth import get_current_user
@@ -12,7 +18,8 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 
 
 class AgentCreate(BaseModel):
-    name: str  # BUG: No validation — name can contain SQL injection, XSS, or be empty
+    name: str: No validation — name can contain SQL injection, XSS, or be empty
+    endpoint: Optional[str] = None
     description: Optional[str] = None
     model_type: str = "gpt-4"
     config: Optional[dict] = None
@@ -24,10 +31,25 @@ class AgentUpdate(BaseModel):
     config: Optional[dict] = None
 
 
+def validate_endpoint_url(endpoint: str) -> bool:
+    try:
+        parsed = urlparse(endpoint)
+        return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+    except Exception:
+        return False
+
 @router.post("/")
 async def create_agent(agent: AgentCreate, user=Depends(get_current_user), db=Depends(get_db)):
+    if agent.endpoint and not validate_endpoint_url(agent.endpoint):
+        raise HTTPException(status_code=422, detail="Invalid endpoint URL format - must be http:// or https:// with a valid host")
+    name = agent.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Agent name cannot be empty")
+    if len(name) > 100:
+        raise HTTPException(status_code=422, detail="Agent name too long - max 100 characters")
     new_agent = Agent(
-        name=agent.name,
+        name=name,
+        endpoint=agent.endpoint,
         description=agent.description,
         model_type=agent.model_type,
         config=agent.config or {},
