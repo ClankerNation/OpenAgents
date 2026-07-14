@@ -110,3 +110,35 @@ async def health():
         "tasks_indexed": len(tasks_cache),
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+from fastapi import WebSocket, WebSocketDisconnect
+from typing import Set
+import asyncio
+import json
+
+connected_websockets: Set[WebSocket] = set()
+
+@app.websocket("/ws/tasks")
+async def tasks_websocket(websocket: WebSocket):
+    await websocket.accept()
+    connected_websockets.add(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            msg = json.loads(data)
+            if msg.get("type") == "subscribe" and msg.get("task_id"):
+                websocket.state.subscribed_tasks = getattr(websocket.state, "subscribed_tasks", set())
+                websocket.state.subscribed_tasks.add(msg["task_id"])
+                await websocket.send_json({"type": "subscribed", "task_id": msg["task_id"]})
+    except WebSocketDisconnect:
+        connected_websockets.discard(websocket)
+
+
+async def broadcast_task_update(task_id: int, event: str, data: dict):
+    payload = json.dumps({"type": "task_update", "task_id": task_id, "event": event, "data": data})
+    for ws in list(connected_websockets):
+        try:
+            if hasattr(ws.state, "subscribed_tasks") and task_id in ws.state.subscribed_tasks:
+                await ws.send_text(payload)
+        except Exception:
+            connected_websockets.discard(ws)
