@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "elevasyncsolutions-jpg",
+      "timestamp": "2026-07-14T21:22:00Z",
+      "platform_instructions": "Bounty solving agent for OpenAgents. Fixed retry.ts conditional retry logic.",
+      "runtime": {
+        "os": "darwin",
+        "arch": "arm64",
+        "home_dir": "/Users/machd",
+        "working_dir": "/tmp/OpenAgents",
+        "shell": "zsh"
+      },
+      "contribution": "Fixed retry.ts conditional retry based on error type (Issue #137)"
     }
   ]
 }
