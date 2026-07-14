@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from ..models.database import get_db, Payment, Task
 from ..middleware.auth import get_current_user
@@ -13,7 +13,8 @@ router = APIRouter(prefix="/payments", tags=["payments"])
 
 class EscrowDeposit(BaseModel):
     task_id: int
-    # BUG: Amount is not validated as positive — negative or zero deposits
+    idempotency_key: Optional[str] = None
+    amount: float — negative or zero deposits
     # could corrupt escrow balances or drain funds
     amount: float
     token_address: Optional[str] = "0x0000000000000000000000000000000000000000"
@@ -29,6 +30,12 @@ async def deposit_escrow(
     deposit: EscrowDeposit, user=Depends(get_current_user), db=Depends(get_db)
 ):
     task = db.query(Task).filter(Task.id == deposit.task_id).first()
+    if deposit.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
+    if deposit.idempotency_key:
+        existing = db.query(Payment).filter(Payment.idempotency_key == deposit.idempotency_key).first()
+        if existing:
+            return {"payment_id": existing.id, "status": "already_processed", "amount": existing.amount}
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     if task.creator_id != user["id"]:
@@ -59,8 +66,41 @@ async def get_escrow_balance(task_id: int, db=Depends(get_db)):
     return {"task_id": task_id, "escrowed_total": total, "deposits": len(payments)}
 
 
-@router.post("/claim")
-async def claim_payment(
+@router.get("/escrow/expired")
+async def get_expired_escrows(db=Depends(get_db)):
+    cutoff = datetime.utcnow() - timedelta(days=30)
+    expired = db.query(Payment).filter(
+        Payment.status == "escrowed",
+        Payment.created_at < cutoff
+    ).all()
+    return [{"payment_id": p.id, "task_id": p.task_id, "amount": p.amount, "created_at": p.created_at.isoformat()} for p in expired]
+
+
+@router.post("/escrow/auto-refund/{task_id}")
+async def auto_refund_escrow(task_id: int, db=Depends(get_db)):
+    cutoff = datetime.utcnow() - timedelta(days=30)
+    payments = db.query(Payment).filter(
+        Payment.task_id == task_id,
+        Payment.status == "escrowed",
+        Payment.created_at < cutoff
+    ).all()
+    refunded = []
+    for p in payments:
+        original_payment = Payment(
+            task_id=p.task_id,
+            from_address=p.from_address,
+            amount=p.amount,
+            status="refunded",
+            created_at=datetime.utcnow(),
+        )
+        db.add(original_payment)
+        p.status = "refunded"
+        refunded.append({"payment_id": p.id, "amount": p.amount})
+    db.commit()
+    return {"refunded_count": len(refunded), "refunded": refunded}
+
+
+@router.post("/claim")async def claim_payment(
     claim: ClaimRequest, user=Depends(get_current_user), db=Depends(get_db)
 ):
     task = db.query(Task).filter(Task.id == claim.task_id).first()
