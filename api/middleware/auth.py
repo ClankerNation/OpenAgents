@@ -81,3 +81,40 @@ def generate_login_tokens(user_id: str, address: str, roles: list = None) -> dic
         "refresh_token": create_refresh_token(data),
         "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     }
+
+
+_API_KEYS: dict[str, dict] = {}
+
+
+def register_api_key(api_key: str, owner_id: str, roles: list = None) -> None:
+    _API_KEYS[api_key] = {"owner_id": owner_id, "roles": roles or []}
+
+
+def revoke_api_key(api_key: str) -> None:
+    _API_KEYS.pop(api_key, None)
+
+
+async def authenticate_request(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> dict:
+    token = credentials.credentials
+    if token.startswith("ak_"):
+        api_key_data = _API_KEYS.get(token)
+        if not api_key_data:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+        return {"id": api_key_data["owner_id"], "address": api_key_data["owner_id"], "roles": api_key_data["roles"], "auth_type": "api_key"}
+
+    if is_token_revoked(token):
+        raise HTTPException(status_code=401, detail="Token has been revoked")
+
+    payload = decode_token(token)
+    if payload.get("type") != "access":
+        raise HTTPException(status_code=401, detail="Invalid token type")
+
+    return {
+        "id": payload.get("sub"),
+        "address": payload.get("address"),
+        "roles": payload.get("roles", []),
+        "auth_type": "jwt",
+    }
