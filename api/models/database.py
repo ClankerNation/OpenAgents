@@ -80,10 +80,38 @@ class Payment(Base):
     amount = Column(Float, nullable=False)
     token_address = Column(String(42), default="0x0000000000000000000000000000000000000000")
     status = Column(String(32), default="pending")
+    idempotency_key = Column(String(128), unique=True, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     claimed_at = Column(DateTime, nullable=True)
 
     task = relationship("Task", back_populates="payments")
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    action = Column(String(64), nullable=False)
+    actor = Column(String(42), nullable=False)
+    target_type = Column(String(64), nullable=True)
+    target_id = Column(String(64), nullable=True)
+    before_values = Column(JSON, nullable=True)
+    after_values = Column(JSON, nullable=True)
+    ip_address = Column(String(45), nullable=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "action": self.action,
+            "actor": self.actor,
+            "target_type": self.target_type,
+            "target_id": self.target_id,
+            "before": self.before_values,
+            "after": self.after_values,
+            "ip_address": self.ip_address,
+            "timestamp": self.timestamp.isoformat(),
+        }
 
 
 def init_db():
