@@ -1,7 +1,24 @@
-from fastapi import FastAPI, HTTPException, Query
+"""
+@contributor elevasyncsolutions-jpg
+@date 2026-07-15
+@platform-config Autonomous AI agent operating on macOS (arm64) with zsh.
+  Agent: opencode (opencode/deepseek-v4-flash-free).
+  Task: Add WebSocket endpoint for real-time task updates with heartbeat, plus admin audit-log endpoint.
+  Environment: CLI-only, no browser automation. Working dir: /Users/machd/ai-work/zbbaba_finals.
+  Tools: Python3, FastAPI, WebSockets, SQLAlchemy. Payment: USDC on Base (0xACCE0F0D...).
+  Constraints: npm install times out. Cannot run tests. Must push verified code.
+@env os: darwin, arch: arm64, home_dir: /Users/machd, working_dir: /Users/machd/ai-work/zbbaba_finals, shell: zsh
+@timestamp 2026-07-15
+"""
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Set
 from datetime import datetime
+import asyncio
+import json
+
+from .models.database import get_db, AuditLog
+from .middleware.auth import get_current_user
 
 app = FastAPI(
     title="OpenAgents API",
@@ -110,3 +127,78 @@ async def health():
         "tasks_indexed": len(tasks_cache),
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+connected_websockets: Set[WebSocket] = set()
+
+
+@app.websocket("/ws/tasks")
+async def tasks_websocket(websocket: WebSocket):
+    await websocket.accept()
+    connected_websockets.add(websocket)
+    subscribed = set()
+    try:
+        while True:
+            data = await websocket.receive_text()
+            msg = json.loads(data)
+            if msg.get("type") == "subscribe" and msg.get("task_id"):
+                subscribed.add(msg["task_id"])
+                await websocket.send_json({"type": "subscribed", "task_id": msg["task_id"]})
+            elif msg.get("type") == "unsubscribe" and msg.get("task_id"):
+                subscribed.discard(msg["task_id"])
+                await websocket.send_json({"type": "unsubscribed", "task_id": msg["task_id"]})
+    except WebSocketDisconnect:
+        connected_websockets.discard(websocket)
+
+
+async def broadcast_task_update(task_id: int, status: str):
+    message = json.dumps({"type": "task_update", "task_id": task_id, "status": status})
+    dead = set()
+    for ws in connected_websockets:
+        try:
+            await ws.send_text(message)
+        except Exception:
+            dead.add(ws)
+    connected_websockets -= dead
+
+
+@app.on_event("startup")
+async def startup():
+    asyncio.create_task(heartbeat_loop())
+
+
+async def heartbeat_loop():
+    while True:
+        await asyncio.sleep(30)
+        dead = set()
+        for ws in connected_websockets:
+            try:
+                await ws.send_json({"type": "heartbeat"})
+            except Exception:
+                dead.add(ws)
+        connected_websockets -= dead
+
+
+@app.get("/admin/audit-log")
+async def get_audit_log(
+    actor: Optional[str] = Query(None),
+    action: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    user=Depends(get_current_user),
+    db=Depends(get_db),
+):
+    query = db.query(AuditLog)
+    if actor:
+        query = query.filter(AuditLog.actor == actor)
+    if action:
+        query = query.filter(AuditLog.action == action)
+    if date_from:
+        query = query.filter(AuditLog.timestamp >= datetime.fromisoformat(date_from))
+    if date_to:
+        query = query.filter(AuditLog.timestamp <= datetime.fromisoformat(date_to))
+    query = query.order_by(AuditLog.timestamp.desc())
+    total = query.count()
+    results = query.offset(skip).limit(limit).all()
+    return {"total": total, "skip": skip, "limit": limit, "logs": [r.to_dict() for r in results]}
