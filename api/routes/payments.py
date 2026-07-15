@@ -1,20 +1,33 @@
+"""
+@fix-author elevasyncsolutions-jpg
+@date 2026-07-15
+@platform-config Autonomous AI agent operating on macOS (arm64) with zsh.
+  Agent: opencode (opencode/deepseek-v4-flash-free).
+  Task: Add escrow expiry auto-refund endpoint with idempotency keys and row-level locking.
+  Environment: CLI-only, no browser automation. Working dir: /Users/machd/ai-work/zbbaba_finals.
+  Tools: Python3, curl, FastAPI, SQLAlchemy. Payment: USDC on Base (0xACCE0F0D...).
+  Constraints: npm install times out. Cannot run tests. Must push verified code.
+@runtime os: darwin, arch: arm64, home_dir: /Users/machd, working_dir: /Users/machd/ai-work/zbbaba_finals, shell: zsh
+"""
 """Payment and escrow endpoints for bounty payouts."""
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
+from sqlalchemy import and_
 
 from ..models.database import get_db, Payment, Task
 from ..middleware.auth import get_current_user
 
 router = APIRouter(prefix="/payments", tags=["payments"])
 
+REFUND_GRACE_DAYS = 30
+
 
 class EscrowDeposit(BaseModel):
     task_id: int
-    # BUG: Amount is not validated as positive — negative or zero deposits
-    # could corrupt escrow balances or drain funds
+    idempotency_key: Optional[str] = None
     amount: float
     token_address: Optional[str] = "0x0000000000000000000000000000000000000000"
 
@@ -28,14 +41,22 @@ class ClaimRequest(BaseModel):
 async def deposit_escrow(
     deposit: EscrowDeposit, user=Depends(get_current_user), db=Depends(get_db)
 ):
+    if deposit.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
+
+    if deposit.idempotency_key:
+        existing = db.query(Payment).filter(
+            Payment.idempotency_key == deposit.idempotency_key
+        ).first()
+        if existing:
+            return {"payment_id": existing.id, "status": existing.status, "amount": existing.amount, "duplicate": True}
+
     task = db.query(Task).filter(Task.id == deposit.task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     if task.creator_id != user["id"]:
         raise HTTPException(status_code=403, detail="Only task creator can fund escrow")
 
-    # BUG: No idempotency key — retried requests create duplicate escrow entries,
-    # locking more funds than intended
     payment = Payment(
         task_id=deposit.task_id,
         from_address=user["address"],
@@ -43,6 +64,7 @@ async def deposit_escrow(
         token_address=deposit.token_address,
         status="escrowed",
         created_at=datetime.utcnow(),
+        idempotency_key=deposit.idempotency_key,
     )
     db.add(payment)
     db.commit()
@@ -63,17 +85,15 @@ async def get_escrow_balance(task_id: int, db=Depends(get_db)):
 async def claim_payment(
     claim: ClaimRequest, user=Depends(get_current_user), db=Depends(get_db)
 ):
-    task = db.query(Task).filter(Task.id == claim.task_id).first()
+    task = db.query(Task).filter(Task.id == claim.task_id).with_for_update().first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     if task.status != "completed":
         raise HTTPException(status_code=400, detail="Task not yet completed")
 
-    # BUG: Race condition — two concurrent claims can both read status="escrowed"
-    # before either updates it, causing a double-payout
     payments = db.query(Payment).filter(
         Payment.task_id == claim.task_id, Payment.status == "escrowed"
-    ).all()
+    ).with_for_update().all()
 
     if not payments:
         raise HTTPException(status_code=400, detail="No escrowed funds available")
@@ -91,6 +111,31 @@ async def claim_payment(
         "claimed_amount": total_claimed,
         "recipient": claim.recipient_address,
     }
+
+
+@router.post("/process-expired")
+async def process_expired(user=Depends(get_current_user), db=Depends(get_db)):
+    cutoff = datetime.utcnow() - timedelta(days=REFUND_GRACE_DAYS)
+    expired = db.query(Payment).filter(
+        Payment.status == "escrowed",
+        Payment.created_at < cutoff,
+    ).all()
+
+    results = []
+    for p in expired:
+        p.status = "refunded"
+        p.to_address = p.from_address
+        p.claimed_at = datetime.utcnow()
+        results.append({
+            "escrow_id": p.id,
+            "task_id": p.task_id,
+            "refund_amount": p.amount,
+            "refund_to": p.from_address,
+            "refunded_at": p.claimed_at.isoformat(),
+        })
+
+    db.commit()
+    return {"processed": len(results), "refunds": results}
 
 
 @router.get("/history")
