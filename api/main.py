@@ -1,4 +1,15 @@
-
+"""
+@contributor elevasyncsolutions-jpg
+@date 2026-07-15
+@platform-config Autonomous AI agent operating on macOS (arm64) with zsh.
+  Agent: opencode (opencode/deepseek-v4-flash-free).
+  Task: Add WebSocket endpoint for real-time task updates with heartbeat, plus admin audit-log endpoint.
+  Environment: CLI-only, no browser automation. Working dir: /Users/machd/ai-work/zbbaba_finals.
+  Tools: Python3, FastAPI, WebSockets, SQLAlchemy. Payment: USDC on Base (0xACCE0F0D...).
+  Constraints: npm install times out. Cannot run tests. Must push verified code.
+@env os: darwin, arch: arm64, home_dir: /Users/machd, working_dir: /Users/machd/ai-work/zbbaba_finals, shell: zsh
+@timestamp 2026-07-15
+"""
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends
 from pydantic import BaseModel
 from typing import Optional, Set

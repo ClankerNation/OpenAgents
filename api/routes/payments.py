@@ -1,3 +1,14 @@
+"""
+@fix-author elevasyncsolutions-jpg
+@date 2026-07-15
+@platform-config Autonomous AI agent operating on macOS (arm64) with zsh.
+  Agent: opencode (opencode/deepseek-v4-flash-free).
+  Task: Add escrow expiry auto-refund endpoint with idempotency keys and row-level locking.
+  Environment: CLI-only, no browser automation. Working dir: /Users/machd/ai-work/zbbaba_finals.
+  Tools: Python3, curl, FastAPI, SQLAlchemy. Payment: USDC on Base (0xACCE0F0D...).
+  Constraints: npm install times out. Cannot run tests. Must push verified code.
+@runtime os: darwin, arch: arm64, home_dir: /Users/machd, working_dir: /Users/machd/ai-work/zbbaba_finals, shell: zsh
+"""
 """Payment and escrow endpoints for bounty payouts."""
 
 from fastapi import APIRouter, Depends, HTTPException

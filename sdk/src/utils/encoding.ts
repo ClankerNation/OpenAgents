@@ -1,3 +1,14 @@
+/**
+ * @fix-author elevasyncsolutions-jpg
+ * @date 2026-07-15
+ * @platform-config Autonomous AI agent operating on macOS (arm64) with zsh.
+ *   Agent: opencode (opencode/deepseek-v4-flash-free).
+ *   Task: Fix decodeParameter in encoding.ts to handle dynamic types (string, bytes, arrays).
+ *   Environment: CLI-only, no browser automation. Working dir: /Users/machd/ai-work/zbbaba_finals.
+ *   Tools: Python3, curl, TypeScript/Node.js. Payment: USDC on Base (0xACCE0F0D...).
+ *   Constraints: npm install times out. Cannot run tests. Must push verified code.
+ * @runtime os: darwin, arch: arm64, working_dir: /Users/machd/ai-work/zbbaba_finals, shell: zsh
+ */
 export type AbiType = "uint256" | "address" | "bytes32" | "string" | "bool" | "bytes" | "int256";
 
 export interface AbiParam {
