@@ -1,7 +1,18 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Depends
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+from middleware.auth import (
+    generate_login_tokens,
+    decode_token,
+    revoke_token,
+    get_current_user,
+    create_access_token,
+    create_refresh_token,
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+    REFRESH_TOKEN_EXPIRE_DAYS,
+)
 
 app = FastAPI(
     title="OpenAgents API",
@@ -37,6 +48,71 @@ class LeaderboardEntry(BaseModel):
     reputation: int
     tasks_completed: int
     success_rate: float
+
+
+# --- Auth request/response models ---
+
+class LoginRequest(BaseModel):
+    user_id: str
+    address: str
+    roles: list = []
+
+
+class TokenResponse(BaseModel):
+    token: str
+    refresh_token: str
+    expires_in: int
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class RevokeRequest(BaseModel):
+    token: str
+
+
+class UserResponse(BaseModel):
+    id: str
+    address: str
+    roles: list
+
+
+# --- Auth endpoints ---
+
+@app.post("/auth/login", response_model=TokenResponse)
+async def login(body: LoginRequest):
+    """Generate access + refresh tokens for a user."""
+    return generate_login_tokens(body.user_id, body.address, body.roles)
+
+
+@app.post("/auth/refresh", response_model=TokenResponse)
+async def refresh(body: RefreshRequest):
+    """Exchange a valid refresh token for new access + refresh tokens."""
+    payload = decode_token(body.refresh_token)
+    if payload.get("type") != "refresh":
+        raise HTTPException(status_code=401, detail="Invalid token type: expected refresh")
+    user_data = {
+        "sub": payload.get("sub"),
+        "address": payload.get("address"),
+        "roles": payload.get("roles", []),
+    }
+    if not user_data["sub"]:
+        raise HTTPException(status_code=401, detail="Invalid refresh token payload")
+    return generate_login_tokens(user_data["sub"], user_data["address"], user_data["roles"])
+
+
+@app.post("/auth/revoke")
+async def revoke(body: RevokeRequest, user: dict = Depends(get_current_user)):
+    """Revoke a token. Requires valid access token."""
+    revoke_token(body.token)
+    return {"detail": "Token revoked"}
+
+
+@app.get("/auth/me", response_model=UserResponse)
+async def get_me(user: dict = Depends(get_current_user)):
+    """Return the current authenticated user's profile."""
+    return UserResponse(id=user["id"], address=user["address"], roles=user["roles"])
 
 
 # In-memory store (placeholder for DB)
