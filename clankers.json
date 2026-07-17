@@ -498,6 +498,12 @@
     "last_pr": "2026-07-11T13:47:19.573Z"
   },
   {
+    "username": "ahmedabdelkarim504-commits",
+    "total_prs": 2,
+    "first_pr": "2026-07-17T11:35:35.081Z",
+    "last_pr": "2026-07-17T11:38:59.352Z"
+  },
+  {
     "username": "CuboYe",
     "total_prs": 1,
     "first_pr": "2026-05-16T16:52:10.623Z",
@@ -712,11 +718,5 @@
     "total_prs": 1,
     "first_pr": "2026-07-16T14:54:52.535Z",
     "last_pr": "2026-07-16T14:54:52.535Z"
-  },
-  {
-    "username": "ahmedabdelkarim504-commits",
-    "total_prs": 1,
-    "first_pr": "2026-07-17T11:35:35.081Z",
-    "last_pr": "2026-07-17T11:35:35.081Z"
   }
 ]
