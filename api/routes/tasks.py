@@ -1,7 +1,7 @@
 """Task management endpoints for bounty assignments."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, validator
 from typing import Optional
 from datetime import datetime
 
@@ -10,19 +10,43 @@ from ..middleware.auth import get_current_user
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
+# Valid status transitions
 VALID_STATUSES = {"open", "assigned", "in_progress", "review", "completed", "cancelled"}
+MAX_PAGINATION_LIMIT = 100
+
+# Allowed status transitions (from -> to)
+VALID_TRANSITIONS = {
+    "open": {"assigned", "cancelled"},
+    "assigned": {"in_progress", "cancelled"},
+    "in_progress": {"review", "cancelled"},
+    "review": {"completed", "in_progress"},
+    "completed": set(),
+    "cancelled": set(),
+}
 
 
 class TaskCreate(BaseModel):
-    title: str
-    description: str
-    reward_amount: float
+    title: str = Field(..., min_length=1, max_length=200)
+    description: str = Field(..., min_length=1, max_length=2000)
+    reward_amount: float = Field(..., gt=0)
     agent_id: Optional[int] = None
     deadline: Optional[datetime] = None
 
+    @validator('deadline')
+    def validate_deadline(cls, v):
+        if v is not None and v <= datetime.utcnow():
+            raise ValueError('Deadline must be in the future')
+        return v
+
 
 class TaskStatusUpdate(BaseModel):
-    status: str  # BUG: Not validated against VALID_STATUSES enum — any string accepted
+    status: str
+
+    @validator('status')
+    def validate_status(cls, v):
+        if v not in VALID_STATUSES:
+            raise ValueError(f'Invalid status. Must be one of: {", ".join(VALID_STATUSES)}')
+        return v
 
 
 @router.post("/")
@@ -48,13 +72,13 @@ async def list_tasks(
     status: Optional[str] = None,
     creator: Optional[str] = None,
     skip: int = Query(0, ge=0),
-    # BUG: No upper bound on limit — clients can request millions of rows,
-    # causing DB strain and potential OOM
-    limit: int = Query(50, ge=1),
+    limit: int = Query(50, ge=1, le=MAX_PAGINATION_LIMIT),
     db=Depends(get_db),
 ):
     query = db.query(Task)
     if status:
+        if status not in VALID_STATUSES:
+            raise HTTPException(status_code=400, detail=f"Invalid status filter. Must be one of: {', '.join(VALID_STATUSES)}")
         query = query.filter(Task.status == status)
     if creator:
         query = query.filter(Task.creator_id == creator)
@@ -80,10 +104,34 @@ async def update_task_status(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # BUG: Creator can mark their own task as completed — should require
-    # a third party or the assignee to confirm completion
-    if task.creator_id != user["id"]:
-        raise HTTPException(status_code=403, detail="Only the creator can update status")
+    # Check deadline enforcement — auto-expire if past deadline
+    if task.deadline and datetime.utcnow() > task.deadline and task.status not in ("completed", "cancelled"):
+        task.status = "cancelled"
+        task.updated_at = datetime.utcnow()
+        db.commit()
+        raise HTTPException(status_code=400, detail="Task has expired and been cancelled")
+
+    # Validate status transition
+    current_transitions = VALID_TRANSITIONS.get(task.status, set())
+    if update.status not in current_transitions:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid transition from '{task.status}' to '{update.status}'"
+        )
+
+    # Self-completion check: creator cannot mark their own task as completed
+    if update.status == "completed" and task.creator_id == user["id"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Creator cannot mark their own task as completed"
+        )
+
+    # Assignment check: only assigned agent can start/review
+    if update.status in ("in_progress", "review") and task.agent_id != user["id"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the assigned agent can update to this status"
+        )
 
     task.status = update.status
     task.updated_at = datetime.utcnow()
