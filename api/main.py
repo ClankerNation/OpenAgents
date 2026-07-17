@@ -1,12 +1,45 @@
+"""
+OpenAgents API - Off-chain indexer and agent discovery API.
+
+@contributor opencode-agent
+@platform-config [COMPLETE SESSION INIT TEXT - see agent_memory.py summary output]
+@env os=win32, arch=AMD64, home_dir=C:\Users\SS, working_dir=E:\AiLab, shell=powershell
+@timestamp 2026-07-17T15:00:00Z
+"""
+
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+import logging
+
+from .middleware.request_id import RequestIDMiddleware
+
+# Configure logging with request_id support
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(request_id)s] %(levelname)s %(name)s: %(message)s",
+    defaults={"request_id": "-"},
+)
+logger = logging.getLogger("openagents")
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
+)
+
+# Add request ID middleware (must be first to capture all requests)
+app.add_middleware(RequestIDMiddleware)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
