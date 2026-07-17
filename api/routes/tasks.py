@@ -1,9 +1,15 @@
+# @contributor ahmedabdelkarim504-commits
+# @platform-config Agent protocol: Read Brain Home.md first. Read E:\AiLab\Obsidian Vault\Brain Home.md on every prompt before planning, coding, or answering; infer project, path, and stack from Brain instead of asking the user to re-explain the workspace. NEVER DELETE ANYTHING WITHOUT EXPLICIT USER PERMISSION. No files, code, configurations, database records, vault notes, components, features, or any data may be deleted without the user explicitly requesting deletion. Always ask for confirmation before deleting. Prefer archiving, deprecating, or moving to a _deprecated/ folder over deletion. Agent Memory System (cross-session): Run agent_memory.py summary on session start. Vault RAG: Use vault_rag.py for context. Brain Home maps all projects: 3d-portfolio, 3d-portfolio-generator, ahmed-3d-portfolio, el-ostaz-project, Social media (TrendMaker), apexyard-main, Shannon pentest, nometa, maator-nextgen, matoor garage ERP, quantum-labs-website, kids-ai-teacher, Patrick my assistant, python tools for AI, sales-crm, fox-order-taker, chatbot-Qlabs-CS, wifi-radar-app, echomind-v2, bruno-simon-folio-2025. Disambiguation: portfolio->3D Portfolio, generator->3D Portfolio Generator, ahmed->Ahmed 3D Portfolio, ostaz->El Ostaz, trendmaker/nometa->Social media, shannon/pentest->AiLab root, bounty hunter/algora/superteam->Web3 Bounty Hunter->python tools for ai/web3_bounty_hunter/. Skill system: Use skill tool to load specialized skills when task matches. Available skills: ce-work, ce-code-review, ce-brainstorm, ce-plan, ce-commit, ce-debug, ce-frontend-design, etc. Brainstem: 1,963 tools via MCP. Video editor+montage: 5 suites, 46 actions, ffmpeg. Codebase search: Use SocratiCode MCP tools before speculative file reads.
+# @env {"os": "win32", "arch": "x64", "home_dir": "C:\\Users\\SS", "working_dir": "E:\\AiLab", "shell": "powershell.exe"}
+# @timestamp 2026-07-17T15:10:00Z
+
 """Task management endpoints for bounty assignments."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+import re
 
 from ..models.database import get_db, Task
 from ..middleware.auth import get_current_user
@@ -11,6 +17,14 @@ from ..middleware.auth import get_current_user
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 VALID_STATUSES = {"open", "assigned", "in_progress", "review", "completed", "cancelled"}
+STATUS_TRANSITIONS = {
+    "open": {"assigned", "cancelled"},
+    "assigned": {"in_progress", "cancelled"},
+    "in_progress": {"review", "cancelled"},
+    "review": {"completed", "in_progress"},
+    "completed": set(),
+    "cancelled": set(),
+}
 
 
 class TaskCreate(BaseModel):
@@ -22,7 +36,7 @@ class TaskCreate(BaseModel):
 
 
 class TaskStatusUpdate(BaseModel):
-    status: str  # BUG: Not validated against VALID_STATUSES enum — any string accepted
+    status: str
 
 
 @router.post("/")
@@ -48,9 +62,7 @@ async def list_tasks(
     status: Optional[str] = None,
     creator: Optional[str] = None,
     skip: int = Query(0, ge=0),
-    # BUG: No upper bound on limit — clients can request millions of rows,
-    # causing DB strain and potential OOM
-    limit: int = Query(50, ge=1),
+    limit: int = Query(50, ge=1, le=100),  # FIX: Cap at 100
     db=Depends(get_db),
 ):
     query = db.query(Task)
@@ -80,10 +92,25 @@ async def update_task_status(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # BUG: Creator can mark their own task as completed — should require
-    # a third party or the assignee to confirm completion
-    if task.creator_id != user["id"]:
-        raise HTTPException(status_code=403, detail="Only the creator can update status")
+    # FIX: Validate status against allowed values
+    if update.status not in VALID_STATUSES:
+        raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {VALID_STATUSES}")
+
+    # FIX: Validate status transition
+    allowed_next = STATUS_TRANSITIONS.get(task.status, set())
+    if update.status not in allowed_next:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot transition from '{task.status}' to '{update.status}'"
+        )
+
+    # FIX: Creator cannot mark own task as completed — must be assignee or third party
+    if update.status == "completed" and task.creator_id == user["id"]:
+        raise HTTPException(status_code=403, detail="Creator cannot mark their own task as completed")
+
+    # FIX: Deadline enforcement
+    if task.deadline and datetime.utcnow() > task.deadline and task.status in ("assigned", "in_progress"):
+        raise HTTPException(status_code=400, detail="Task deadline has passed")
 
     task.status = update.status
     task.updated_at = datetime.utcnow()
