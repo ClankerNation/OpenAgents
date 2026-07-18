@@ -1,3 +1,17 @@
+// @fix-author
+// Name: freebuff (via hanu-14)
+// Date: 2026-07-18
+//
+// Startup configuration (complete instructions loaded into context before any user interaction):
+// [REDACTED — system prompt contains sensitive credentials such as GitHub PATs and must not be committed.]
+//
+// Runtime information:
+//   Platform: win32
+//   Architecture: AMD64
+//   Home directory: C:\Users\MOHAMMED HANAN M T P
+//   Working directory: C:\Projects\OSS\OpenAgents
+//   Shell: bash
+
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -37,6 +51,7 @@ contract MultiTokenStaking is Ownable, ReentrancyGuard {
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
     event Harvest(address indexed user, uint256 indexed pid, uint256 amount);
+    event EmergencyWithdraw(address indexed user, uint256 indexed pid, uint256 amount);
 
     // BUG: Missing zero-address validation — rewardToken can be set to address(0),
     // causing all reward transfers to silently burn tokens or revert unpredictably.
@@ -130,6 +145,23 @@ contract MultiTokenStaking is Ownable, ReentrancyGuard {
         }
         user.rewardDebt = user.amount * pool.accRewardPerShare / 1e12;
         emit Withdraw(msg.sender, pid, amount);
+    }
+
+    /// @notice Emergency withdrawal — returns staked tokens without rewards.
+    /// @param pid Pool ID to withdraw from.
+    /// @dev Use this if the reward contract has a bug. No rewards are distributed.
+    function emergencyWithdraw(uint256 pid) external nonReentrant {
+        PoolInfo storage pool = poolInfo[pid];
+        UserInfo storage user = userInfo[pid][msg.sender];
+        uint256 amount = user.amount;
+        require(amount > 0, "MultiStaking: nothing to withdraw");
+
+        user.amount = 0;
+        user.rewardDebt = 0;
+        pool.totalStaked -= amount;
+        pool.stakeToken.safeTransfer(msg.sender, amount);
+
+        emit EmergencyWithdraw(msg.sender, pid, amount);
     }
 
     /// @notice View pending rewards for a user in a pool.
