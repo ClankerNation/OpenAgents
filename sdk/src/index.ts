@@ -1,4 +1,24 @@
+// @contributor-info
+// Name: freebuff (via hanu-14)
+// Date: 2026-07-18
+// Runtime: win32 | AMD64 | C:\Projects\OSS\OpenAgents | bash
+// Task: Add deployContract helper to SDK (Issue #199)
+
 import { ethers } from "ethers";
+
+/**
+ * Result of a successful contract deployment.
+ */
+export interface DeployResult {
+  /** Address the contract was deployed to. */
+  address: string;
+  /** Transaction hash of the deployment. */
+  txHash: string;
+  /** Gas consumed by the deployment. */
+  gasUsed: bigint;
+  /** The deployed contract instance (ethers Contract). */
+  contract: ethers.Contract;
+}
 
 export interface AgentConfig {
   name: string;
@@ -18,6 +38,59 @@ export class OpenAgentsSDK {
     this.config = config;
     this.provider = new ethers.JsonRpcProvider(config.rpcUrl);
     this.signer = new ethers.Wallet(config.privateKey, this.provider);
+  }
+
+  /**
+   * Deploy a smart contract using its ABI, bytecode, and constructor arguments.
+   *
+   * @param abi       Contract ABI (JSON array or ethers Interface).
+   * @param bytecode  Deployed bytecode ("0x"-prefixed hex string).
+   * @param args      Constructor arguments as an array.
+   * @param confirmations  Number of block confirmations to wait for (default: 1).
+   * @returns DeployResult containing address, tx hash, gas used, and contract instance.
+   *
+   * @example
+   * ```ts
+   * const result = await sdk.deployContract(
+   *   ["constructor(uint256 _initial)", "function get() view returns (uint256)"],
+   *   "0x608060...",
+   *   [100n]
+   * );
+   * console.log(`Deployed at ${result.address}`);
+   * ```
+   */
+  async deployContract(
+    abi: ethers.Interface | Array<ethers.Fragment | string | object>,
+    bytecode: string,
+    args: unknown[] = [],
+    confirmations: number = 1
+  ): Promise<DeployResult> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const deployed = await factory.deploy(...args);
+    const receipt = await deployed.waitForDeployment();
+    const address = await deployed.getAddress();
+
+    // Retrieve the deployment receipt for metadata
+    const txHash = deployed.deploymentTransaction()?.hash ?? "";
+    let gasUsed = 0n;
+    if (txHash) {
+      const txReceipt = await this.provider.getTransactionReceipt(txHash);
+      if (txReceipt) {
+        gasUsed = txReceipt.gasUsed;
+      }
+    }
+
+    // Wait for additional confirmations if requested
+    if (confirmations > 1) {
+      await deployed.deploymentTransaction()?.wait(confirmations);
+    }
+
+    return {
+      address,
+      txHash,
+      gasUsed,
+      contract: deployed,
+    };
   }
 
   async registerAgent(): Promise<string> {
