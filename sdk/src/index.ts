@@ -67,28 +67,17 @@ export class OpenAgentsSDK {
   ): Promise<DeployResult> {
     const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
     const deployed = await factory.deploy(...args);
-    const receipt = await deployed.waitForDeployment();
+    const tx = deployed.deploymentTransaction();
+    if (!tx) throw new Error("Deployment transaction not available");
+
+    // Wait for the requested number of block confirmations
+    const receipt = await tx.wait(confirmations);
     const address = await deployed.getAddress();
-
-    // Retrieve the deployment receipt for metadata
-    const txHash = deployed.deploymentTransaction()?.hash ?? "";
-    let gasUsed = 0n;
-    if (txHash) {
-      const txReceipt = await this.provider.getTransactionReceipt(txHash);
-      if (txReceipt) {
-        gasUsed = txReceipt.gasUsed;
-      }
-    }
-
-    // Wait for additional confirmations if requested
-    if (confirmations > 1) {
-      await deployed.deploymentTransaction()?.wait(confirmations);
-    }
 
     return {
       address,
-      txHash,
-      gasUsed,
+      txHash: tx.hash,
+      gasUsed: receipt?.gasUsed ?? 0n,
       contract: deployed,
     };
   }
