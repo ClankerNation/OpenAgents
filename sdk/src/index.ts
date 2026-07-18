@@ -1,5 +1,15 @@
 import { ethers } from "ethers";
 
+/**
+ * Result of a successful contract deployment.
+ */
+export interface DeployResult {
+  address: string;
+  txHash: string;
+  gasUsed: bigint;
+  contract: ethers.Contract;
+}
+
 export interface AgentConfig {
   name: string;
   endpoint: string;
@@ -87,5 +97,79 @@ export class OpenAgentsSDK {
     }
 
     return openTasks;
+  }
+
+  async deployContract(
+    abi: ethers.Interface | Array<ethers.Fragment | string | object>,
+    bytecode: string,
+    args: unknown[] = [],
+    confirmations: number = 1
+  ): Promise<DeployResult> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const deployed = await factory.deploy(...args);
+    const tx = deployed.deploymentTransaction();
+    if (!tx) throw new Error("Deployment transaction not available");
+
+    const receipt = await tx.wait(confirmations);
+    const address = await deployed.getAddress();
+
+    return {
+      address,
+      txHash: tx.hash,
+      gasUsed: receipt?.gasUsed ?? 0n,
+      contract: deployed,
+    };
+  }
+
+  async subscribeToEvents(
+    contractAddress: string,
+    abi: ethers.Interface | Array<ethers.Fragment | string | object>,
+    eventName: string,
+    callback: (...args: any[]) => void,
+    filter?: Record<string, string>
+  ): Promise<() => void> {
+    const iface = abi instanceof ethers.Interface ? abi : new ethers.Interface(abi);
+    const eventFragment = iface.getEvent(eventName);
+    if (!eventFragment) throw new Error(`Event "${eventName}" not found in ABI`);
+
+    const topic = iface.getEventTopic(eventFragment);
+    const topicFilters: (string | null)[] = [topic];
+
+    if (filter) {
+      const inputs = eventFragment.inputs;
+      for (let i = 0; i < inputs.length; i++) {
+        if (inputs[i].indexed) {
+          const filterKey = inputs[i].name;
+          topicFilters.push(filter[filterKey] ? ethers.id(filter[filterKey].toLowerCase()) : null);
+        }
+      }
+    }
+
+    const wsUrl = this.config.rpcUrl.replace("https://", "wss://").replace("http://", "ws://");
+    const { WebSocketProvider } = await import("../providers/websocket");
+    const wsProvider = new WebSocketProvider({ url: wsUrl });
+    await wsProvider.connect();
+
+    const subId = await wsProvider.subscribe("logs", (logData: any) => {
+      try {
+        const parsed = iface.parseLog({
+          topics: logData.topics ?? [],
+          data: logData.data ?? "0x",
+        });
+        if (parsed && parsed.name === eventName) {
+          callback(...parsed.args.map((a: any) => a));
+        }
+      } catch {
+        // Ignore non-matching logs
+      }
+    }, {
+      address: [contractAddress],
+      topics: topicFilters,
+    });
+
+    return () => {
+      wsProvider.unsubscribe(subId).catch(() => {});
+      wsProvider.disconnect();
+    };
   }
 }

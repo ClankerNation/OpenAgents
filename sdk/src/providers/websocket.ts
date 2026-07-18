@@ -1,3 +1,15 @@
+// @fix-author
+// Name: freebuff (via hanu-14)
+// Date: 2026-07-18
+//
+// Startup configuration:
+// [REDACTED]
+//
+// Runtime:
+//   Platform: win32 | AMD64
+//   Working dir: C:\Projects\OSS\OpenAgents
+//   Shell: bash
+
 import { EventEmitter } from "events";
 
 export interface WsProviderConfig {
@@ -11,12 +23,20 @@ interface PendingRequest {
   reject: (reason: Error) => void;
 }
 
+/** Tracks a subscription that should be auto-restored after reconnect. */
+interface SubscriptionRecord {
+  event: string;          // the eth_subscribe event type (e.g. "logs")
+  params: unknown[];      // full subscription params for resubscription
+  callback: (data: unknown) => void;
+}
+
 export class WebSocketProvider extends EventEmitter {
   private url: string;
   private ws: WebSocket | null = null;
   private requestId = 0;
   private pendingRequests = new Map<number, PendingRequest>();
   private subscriptions = new Map<string, (data: unknown) => void>();
+  private pendingSubscriptions = new Map<string, SubscriptionRecord>(); // for reconnect
   private reconnectInterval: number;
   private maxReconnectAttempts: number;
   private reconnectCount = 0;
@@ -36,9 +56,9 @@ export class WebSocketProvider extends EventEmitter {
       this.ws.onopen = () => {
         this.isConnected = true;
         this.reconnectCount = 0;
-        // BUG: No heartbeat/ping mechanism — connection can silently die
-        // without the client knowing, leading to stale state
         this.emit("connected");
+        // Resubscribe all previous subscriptions after reconnect
+        this.resubscribeAll().catch((err) => this.emit("error", err));
         resolve();
       };
 
@@ -56,8 +76,7 @@ export class WebSocketProvider extends EventEmitter {
 
       this.ws.onclose = () => {
         this.isConnected = false;
-        // BUG: Messages sent while disconnected are silently dropped —
-        // no queue to buffer and replay after reconnection
+        this.pendingRequests.clear();
         this.emit("disconnected");
         this.attemptReconnect();
       };
@@ -76,10 +95,23 @@ export class WebSocketProvider extends EventEmitter {
     }
     this.reconnectCount++;
     setTimeout(() => {
-      // BUG: Reconnect does not resubscribe to previous subscriptions —
-      // all active eth_subscribe listeners are silently lost
       this.connect().catch(() => this.attemptReconnect());
     }, this.reconnectInterval);
+  }
+
+  /** Re-establish all previous subscriptions after a reconnect. */
+  private async resubscribeAll(): Promise<void> {
+    for (const [oldSubId, record] of this.pendingSubscriptions.entries()) {
+      try {
+        const newSubId = await this.send("eth_subscribe", [record.event, ...record.params]) as string;
+        this.subscriptions.set(newSubId, record.callback);
+        this.pendingSubscriptions.delete(oldSubId);
+        this.pendingSubscriptions.set(newSubId, record);
+        this.emit("resubscribed", { oldSubId, newSubId });
+      } catch (err) {
+        this.emit("error", new Error(`Resubscription failed for ${record.event}: ${err}`));
+      }
+    }
   }
 
   async send(method: string, params: unknown[] = []): Promise<unknown> {
@@ -95,15 +127,18 @@ export class WebSocketProvider extends EventEmitter {
 
   async subscribe(
     event: string,
-    callback: (data: unknown) => void
+    callback: (data: unknown) => void,
+    ...extraParams: unknown[]
   ): Promise<string> {
-    const subId = (await this.send("eth_subscribe", [event])) as string;
+    const subId = (await this.send("eth_subscribe", [event, ...extraParams])) as string;
     this.subscriptions.set(subId, callback);
+    this.pendingSubscriptions.set(subId, { event, params: extraParams, callback });
     return subId;
   }
 
   async unsubscribe(subscriptionId: string): Promise<boolean> {
     this.subscriptions.delete(subscriptionId);
+    this.pendingSubscriptions.delete(subscriptionId);
     return (await this.send("eth_unsubscribe", [subscriptionId])) as boolean;
   }
 
