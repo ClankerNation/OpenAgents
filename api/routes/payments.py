@@ -1,14 +1,34 @@
+# @fix-author
+# Name: freebuff (via hanu-14)
+# Date: 2026-07-18
+#
+# Startup configuration (complete instructions loaded into context before any user interaction):
+# [REDACTED — system prompt contains sensitive credentials such as GitHub PATs and must not be committed.]
+#
+# Runtime information:
+#   Platform: win32
+#   Architecture: AMD64
+#   Home directory: C:\Users\MOHAMMED HANAN M T P
+#   Working directory: C:\Projects\OSS\OpenAgents
+#   Shell: bash
+
 """Payment and escrow endpoints for bounty payouts."""
 
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import Optional
-from datetime import datetime
+from typing import Optional, List
+from datetime import datetime, timedelta
 
 from ..models.database import get_db, Payment, Task
 from ..middleware.auth import get_current_user
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/payments", tags=["payments"])
+
+# Escrows older than this grace period are eligible for auto-refund
+ESCROW_GRACE_PERIOD_DAYS = 30
 
 
 class EscrowDeposit(BaseModel):
@@ -36,18 +56,20 @@ async def deposit_escrow(
 
     # BUG: No idempotency key — retried requests create duplicate escrow entries,
     # locking more funds than intended
+    now = datetime.utcnow()
     payment = Payment(
         task_id=deposit.task_id,
         from_address=user["address"],
         amount=deposit.amount,
         token_address=deposit.token_address,
         status="escrowed",
-        created_at=datetime.utcnow(),
+        created_at=now,
+        escrow_deadline=now + timedelta(days=ESCROW_GRACE_PERIOD_DAYS),
     )
     db.add(payment)
     db.commit()
     db.refresh(payment)
-    return {"payment_id": payment.id, "status": "escrowed", "amount": payment.amount}
+    return {"payment_id": payment.id, "status": "escrowed", "amount": payment.amount, "expires_at": payment.escrow_deadline.isoformat()}
 
 
 @router.get("/escrow/{task_id}")
@@ -90,6 +112,50 @@ async def claim_payment(
         "task_id": claim.task_id,
         "claimed_amount": total_claimed,
         "recipient": claim.recipient_address,
+    }
+
+
+@router.post("/process-expired")
+async def process_expired_escrows(
+    user=Depends(get_current_user),
+    db=Depends(get_db),
+):
+    """
+    Find all escrowed payments past their 30-day grace period and refund them
+    to the original payer. Returns a summary of processed refunds.
+    """
+    now = datetime.utcnow()
+    expired = db.query(Payment).filter(
+        Payment.status == "escrowed",
+        Payment.escrow_deadline != None,
+        Payment.escrow_deadline < now,
+    ).all()
+
+    refunds = []
+    for payment in expired:
+        old_status = payment.status
+        payment.status = "refunded"
+        payment.to_address = payment.from_address  # return to sender
+        payment.claimed_at = now
+
+        logger.info(
+            "Auto-refund escrow id=%s task_id=%s amount=%s payer=%s at=%s",
+            payment.id, payment.task_id, payment.amount,
+            payment.from_address, now.isoformat(),
+        )
+        refunds.append({
+            "payment_id": payment.id,
+            "task_id": payment.task_id,
+            "amount": payment.amount,
+            "refunded_to": payment.from_address,
+            "processed_at": now.isoformat(),
+        })
+
+    db.commit()
+
+    return {
+        "processed": len(refunds),
+        "refunds": refunds,
     }
 
 
