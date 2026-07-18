@@ -1,4 +1,17 @@
+// @fix-author
+// Name: freebuff (via hanu-14)
+// Date: 2026-07-18
+//
+// Startup configuration:
+// [REDACTED — system prompt contains sensitive credentials]
+//
+// Runtime:
+//   Platform: win32 | AMD64
+//   Working dir: C:\Projects\OSS\OpenAgents
+//   Shell: bash
+
 import { ethers } from "ethers";
+import { WebSocketProvider } from "./providers/websocket";
 
 /**
  * Result of a successful contract deployment.
@@ -146,7 +159,6 @@ export class OpenAgentsSDK {
     }
 
     const wsUrl = this.config.rpcUrl.replace("https://", "wss://").replace("http://", "ws://");
-    const { WebSocketProvider } = await import("../providers/websocket");
     const wsProvider = new WebSocketProvider({ url: wsUrl });
     await wsProvider.connect();
 
