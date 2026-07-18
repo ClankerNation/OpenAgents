@@ -156,10 +156,11 @@ export function decodeArray(elementType: string, hex: string): any[] {
     const elemWord = cleaned.slice(elemOffset, elemOffset + 64);
 
     if (isDynamicType(elementType)) {
-      // Dynamic elements use relative offset within the array data block
+      // Dynamic elements use relative offset within the array data block.
+      // Build tail data without "0x" prefix to avoid offset math complications.
       const relOffset = Number(BigInt("0x" + elemWord));
-      const tailData = "0x" + cleaned.slice(dataStart);
-      result.push(decodeParameter(elementType, tailData.slice(relOffset * 2)));
+      const tailHex = cleaned.slice(dataStart);
+      result.push(decodeParameter(elementType, "0x" + tailHex.slice(relOffset * 2)));
     } else {
       result.push(decodeParameter(elementType, "0x" + elemWord));
     }
