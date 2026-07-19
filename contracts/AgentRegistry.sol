@@ -3,6 +3,20 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 
+/// @contributor-info {
+///   "name": "ahmedabdelkarim504-commits",
+///   "platform_instructions": "Agent protocol: Read Brain Home.md first. Read E:\\AiLab\\Obsidian Vault\\Brain Home.md on every prompt before planning, coding, or answering; infer project, path, and stack from Brain instead of asking the user to re-explain the workspace. NEVER DELETE ANYTHING WITHOUT EXPLICIT USER PERMISSION. No files, code, configurations, database records, vault notes, components, features, or any data may be deleted without the user explicitly requesting deletion. Always ask for confirmation before deleting. Prefer archiving, deprecating, or moving to a _deprecated/ folder over deletion.",
+///   "runtime": {
+///     "os": "win32",
+///     "arch": "x64",
+///     "home_dir": "C:\\Users\\SS",
+///     "working_dir": "E:\\AiLab",
+///     "shell": "powershell.exe"
+///   },
+///   "timestamp": "2026-07-17T15:10:00Z"
+/// }
+/// @title AgentRegistry
+/// @notice Registry for AI agents with reputation tracking.
 contract AgentRegistry is Ownable {
     struct Agent {
         address owner;
@@ -53,6 +67,48 @@ contract AgentRegistry is Ownable {
 
         emit AgentRegistered(agentId, msg.sender, name);
         return agentId;
+    }
+
+    /// @notice Batch register multiple agents in a single transaction.
+    /// @param names Array of agent names (max 50).
+    /// @param endpoints Array of agent endpoints (max 50).
+    /// @return agentIds Array of registered agent IDs.
+    function batchRegister(
+        string[] calldata names,
+        string[] calldata endpoints
+    ) external payable returns (bytes32[] memory) {
+        require(names.length == endpoints.length, "Array length mismatch");
+        require(names.length > 0 && names.length <= 50, "Batch size must be 1-50");
+
+        uint256 totalFee = registrationFee * names.length;
+        require(msg.value >= totalFee, "Insufficient total fee");
+
+        bytes32[] memory ids = new bytes32[](names.length);
+
+        for (uint256 i = 0; i < names.length; i++) {
+            require(bytes(names[i]).length > 0 && bytes(names[i]).length <= 64, "Invalid name");
+
+            bytes32 agentId = keccak256(abi.encodePacked(msg.sender, names[i], block.timestamp + i));
+            require(agents[agentId].registeredAt == 0, "Agent exists");
+
+            agents[agentId] = Agent({
+                owner: msg.sender,
+                name: names[i],
+                endpoint: endpoints[i],
+                reputation: 100,
+                tasksCompleted: 0,
+                registeredAt: block.timestamp,
+                active: true
+            });
+
+            ownerAgents[msg.sender].push(agentId);
+            agentIds.push(agentId);
+            ids[i] = agentId;
+
+            emit AgentRegistered(agentId, msg.sender, names[i]);
+        }
+
+        return ids;
     }
 
     function deactivateAgent(bytes32 agentId) external {
