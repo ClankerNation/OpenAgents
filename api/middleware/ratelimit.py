@@ -40,12 +40,6 @@ def _get_tier(request: Request) -> Tuple[str, int, str]:
         except Exception:
             pass
 
-<<<<<<< Updated upstream
-    ip = request.client.host if request.client else "unknown"
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        ip = forwarded.split(",")[0].strip()
-=======
     forwarded = request.headers.get("X-Forwarded-For")
     if forwarded:
         ip = forwarded.split(",")[0].strip()
@@ -53,7 +47,6 @@ def _get_tier(request: Request) -> Tuple[str, int, str]:
         ip = request.client.host
     else:
         ip = request.headers.get("X-Real-IP", "unknown")
->>>>>>> Stashed changes
     return ("anonymous", 60, ip)
 
 
