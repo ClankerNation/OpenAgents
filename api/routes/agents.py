@@ -1,7 +1,7 @@
 """Agent CRUD endpoints for the OpenAgents platform."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional
 from datetime import datetime
 
@@ -12,16 +12,46 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 
 
 class AgentCreate(BaseModel):
-    name: str  # BUG: No validation — name can contain SQL injection, XSS, or be empty
+    name: str
     description: Optional[str] = None
+    endpoint: str
     model_type: str = "gpt-4"
     config: Optional[dict] = None
+
+    @field_validator("name")
+    @classmethod
+    def name_not_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("name must not be empty")
+        return v.strip()
+
+    @field_validator("endpoint")
+    @classmethod
+    def validate_endpoint_url(cls, v: str) -> str:
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("endpoint must be a valid HTTP or HTTPS URL")
+        return v
 
 
 class AgentUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    endpoint: Optional[str] = None
     config: Optional[dict] = None
+
+    @field_validator("name")
+    @classmethod
+    def name_not_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("name must not be empty")
+        return v.strip()
+
+    @field_validator("endpoint")
+    @classmethod
+    def validate_endpoint_url(cls, v: str) -> str:
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("endpoint must be a valid HTTP or HTTPS URL")
+        return v
 
 
 @router.post("/")
@@ -29,6 +59,7 @@ async def create_agent(agent: AgentCreate, user=Depends(get_current_user), db=De
     new_agent = Agent(
         name=agent.name,
         description=agent.description,
+        endpoint=agent.endpoint,
         model_type=agent.model_type,
         config=agent.config or {},
         owner_id=user["id"],
