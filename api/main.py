@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Query
+from middleware.ratelimit import RateLimitMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -8,6 +9,8 @@ app = FastAPI(
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+app.add_middleware(RateLimitMiddleware)
 
 
 class AgentResponse(BaseModel):
