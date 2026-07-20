@@ -1,4 +1,6 @@
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from middleware.request_id import RequestIDMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -8,6 +10,16 @@ app = FastAPI(
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.add_middleware(RequestIDMiddleware)
 
 
 class AgentResponse(BaseModel):
