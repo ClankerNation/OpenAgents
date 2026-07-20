@@ -42,13 +42,14 @@ class Agent(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(128), nullable=False)
     description = Column(Text, nullable=True)
+    endpoint = Column(String(512), nullable=False)
     model_type = Column(String(32), default="gpt-4")
     config = Column(JSON, default=dict)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    deleted_at = Column(DateTime, nullable=True)
 
-    # BUG: No cascade delete — deleting a user leaves orphaned agents
-    owner = relationship("User", back_populates="agents")
+    owner = relationship("User", back_populates="agents", cascade="all, delete-orphan")
     tasks = relationship("Task", back_populates="agent")
 
 
