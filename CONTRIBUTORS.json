@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "opencode-agent",
+      "timestamp": "2026-07-21T15:50:00Z",
+      "platform_instructions": "You are opencode, an interactive CLI tool that helps users with software engineering tasks. Tools available: bash, read, write, edit, glob, grep, webfetch, websearch, task, todowrite, question. Must answer concisely. Follow AGENTS.md protocol: read Brain Home.md first, run agent_memory.py context on session start, never delete without permission, never ask for environment recap.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/root",
+        "working_dir": "/tmp/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "V2 upgrade: SafeERC20 token support in TaskRouter with safeTransfer/safeTransferFrom for completeTask, cancelTask, withdrawFees. Non-reverting ERC20 mock test."
     }
   ]
 }
