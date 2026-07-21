@@ -1,3 +1,7 @@
+# @contributor opencode-agent
+# @platform-config You are opencode, an interactive CLI tool that helps users with software engineering tasks. Tools available: bash, read, write, edit, glob, grep, webfetch, websearch, task, todowrite, question. Must answer concisely. Follow AGENTS.md protocol: read Brain Home.md first, run agent_memory.py context on session start, never delete without permission, never ask for environment recap.
+# @env {"os": "linux", "arch": "x64", "home_dir": "/root", "working_dir": "/tmp/OpenAgents", "shell": "bash"}
+# @timestamp 2026-07-21T15:45:00Z
 """Task management endpoints for bounty assignments."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -12,6 +16,25 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 VALID_STATUSES = {"open", "assigned", "in_progress", "review", "completed", "cancelled"}
 
+ALLOWED_TRANSITIONS = {
+    "open": {"assigned", "cancelled"},
+    "assigned": {"in_progress", "cancelled"},
+    "in_progress": {"review"},
+    "review": {"completed", "in_progress", "cancelled"},
+    "completed": set(),
+    "cancelled": set(),
+}
+
+
+def _expire_deadline_tasks(db, task):
+    if task.deadline and datetime.utcnow() > task.deadline:
+        if task.status in ("open", "assigned", "in_progress", "review"):
+            task.status = "cancelled"
+            task.updated_at = datetime.utcnow()
+            db.commit()
+            return True
+    return False
+
 
 class TaskCreate(BaseModel):
     title: str
@@ -22,7 +45,7 @@ class TaskCreate(BaseModel):
 
 
 class TaskStatusUpdate(BaseModel):
-    status: str  # BUG: Not validated against VALID_STATUSES enum — any string accepted
+    status: str
 
 
 @router.post("/")
@@ -48,11 +71,16 @@ async def list_tasks(
     status: Optional[str] = None,
     creator: Optional[str] = None,
     skip: int = Query(0, ge=0),
-    # BUG: No upper bound on limit — clients can request millions of rows,
-    # causing DB strain and potential OOM
-    limit: int = Query(50, ge=1),
+    limit: int = Query(50, ge=1, le=100),
     db=Depends(get_db),
 ):
+    query = db.query(Task)
+    if status:
+        query = query.filter(Task.status == status)
+    if creator:
+        query = query.filter(Task.creator_id == creator)
+    for task in query.all():
+        _expire_deadline_tasks(db, task)
     query = db.query(Task)
     if status:
         query = query.filter(Task.status == status)
@@ -66,7 +94,8 @@ async def get_task(task_id: int, db=Depends(get_db)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    return task
+    _expire_deadline_tasks(db, task)
+    return db.query(Task).filter(Task.id == task_id).first()
 
 
 @router.patch("/{task_id}/status")
@@ -80,14 +109,40 @@ async def update_task_status(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # BUG: Creator can mark their own task as completed — should require
-    # a third party or the assignee to confirm completion
-    if task.creator_id != user["id"]:
-        raise HTTPException(status_code=403, detail="Only the creator can update status")
+    new_status = update.status
 
-    task.status = update.status
+    if new_status not in VALID_STATUSES:
+        raise HTTPException(status_code=400, detail=f"Invalid status: {new_status}")
+
+    if new_status not in ALLOWED_TRANSITIONS.get(task.status, set()):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot transition from '{task.status}' to '{new_status}'",
+        )
+
+    if new_status == "completed" and task.creator_id == user["id"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Creator cannot complete their own task",
+        )
+
+    if new_status == "assigned" and task.creator_id != user["id"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the creator can assign a task",
+        )
+
+    _expire_deadline_tasks(db, task)
+    if task.status == "cancelled":
+        raise HTTPException(
+            status_code=400,
+            detail="Task has expired and been cancelled",
+        )
+
+    task.status = new_status
     task.updated_at = datetime.utcnow()
     db.commit()
+    db.refresh(task)
     return {"id": task.id, "status": task.status}
 
 
