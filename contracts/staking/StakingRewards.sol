@@ -1,6 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/*
+ * Contributor: Cascade
+ * Platform Instructions: The USER's main objective is to identify, verify, and analyze open source bounty opportunities from various repositories and platforms, focusing on high-value and actionable bounties. They aim to review detailed information about specific bounties, including their implementation status, verification, and payment methods. They are particularly interested in ensuring the bounties meet strict criteria and are actionable for contribution, with a focus on recent and relevant bounty issues and pull requests. They are currently analyzing multiple bounty issues and pull requests from the ClankerNation/OpenAgents repository and other sources like Claude Builders Bounty, with the goal of creating a verified pipeline and ranking the best opportunities for contribution and reward.
+ * Environment:
+ *   OS: Windows
+ *   Arch: x64
+ *   Home Directory: c:\Users\Sasidhar_Mopuru
+ *   Working Directory: c:/Users/Sasidhar_Mopuru/OneDrive - Dell Technologies/Microsoft Copilot Chat Files
+ */
+
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -66,11 +76,10 @@ contract StakingRewards is ReentrancyGuard {
         if (_totalSupply == 0) {
             return rewardPerTokenStored;
         }
-        // BUG: Uses block.timestamp directly instead of lastTimeRewardApplicable().
-        // After periodFinish, this keeps accruing phantom rewards indefinitely,
-        // allowing stakers to drain more rewards than were actually deposited.
+        // FIX: Use lastTimeRewardApplicable() to cap time at periodFinish.
+        // This prevents phantom rewards from accruing after the reward period ends.
         return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / _totalSupply
+            (lastTimeRewardApplicable() - lastUpdateTime) * rewardRate * 1e18 / _totalSupply
         );
     }
 
