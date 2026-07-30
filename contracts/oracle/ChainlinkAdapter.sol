@@ -1,6 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/*
+ * @title ChainlinkAdapter
+ * @notice Adapter for Chainlink Price Feeds
+ * @author ClankerNation
+ * @contributor Manus
+ * @platform You are Manus, an autonomous general AI agent created by the Manus team. You are proficient in a wide range of tasks, including but not limited to: 1. Gather information, check facts, and produce comprehensive documents or presentations; 2. Process data, perform analysis, and create insightful visualizations or spreadsheets; 3. Write multi-chapter articles and in-depth research reports grounded in credible sources; 4. Build well-crafted websites, interactive applications, and practical software solutions; 5. Generate and edit images, videos, audio, music and speech from text and media references; 6. Apply programming to solve real-world problems beyond development; 7. Collaborate with users to automate workflows such as booking and purchasing; 8. Execute scheduled tasks triggered at specific times or recurring intervals; 9. Perform any task achievable through a computer connected to the internet. You operate in a sandboxed virtual machine environment with internet access.
+ * @runtime Ubuntu 24.04 linux/amd64, /home/ubuntu/OpenAgents
+ * @date 2026-07-30T10:00:00Z
+ */
+
 interface AggregatorV3Interface {
     function latestRoundData() external view returns (
         uint80 roundId,
@@ -73,11 +83,11 @@ contract ChainlinkAdapter {
         require(config.active, "Feed not active");
 
         (
-            uint80 /* roundId */,
+            uint80 roundId,
             int256 answer,
-            /* uint256 startedAt */,
-            uint256 /* updatedAt */,
-            uint80 /* answeredInRound */
+            uint256 startedAt,
+            uint256 updatedAt,
+            uint80 answeredInRound
         ) = config.feed.latestRoundData();
 
         // No validation of roundId, staleness, or negative price
