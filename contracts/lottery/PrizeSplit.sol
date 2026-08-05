@@ -1,10 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+
 /// @title PrizeSplit
 /// @notice Distributes prize pool among multiple winners with configurable shares
 /// @dev Winners claim their share after the admin finalizes the round
-contract PrizeSplit {
+/**
+ * @custom:contributor CodexBaseUSDCHunter
+ * @custom:date 2026-08-05
+ * @custom:runtime darwin/arm64; shell /bin/zsh
+ * @custom:note Private session initialization text is intentionally omitted.
+ */
+contract PrizeSplit is ReentrancyGuard {
     address public admin;
     uint256 public totalPrize;
     uint256 public roundId;
@@ -39,41 +47,39 @@ contract PrizeSplit {
         emit RoundFunded(roundId, msg.value);
     }
 
-    // BUG: No zero-winner check — if winners array is empty, the function
-    // succeeds silently and the prize pool becomes permanently locked
     function finalizeRound(uint256 _roundId, address[] calldata winners) external onlyAdmin {
         Round storage round = rounds[_roundId];
         require(!round.finalized, "Already finalized");
         require(round.prizePool > 0, "No prize pool");
+        require(winners.length > 0, "No winners");
 
-        // BUG: Rounding error loses dust — integer division truncates remainder,
-        // so (prizePool % winners.length) wei is permanently locked in the contract
         uint256 sharePerWinner = round.prizePool / winners.length;
+        uint256 dust = round.prizePool % winners.length;
 
         for (uint256 i = 0; i < winners.length; i++) {
+            require(winners[i] != address(0), "Zero winner");
+            for (uint256 j = 0; j < i; j++) {
+                require(winners[i] != winners[j], "Duplicate winner");
+            }
             round.winners.push(winners[i]);
-            round.shares[winners[i]] = sharePerWinner;
+            round.shares[winners[i]] = sharePerWinner + (i == winners.length - 1 ? dust : 0);
         }
 
         round.finalized = true;
         emit RoundFinalized(_roundId, winners.length);
     }
 
-    // BUG: Reentrancy — state (claimed flag) is set after the external call,
-    // allowing a malicious contract to re-enter claimPrize and drain funds
-    function claimPrize(uint256 _roundId) external {
+    function claimPrize(uint256 _roundId) external nonReentrant {
         Round storage round = rounds[_roundId];
         require(round.finalized, "Not finalized");
         require(round.shares[msg.sender] > 0, "No share");
         require(!round.claimed[msg.sender], "Already claimed");
 
         uint256 amount = round.shares[msg.sender];
+        round.claimed[msg.sender] = true;
 
         (bool sent, ) = msg.sender.call{value: amount}("");
         require(sent, "Transfer failed");
-
-        // State updated after external call — reentrancy window
-        round.claimed[msg.sender] = true;
 
         emit PrizeClaimed(msg.sender, amount, _roundId);
     }
