@@ -61,6 +61,18 @@ test("decodes dynamic arrays with static and dynamic elements", () => {
   assert.deepEqual(strings, ["one", "two"]);
 });
 
+test("decodes fixed arrays and empty dynamic arrays", () => {
+  const encoded = encodeParams([
+    { type: "uint256[2]", value: [3n, 4n] },
+    { type: "bytes[]", value: [] },
+  ]);
+
+  assert.deepEqual(
+    decodeParams(["uint256[2]", "bytes[]"], encoded),
+    [[3n, 4n], []],
+  );
+});
+
 test("decodes nested tuples and tuple arrays recursively", () => {
   const encoded = encodeParams([
     {
