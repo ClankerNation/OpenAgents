@@ -245,9 +245,13 @@ function encodePrimitive(node: AbiNode, value: AbiValue): string {
   throw new Error(`Unsupported static ABI type: ${name}`);
 }
 
-function encodeDynamicBytesBody(value: Uint8Array | string, label: string): string {
+function encodeDynamicBytesBody(
+  value: Uint8Array | string,
+  label: string,
+  allowHexString = true,
+): string {
   const bytes = typeof value === "string"
-    ? (value.startsWith("0x") || value.startsWith("0X")
+    ? (allowHexString && (value.startsWith("0x") || value.startsWith("0X"))
       ? cleanHex(value, label)
       : Buffer.from(value, "utf8").toString("hex"))
     : Buffer.from(value).toString("hex");
@@ -258,7 +262,9 @@ function encodeDynamicBytesBody(value: Uint8Array | string, label: string): stri
 
 function encodeNode(node: AbiNode, value: AbiValue): string {
   if (node.kind === "primitive") {
-    if (node.name === "string") return encodeDynamicBytesBody(String(value), "string");
+    if (node.name === "string") {
+      return encodeDynamicBytesBody(String(value), "string", false);
+    }
     if (node.name === "bytes") {
       return encodeDynamicBytesBody(value as Uint8Array | string, "bytes");
     }
@@ -331,7 +337,7 @@ export function encodeBool(value: boolean): string {
 
 /** Encodes the body of one ABI string value (length followed by padded bytes). */
 export function encodeString(value: string): string {
-  return encodeDynamicBytesBody(value, "string");
+  return encodeDynamicBytesBody(value, "string", false);
 }
 
 /** Encodes the body of one ABI bytes value (length followed by padded bytes). */

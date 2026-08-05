@@ -21,6 +21,14 @@ test("decodes a single dynamic string from the standard offset encoding", () => 
   assert.equal(decodeParameter("string", expected), "hello");
 });
 
+test("encodes strings beginning with a hex-like prefix as UTF-8 text", () => {
+  const encoded = encodeParams([{ type: "string", value: "0xabc" }]);
+  assert.deepEqual(
+    decodeParams(["string"], encoded),
+    ["0xabc"],
+  );
+});
+
 test("decodes mixed dynamic and static return values", () => {
   const encoded = encodeParams([
     { type: "string", value: "hello" },
