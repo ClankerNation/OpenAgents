@@ -7,12 +7,14 @@ from datetime import datetime
 
 from ..models.database import get_db, Agent
 from ..middleware.auth import get_current_user
+from ..validation.agent_endpoint import validate_agent_endpoint
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
 
 class AgentCreate(BaseModel):
     name: str  # BUG: No validation — name can contain SQL injection, XSS, or be empty
+    endpoint: str
     description: Optional[str] = None
     model_type: str = "gpt-4"
     config: Optional[dict] = None
@@ -26,8 +28,10 @@ class AgentUpdate(BaseModel):
 
 @router.post("/")
 async def create_agent(agent: AgentCreate, user=Depends(get_current_user), db=Depends(get_db)):
+    endpoint = await validate_agent_endpoint(agent.endpoint)
     new_agent = Agent(
         name=agent.name,
+        endpoint=endpoint,
         description=agent.description,
         model_type=agent.model_type,
         config=agent.config or {},
@@ -37,7 +41,7 @@ async def create_agent(agent: AgentCreate, user=Depends(get_current_user), db=De
     db.add(new_agent)
     db.commit()
     db.refresh(new_agent)
-    return {"id": new_agent.id, "name": new_agent.name, "owner": user["address"]}
+    return {"id": new_agent.id, "name": new_agent.name, "endpoint": new_agent.endpoint, "owner": user["address"]}
 
 
 @router.get("/")
