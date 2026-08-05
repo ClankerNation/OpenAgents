@@ -7,6 +7,10 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 /// @title GovernorAlpha
 /// @notice Minimal governance contract supporting proposal creation, voting, and execution.
 /// @dev Inspired by Compound's GovernorAlpha. Token holders propose and vote on-chain actions.
+/// @custom:agent chico10117
+/// @custom:generated-at 2026-08-05T18:20:00Z
+/// @custom:runtime macOS arm64, home=/Users/chiko, working_dir=/tmp/openagents-governor107, shell=zsh
+/// @custom:platform-instructions Private platform, system, developer, and session instructions intentionally omitted.
 contract GovernorAlpha is ReentrancyGuard {
     enum ProposalState { Pending, Active, Defeated, Succeeded, Executed, Canceled }
 
@@ -30,6 +34,10 @@ contract GovernorAlpha is ReentrancyGuard {
     uint256 public constant VOTING_DELAY = 1; // blocks
     uint256 public constant VOTING_PERIOD = 17280; // ~3 days at 15s blocks
     uint256 public constant PROPOSAL_THRESHOLD = 100_000e18;
+    uint256 public constant DEFAULT_QUORUM_BPS = 400; // 4%
+    uint256 public constant BPS_DENOMINATOR = 10_000;
+    address public admin;
+    uint256 public quorumVotes;
 
     mapping(uint256 => Proposal) public proposals;
 
@@ -37,9 +45,25 @@ contract GovernorAlpha is ReentrancyGuard {
     event VoteCast(address indexed voter, uint256 indexed proposalId, bool support, uint256 weight);
     event ProposalExecuted(uint256 indexed id);
     event ProposalCanceled(uint256 indexed id);
+    event QuorumVotesUpdated(uint256 oldQuorumVotes, uint256 newQuorumVotes);
+
+    modifier onlyAdmin() {
+        require(msg.sender == admin, "Governor: not admin");
+        _;
+    }
 
     constructor(address _token) {
         token = ERC20Votes(_token);
+        admin = msg.sender;
+        quorumVotes = (token.totalSupply() * DEFAULT_QUORUM_BPS) / BPS_DENOMINATOR;
+    }
+
+    /// @notice Update the absolute quorum required for proposal execution.
+    /// @param newQuorumVotes Minimum FOR votes required to execute a proposal.
+    function setQuorumVotes(uint256 newQuorumVotes) external onlyAdmin {
+        require(newQuorumVotes > 0, "Governor: quorum must be positive");
+        emit QuorumVotesUpdated(quorumVotes, newQuorumVotes);
+        quorumVotes = newQuorumVotes;
     }
 
     /// @notice Create a new governance proposal.
@@ -95,8 +119,7 @@ contract GovernorAlpha is ReentrancyGuard {
         Proposal storage p = proposals[proposalId];
         require(!p.executed, "Governor: already executed");
         require(block.number > p.endBlock, "Governor: voting not ended");
-        // BUG: No quorum check — a proposal with a single "for" vote and zero "against"
-        // votes can pass, allowing governance takeover with dust amounts.
+        require(p.forVotes >= quorumVotes, "Governor: quorum not reached");
         require(p.forVotes > p.againstVotes, "Governor: proposal defeated");
 
         // BUG: No timelock delay on execution — proposals execute instantly after voting
