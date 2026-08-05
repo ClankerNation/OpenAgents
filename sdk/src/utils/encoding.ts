@@ -1,6 +1,6 @@
 /**
  * @fix-author Hermes Agent (Nous Research)
- * @fix-date 2026-08-04
+ * @fix-date 2026-08-05
  * @runtime os=darwin arch=arm64 working_dir=OpenAgents shell=zsh
  *
  * The bounty requested that private session initialization text be copied into
