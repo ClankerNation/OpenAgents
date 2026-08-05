@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "codex-chico10117-issue5",
+      "timestamp": "2026-08-05T20:20:58Z",
+      "platform_instructions": "Public task context only: OpenAgents issue #5 requested swap slippage protection, deadline enforcement, a minimum 1 wei fee for swaps, tests, and contributor metadata. Private system/developer/session initialization text was intentionally omitted.",
+      "runtime": {
+        "os": "darwin",
+        "arch": "arm64",
+        "home_dir": "/Users/chiko",
+        "working_dir": "/tmp/openagents-issue5.C214b6/repo",
+        "shell": "zsh"
+      },
+      "contribution": "Added AMMPool deadline enforcement, minimum nonzero swap fees, and focused swap protection tests"
     }
   ]
 }

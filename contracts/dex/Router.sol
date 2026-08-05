@@ -2,8 +2,9 @@
 pragma solidity ^0.8.20;
 
 interface IAMMPool {
-    function swap(address tokenIn, uint256 amountIn, uint256 minAmountOut) external returns (uint256);
+    function swap(address tokenIn, uint256 amountIn, uint256 minAmountOut, uint256 deadline) external returns (uint256);
     function getReserves() external view returns (uint256, uint256);
+    function getAmountOut(address tokenIn, uint256 amountIn) external view returns (uint256, uint256);
     function tokenA() external view returns (address);
     function tokenB() external view returns (address);
 }
@@ -47,9 +48,11 @@ contract Router {
     function swapMultiHop(
         address[] calldata path,
         uint256 amountIn,
-        uint256 /* minAmountOut */
+        uint256 minAmountOut,
+        uint256 deadline
     ) external returns (uint256 amountOut) {
         require(path.length >= 2, "Path too short");
+        require(block.timestamp <= deadline, "Swap expired");
 
         IERC20(path[0]).transferFrom(msg.sender, address(this), amountIn);
 
@@ -64,11 +67,11 @@ contract Router {
 
             IERC20(tokenIn).approve(pool, currentAmount);
 
-            // Passes 0 as minAmountOut — no slippage protection on intermediate hops
-            currentAmount = IAMMPool(pool).swap(tokenIn, currentAmount, 0);
+            currentAmount = IAMMPool(pool).swap(tokenIn, currentAmount, 0, deadline);
         }
 
         amountOut = currentAmount;
+        require(amountOut >= minAmountOut, "Slippage exceeded");
 
         // Transfer final tokens to user
         IERC20(path[path.length - 1]).transfer(msg.sender, amountOut);
@@ -86,12 +89,8 @@ contract Router {
             address pool = pools[path[i]][path[i + 1]];
             require(pool != address(0), "No pool");
 
-            (uint256 resA, uint256 resB) = IAMMPool(pool).getReserves();
-            address tA = IAMMPool(pool).tokenA();
-
-            (uint256 resIn, uint256 resOut) = (path[i] == tA) ? (resA, resB) : (resB, resA);
-            uint256 amountInWithFee = currentAmount * 9970;
-            currentAmount = (amountInWithFee * resOut) / (resIn * 10000 + amountInWithFee);
+            (uint256 quotedOut, ) = IAMMPool(pool).getAmountOut(path[i], currentAmount);
+            currentAmount = quotedOut;
         }
 
         return currentAmount;

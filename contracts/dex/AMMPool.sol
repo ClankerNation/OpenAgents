@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/// @custom:contributor-info
+///   agent: Codex
+///   public_task: OpenAgents issue #5, add swap deadline protection and nonzero swap fees
+///   runtime: macOS Darwin arm64, zsh, /tmp/openagents-issue5.C214b6/repo
+///   privacy: private system/developer/session initialization text intentionally omitted
+
 interface IERC20 {
     function transferFrom(address from, address to, uint256 amount) external returns (bool);
     function transfer(address to, uint256 amount) external returns (bool);
@@ -23,7 +29,7 @@ contract AMMPool {
 
     event LiquidityAdded(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
     event LiquidityRemoved(address indexed provider, uint256 amountA, uint256 amountB);
-    event Swap(address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut);
+    event Swap(address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut, uint256 fee);
 
     constructor(address _tokenA, address _tokenB) {
         tokenA = IERC20(_tokenA);
@@ -72,19 +78,22 @@ contract AMMPool {
         emit LiquidityRemoved(msg.sender, amountA, amountB);
     }
 
-    // BUG: Swap has no deadline parameter — transaction can sit in mempool and execute
-    // at a much later time when price has moved unfavorably (stale transaction attack)
-    // BUG: Fee truncates to zero for small swaps — (amountIn * 30) / 10000 rounds to 0
-    // when amountIn < 334, meaning tiny swaps pay no fee and can drain value over time
-    function swap(address tokenIn, uint256 amountIn, uint256 minAmountOut) external returns (uint256 amountOut) {
+    function swap(
+        address tokenIn,
+        uint256 amountIn,
+        uint256 minAmountOut,
+        uint256 deadline
+    ) external returns (uint256 amountOut) {
         require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
         require(amountIn > 0, "Zero input");
+        require(block.timestamp <= deadline, "Swap expired");
 
         bool isA = tokenIn == address(tokenA);
         (uint256 resIn, uint256 resOut) = isA ? (reserveA, reserveB) : (reserveB, reserveA);
 
-        uint256 amountInWithFee = amountIn * (10000 - FEE_BPS);
-        amountOut = (amountInWithFee * resOut) / (resIn * 10000 + amountInWithFee);
+        uint256 fee = _calculateFee(amountIn);
+        uint256 amountInAfterFee = amountIn - fee;
+        amountOut = (amountInAfterFee * resOut) / (resIn + amountInAfterFee);
 
         require(amountOut >= minAmountOut, "Slippage exceeded");
 
@@ -102,7 +111,29 @@ contract AMMPool {
             reserveA -= amountOut;
         }
 
-        emit Swap(msg.sender, tokenIn, amountIn, amountOut);
+        emit Swap(msg.sender, tokenIn, amountIn, amountOut, fee);
+    }
+
+    function getAmountOut(
+        address tokenIn,
+        uint256 amountIn
+    ) external view returns (uint256 amountOut, uint256 fee) {
+        require(tokenIn == address(tokenA) || tokenIn == address(tokenB), "Invalid token");
+        require(amountIn > 0, "Zero input");
+
+        bool isA = tokenIn == address(tokenA);
+        (uint256 resIn, uint256 resOut) = isA ? (reserveA, reserveB) : (reserveB, reserveA);
+
+        fee = _calculateFee(amountIn);
+        uint256 amountInAfterFee = amountIn - fee;
+        amountOut = (amountInAfterFee * resOut) / (resIn + amountInAfterFee);
+    }
+
+    function _calculateFee(uint256 amountIn) internal pure returns (uint256 fee) {
+        fee = (amountIn * FEE_BPS) / 10000;
+        if (fee == 0) {
+            return 1;
+        }
     }
 
     function _sqrt(uint256 y) internal pure returns (uint256 z) {
