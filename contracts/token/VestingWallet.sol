@@ -3,11 +3,18 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/math/Math.sol";
 
 /// @title VestingWallet
 /// @notice Linear vesting wallet with a cliff period for token distribution.
 /// @dev Tokens vest linearly from cliff end to vesting end. The contract owner
 ///      can revoke unvested tokens and redirect them to a specified address.
+/**
+ * @custom:contributor CodexBaseUSDCHunter
+ * @custom:date 2026-08-05
+ * @custom:runtime darwin/arm64; shell /bin/zsh
+ * @custom:note Private session initialization text is intentionally omitted.
+ */
 contract VestingWallet {
     using SafeERC20 for IERC20;
 
@@ -26,8 +33,6 @@ contract VestingWallet {
     event TokensReleased(address indexed beneficiary, uint256 amount);
     event VestingRevoked(address indexed token, uint256 refund);
 
-    // BUG: No zero-address validation on beneficiary — if beneficiary is set to
-    // address(0), all vested tokens are sent to the zero address (burned) on release.
     constructor(
         address _beneficiary,
         address _token,
@@ -37,6 +42,8 @@ contract VestingWallet {
         uint256 _totalAllocation,
         bool _revocable
     ) {
+        require(_beneficiary != address(0), "Vesting: zero beneficiary");
+        require(_token != address(0), "Vesting: zero token");
         require(_vestingDuration > _cliffDuration, "Vesting: cliff exceeds duration");
         require(_totalAllocation > 0, "Vesting: zero allocation");
 
@@ -53,6 +60,7 @@ contract VestingWallet {
     /// @notice Release vested tokens to the beneficiary.
     function release() external {
         require(msg.sender == beneficiary, "Vesting: not beneficiary");
+        require(!revoked, "Vesting: revoked");
         uint256 vested = vestedAmount();
         uint256 unreleased = vested - released;
         require(unreleased > 0, "Vesting: nothing to release");
@@ -65,17 +73,23 @@ contract VestingWallet {
     /// @notice Calculate the total vested amount at the current timestamp.
     /// @return The total amount of tokens that have vested.
     function vestedAmount() public view returns (uint256) {
-        if (block.timestamp < start + cliffDuration) {
+        if (block.timestamp < start) {
             return 0;
         }
-        if (block.timestamp >= start + vestingDuration) {
+
+        uint256 elapsed = block.timestamp - start;
+        if (elapsed < cliffDuration) {
+            return 0;
+        }
+        if (elapsed >= vestingDuration) {
             return totalAllocation;
         }
-        // BUG: Overflow risk — (totalAllocation * elapsed) can overflow for large
-        // allocations. E.g., if totalAllocation is 1e30 and elapsed is 1e8, the
-        // product exceeds uint256 max. Should use mulDiv or restructure the math.
-        uint256 elapsed = block.timestamp - start;
-        return (totalAllocation * elapsed) / vestingDuration;
+
+        // Split the quotient before multiplying. Math.mulDiv keeps the remainder
+        // product in full precision when allocations and timestamps are large.
+        uint256 whole = totalAllocation / vestingDuration;
+        uint256 remainder = totalAllocation % vestingDuration;
+        return (whole * elapsed) + Math.mulDiv(remainder, elapsed, vestingDuration);
     }
 
     /// @notice Revoke unvested tokens and return them to the owner.
@@ -85,13 +99,9 @@ contract VestingWallet {
         require(!revoked, "Vesting: already revoked");
 
         revoked = true;
-        uint256 vested = vestedAmount();
-        // BUG: During the cliff period, vestedAmount() returns 0, so refund is
-        // calculated as totalAllocation - 0 = totalAllocation. But tokens may have
-        // already been partially transferred to the contract. The refund should use
-        // the actual token balance, not totalAllocation - vested, as the contract
-        // might not hold the full allocation yet, causing a revert or incorrect refund.
-        uint256 refund = totalAllocation - vested;
+        uint256 refundable = totalAllocation - released;
+        uint256 balance = token.balanceOf(address(this));
+        uint256 refund = balance < refundable ? balance : refundable;
 
         token.safeTransfer(owner, refund);
         emit VestingRevoked(address(token), refund);
@@ -99,11 +109,14 @@ contract VestingWallet {
 
     /// @notice Get the releasable (vested but not yet released) token amount.
     function releasable() external view returns (uint256) {
+        if (revoked) {
+            return 0;
+        }
         return vestedAmount() - released;
     }
 
     /// @notice Check if the cliff period has passed.
     function cliffReached() external view returns (bool) {
-        return block.timestamp >= start + cliffDuration;
+        return block.timestamp >= start && block.timestamp - start >= cliffDuration;
     }
 }
