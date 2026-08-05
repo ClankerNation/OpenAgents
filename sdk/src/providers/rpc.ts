@@ -1,4 +1,10 @@
 import { withRetry, RetryOptions } from "../utils/retry";
+import {
+  FeeData,
+  GasEstimationTransaction,
+  parseRpcQuantity,
+  toRpcTransaction,
+} from "../utils/gas";
 
 export interface JsonRpcRequest {
   jsonrpc: "2.0";
@@ -85,6 +91,64 @@ export class RpcProvider {
     return responses
       .sort((a, b) => a.id - b.id)
       .map((r) => r.result);
+  }
+
+  async estimateGas(transaction: GasEstimationTransaction): Promise<bigint> {
+    const result = await this.call("eth_estimateGas", [
+      toRpcTransaction(transaction),
+    ]);
+    return parseRpcQuantity(result, "eth_estimateGas");
+  }
+
+  async getBlockGasLimit(): Promise<bigint> {
+    const block = await this.call("eth_getBlockByNumber", ["latest", false]);
+    if (!block || typeof block !== "object" || !("gasLimit" in block)) {
+      throw new Error("RPC latest block is missing gasLimit");
+    }
+
+    return parseRpcQuantity(
+      (block as { gasLimit: unknown }).gasLimit,
+      "latest.gasLimit"
+    );
+  }
+
+  async getFeeData(): Promise<FeeData> {
+    const block = await this.call("eth_getBlockByNumber", ["latest", false]);
+    const baseFeePerGas =
+      block && typeof block === "object" && "baseFeePerGas" in block
+        ? (block as { baseFeePerGas?: unknown }).baseFeePerGas
+        : undefined;
+
+    if (typeof baseFeePerGas !== "string") {
+      return {
+        gasPrice: parseRpcQuantity(
+          await this.call("eth_gasPrice"),
+          "eth_gasPrice"
+        ),
+      };
+    }
+
+    const baseFee = parseRpcQuantity(baseFeePerGas, "latest.baseFeePerGas");
+    let maxPriorityFeePerGas: bigint;
+
+    try {
+      maxPriorityFeePerGas = parseRpcQuantity(
+        await this.call("eth_maxPriorityFeePerGas"),
+        "eth_maxPriorityFeePerGas"
+      );
+    } catch {
+      const gasPrice = parseRpcQuantity(
+        await this.call("eth_gasPrice"),
+        "eth_gasPrice"
+      );
+      maxPriorityFeePerGas =
+        gasPrice > baseFee ? gasPrice - baseFee : 1_000_000_000n;
+    }
+
+    return {
+      maxPriorityFeePerGas,
+      maxFeePerGas: baseFee * 2n + maxPriorityFeePerGas,
+    };
   }
 
   async getBlockNumber(): Promise<number> {

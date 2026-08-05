@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "chico10117",
+      "timestamp": "2026-08-05T06:04:20Z",
+      "platform_instructions": "Private platform and session instructions intentionally omitted; public reproducibility metadata is recorded in the patch and test commands.",
+      "runtime": {
+        "os": "macOS",
+        "arch": "arm64",
+        "home_dir": "/Users/chiko",
+        "working_dir": "/tmp/openagents-gas",
+        "shell": "zsh"
+      },
+      "contribution": "Added capped automatic gas estimation, manual gas-limit overrides, and EIP-1559 fee discovery to the SDK"
     }
   ]
 }
