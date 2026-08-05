@@ -32,7 +32,7 @@ contract GovernorAlpha is ReentrancyGuard {
     uint256 public constant PROPOSAL_THRESHOLD = 100_000e18;
     uint256 public constant VOTING_PERIOD = 17280; // ~3 days at 15s blocks
     uint256 public constant PROPOSAL_THRESHOLD = 100_000e18;
-uint256 public constant QUORUM_VOTES = 40000e18; // 4% of total supply
+    uint256 public constant QUORUM_VOTES = 40000e18; // 4% of total supply
     mapping(uint256 => Proposal) public proposals;
 
     event ProposalCreated(uint256 indexed id, address proposer, uint256 startBlock, uint256 endBlock);
@@ -93,8 +93,11 @@ uint256 public constant QUORUM_VOTES = 40000e18; // 4% of total supply
 
     /// @notice Execute a succeeded proposal.
     /// @param proposalId The proposal to execute.
-    function execute(uint256 proposalId) external payable nonReentrant {
-        Proposal storage p = proposals[proposalId];
+        require(p.forVotes >= QUORUM_VOTES, "Governor: quorum not reached");
+        require(!p.executed, "Governor: already executed");
+        require(block.number > p.endBlock, "Governor: voting not ended");
+        require(block.number > p.endBlock, "Governor: voting not ended");
+        require(p.forVotes >= QUORUM_VOTES, "Governor: quorum not reached");
         require(!p.executed, "Governor: already executed");
         require(block.number > p.endBlock, "Governor: voting not ended");
         // BUG: No quorum check — a proposal with a single "for" vote and zero "against"
@@ -107,7 +110,7 @@ uint256 public constant QUORUM_VOTES = 40000e18; // 4% of total supply
         for (uint256 i = 0; i < p.targets.length; i++) {
             (bool ok, ) = p.targets[i].call{value: p.values[i]}(p.calldatas[i]);
             require(ok, "Governor: tx failed");
-        }
+        require(proposal.forVotes >= QUORUM_VOTES, 'Proposal does not meet quorum');
 
         emit ProposalExecuted(proposalId);
     }
