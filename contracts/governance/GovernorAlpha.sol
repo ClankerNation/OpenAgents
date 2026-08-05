@@ -4,6 +4,13 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
+/// @fix-author Codex, 2026-08-05
+/// @notice Public task context: OpenAgents issue #4 requested removing origin-based
+///         voter identity, adding sender guards, adding execution timelock
+///         enforcement, tests, and contributor metadata.
+/// @dev Private system/developer/session initialization text intentionally omitted.
+/// @runtime os=darwin arch=arm64 working_dir=/tmp/openagents-issue4.GrPYqi/repo shell=zsh
+
 /// @title GovernorAlpha
 /// @notice Minimal governance contract supporting proposal creation, voting, and execution.
 /// @dev Inspired by Compound's GovernorAlpha. Token holders propose and vote on-chain actions.
@@ -18,6 +25,7 @@ contract GovernorAlpha is ReentrancyGuard {
         bytes[] calldatas;
         uint256 startBlock;
         uint256 endBlock;
+        uint256 earliestExecutionBlock;
         uint256 forVotes;
         uint256 againstVotes;
         bool executed;
@@ -29,6 +37,7 @@ contract GovernorAlpha is ReentrancyGuard {
     uint256 public proposalCount;
     uint256 public constant VOTING_DELAY = 1; // blocks
     uint256 public constant VOTING_PERIOD = 17280; // ~3 days at 15s blocks
+    uint256 public constant TIMELOCK_DELAY = 5760; // ~1 day at 15s blocks
     uint256 public constant PROPOSAL_THRESHOLD = 100_000e18;
 
     mapping(uint256 => Proposal) public proposals;
@@ -52,6 +61,7 @@ contract GovernorAlpha is ReentrancyGuard {
         uint256[] calldata values,
         bytes[] calldata calldatas
     ) external returns (uint256 proposalId) {
+        require(msg.sender != address(0), "Governor: zero sender");
         require(targets.length == values.length && values.length == calldatas.length, "Governor: arity mismatch");
         require(token.getVotes(msg.sender) >= PROPOSAL_THRESHOLD, "Governor: below threshold");
 
@@ -59,11 +69,15 @@ contract GovernorAlpha is ReentrancyGuard {
         Proposal storage p = proposals[proposalId];
         p.id = proposalId;
         p.proposer = msg.sender;
-        p.targets = targets;
-        p.values = values;
-        p.calldatas = calldatas;
         p.startBlock = block.number + VOTING_DELAY;
         p.endBlock = block.number + VOTING_DELAY + VOTING_PERIOD;
+        p.earliestExecutionBlock = p.endBlock + TIMELOCK_DELAY;
+
+        for (uint256 i = 0; i < targets.length; i++) {
+            p.targets.push(targets[i]);
+            p.values.push(values[i]);
+            p.calldatas.push(calldatas[i]);
+        }
 
         emit ProposalCreated(proposalId, msg.sender, p.startBlock, p.endBlock);
     }
@@ -72,26 +86,27 @@ contract GovernorAlpha is ReentrancyGuard {
     /// @param proposalId The proposal to vote on.
     /// @param support True for yes, false for no.
     function vote(uint256 proposalId, bool support) external {
+        require(msg.sender != address(0), "Governor: zero sender");
         Proposal storage p = proposals[proposalId];
         require(block.number >= p.startBlock && block.number <= p.endBlock, "Governor: voting closed");
-        // BUG: Uses tx.origin instead of msg.sender — allows phishing attacks where
-        // a malicious contract can vote on behalf of the original caller.
-        require(!p.hasVoted[tx.origin], "Governor: already voted");
-        p.hasVoted[tx.origin] = true;
+        require(!p.hasVoted[msg.sender], "Governor: already voted");
+        p.hasVoted[msg.sender] = true;
 
-        uint256 weight = token.getPastVotes(tx.origin, p.startBlock);
+        uint256 weight = token.getPastVotes(msg.sender, p.startBlock);
+        require(weight > 0, "Governor: no voting power");
         if (support) {
             p.forVotes += weight;
         } else {
             p.againstVotes += weight;
         }
 
-        emit VoteCast(tx.origin, proposalId, support, weight);
+        emit VoteCast(msg.sender, proposalId, support, weight);
     }
 
     /// @notice Execute a succeeded proposal.
     /// @param proposalId The proposal to execute.
     function execute(uint256 proposalId) external payable nonReentrant {
+        require(msg.sender != address(0), "Governor: zero sender");
         Proposal storage p = proposals[proposalId];
         require(!p.executed, "Governor: already executed");
         require(block.number > p.endBlock, "Governor: voting not ended");
@@ -99,8 +114,8 @@ contract GovernorAlpha is ReentrancyGuard {
         // votes can pass, allowing governance takeover with dust amounts.
         require(p.forVotes > p.againstVotes, "Governor: proposal defeated");
 
-        // BUG: No timelock delay on execution — proposals execute instantly after voting
-        // ends, giving no time for users to exit if a malicious proposal passes.
+        require(block.number >= p.earliestExecutionBlock, "Governor: timelock active");
+
         p.executed = true;
         for (uint256 i = 0; i < p.targets.length; i++) {
             (bool ok, ) = p.targets[i].call{value: p.values[i]}(p.calldatas[i]);
@@ -113,6 +128,7 @@ contract GovernorAlpha is ReentrancyGuard {
     /// @notice Cancel a proposal. Only the proposer can cancel.
     /// @param proposalId The proposal to cancel.
     function cancel(uint256 proposalId) external {
+        require(msg.sender != address(0), "Governor: zero sender");
         Proposal storage p = proposals[proposalId];
         require(msg.sender == p.proposer, "Governor: not proposer");
         require(!p.executed, "Governor: already executed");
