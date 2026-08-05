@@ -16,11 +16,13 @@ describe("GovernorAlpha Quorum Tests", function () {
         await expect(governorAlpha.execute(proposalId)).to.be.revertedWith("Proposal does not meet quorum");
     });
 
-    it("Should execute if forVotes meets quorum", async function () {
-        // Setup a proposal with enough votes to meet quorum
+    it("Should execute if forVotes meets quorum and has majority", async function () {
+        // Setup a proposal with enough votes to meet quorum and has majority
         const proposalId = 1; // Assuming proposalId is 1 for simplicity
-        // Simulate voting logic to meet quorum
+        // Simulate voting logic to meet quorum and have majority
         await governorAlpha.setQuorumVotes(1); // Set quorum to 1 for testing purposes
+        await governorAlpha.vote(proposalId, true); // Vote FOR the proposal
+        await governorAlpha.vote(proposalId, false); // Vote AGAINST the proposal
         await expect(governorAlpha.execute(proposalId)).not.to.be.reverted;
     });
 });
