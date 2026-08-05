@@ -1,46 +1,141 @@
-"""JWT authentication middleware for the OpenAgents API."""
+"""JWT authentication middleware for the OpenAgents API.
+
+@generated-by: chico10117
+@generated-at: 2026-08-05T06:17:10Z
+@runtime: macOS arm64, working_dir=/tmp/openagents-auth, shell=zsh
+@platform-instructions: private session material intentionally omitted
+"""
+
+import logging
+import os
+import secrets
+from datetime import datetime, timedelta, timezone
+from threading import RLock
+from typing import Optional
+from uuid import uuid4
 
 import jwt
-import os
-from fastapi import Request, HTTPException, Depends
+from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from datetime import datetime, timedelta
-from typing import Optional
 
-# BUG: No fallback — if JWT_SECRET is not set, os.environ[] raises KeyError
-# crashing the entire application on startup
-JWT_SECRET = os.environ["JWT_SECRET"]
+logger = logging.getLogger(__name__)
+
+# A missing development secret should not prevent the API from importing. An
+# ephemeral fallback avoids shipping a reusable signing secret; operators must
+# set JWT_SECRET in deployments where tokens need to survive a restart.
+JWT_SECRET = os.getenv("JWT_SECRET")
+if not JWT_SECRET:
+    JWT_SECRET = secrets.token_urlsafe(32)
+    logger.warning(
+        "JWT_SECRET is not set; using an ephemeral development signing secret"
+    )
+
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 REFRESH_TOKEN_EXPIRE_DAYS = 30
 
 security = HTTPBearer()
+revoked_tokens: set[str] = set()
+_revocation_lock = RLock()
 
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _encode_token(
+    data: dict,
+    token_type: str,
+    expires_delta: timedelta,
+) -> str:
     to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
-    to_encode.update({"exp": expire, "iat": datetime.utcnow(), "type": "access"})
+    now = _utcnow()
+    to_encode.update(
+        {
+            "exp": now + expires_delta,
+            "iat": now,
+            "jti": uuid4().hex,
+            "type": token_type,
+        }
+    )
     return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
-def create_refresh_token(data: dict) -> str:
-    to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
-    to_encode.update({"exp": expire, "iat": datetime.utcnow(), "type": "refresh"})
-    return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
-
-
-def decode_token(token: str) -> dict:
+def _decode_token(token: str, verify_exp: bool = True) -> dict:
+    options = {"verify_exp": verify_exp}
+    if verify_exp:
+        options["require"] = ["exp", "iat", "jti", "type"]
     try:
-        # BUG: Algorithm not pinned in decode — attacker can forge a token with
-        # alg: "none" and bypass signature verification entirely
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256", "none"])
-        return payload
+        payload = jwt.decode(
+            token,
+            JWT_SECRET,
+            algorithms=[JWT_ALGORITHM],
+            options=options,
+        )
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token has expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+    return payload
+
+
+def _is_revoked(jti: Optional[str]) -> bool:
+    with _revocation_lock:
+        return bool(jti) and jti in revoked_tokens
+
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    return _encode_token(
+        data,
+        "access",
+        expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
+    )
+
+
+def create_refresh_token(data: dict) -> str:
+    return _encode_token(
+        data,
+        "refresh",
+        timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+    )
+
+
+def decode_token(token: str) -> dict:
+    payload = _decode_token(token)
+    if _is_revoked(payload.get("jti")):
+        raise HTTPException(status_code=401, detail="Token has been revoked")
+    return payload
+
+
+def revoke_token(token: str) -> str:
+    """Revoke a signed token by its unique JWT ID."""
+    payload = _decode_token(token, verify_exp=False)
+    jti = payload.get("jti")
+    if not jti:
+        raise HTTPException(status_code=401, detail="Token has no revocation ID")
+    with _revocation_lock:
+        revoked_tokens.add(jti)
+    return jti
+
+
+def refresh_access_token(refresh_token: str) -> dict:
+    """Issue a new access token only from a valid, non-revoked refresh token."""
+    payload = decode_token(refresh_token)
+    if payload.get("type") != "refresh":
+        raise HTTPException(status_code=401, detail="Invalid refresh token type")
+
+    identity = {
+        key: payload[key]
+        for key in ("sub", "address", "roles")
+        if key in payload
+    }
+    return {
+        "token": create_access_token(identity),
+        "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    }
 
 
 async def get_current_user(
@@ -52,8 +147,7 @@ async def get_current_user(
     if payload.get("type") != "access":
         raise HTTPException(status_code=401, detail="Invalid token type")
 
-    # BUG: No token revocation check — logged-out or compromised tokens
-    # remain valid until they naturally expire
+    # decode_token performs signature, expiry, and revocation checks first.
     user_data = {
         "id": payload.get("sub"),
         "address": payload.get("address"),

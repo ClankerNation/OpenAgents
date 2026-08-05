@@ -3,6 +3,11 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+try:
+    from .middleware.auth import refresh_access_token, revoke_token
+except ImportError:  # Supports `uvicorn main:app` from the api directory.
+    from middleware.auth import refresh_access_token, revoke_token
+
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
@@ -42,6 +47,14 @@ class LeaderboardEntry(BaseModel):
 # In-memory store (placeholder for DB)
 agents_cache: dict = {}
 tasks_cache: dict = {}
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+
+class RevokeTokenRequest(BaseModel):
+    token: str
 
 
 @app.get("/agents", response_model=list[AgentResponse])
@@ -110,3 +123,14 @@ async def health():
         "tasks_indexed": len(tasks_cache),
         "timestamp": datetime.utcnow().isoformat(),
     }
+
+
+@app.post("/auth/refresh")
+async def refresh_auth_token(request: RefreshTokenRequest):
+    return refresh_access_token(request.refresh_token)
+
+
+@app.post("/auth/revoke")
+async def revoke_auth_token(request: RevokeTokenRequest):
+    revoke_token(request.token)
+    return {"revoked": True}
