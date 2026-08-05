@@ -18,6 +18,7 @@ contract AMMPool {
     uint256 public reserveB;
     uint256 public totalLiquidity;
     uint256 public constant FEE_BPS = 30; // 0.3%
+    uint256 public constant MINIMUM_LIQUIDITY = 1000;
 
     mapping(address => uint256) public liquidity;
 
@@ -30,14 +31,19 @@ contract AMMPool {
         tokenB = IERC20(_tokenB);
     }
 
-    // BUG: No minimum liquidity lock — first LP can add tiny liquidity then remove it all,
-    // enabling a well-known inflation attack where attacker donates tokens to manipulate
-    // share price and steal from the next depositor
     function addLiquidity(uint256 amountA, uint256 amountB) external returns (uint256 lpTokens) {
         require(amountA > 0 && amountB > 0, "Zero amounts");
 
         if (totalLiquidity == 0) {
-            lpTokens = _sqrt(amountA * amountB);
+            uint256 rootK = _sqrt(amountA * amountB);
+            require(rootK > MINIMUM_LIQUIDITY, "Insufficient liquidity");
+
+            // Permanently lock the first 1000 LP units so the pool can never be
+            // reduced to a zero-liquidity state. This prevents a first-depositor
+            // donation from changing the share-price denominator for the next LP.
+            liquidity[address(0)] = MINIMUM_LIQUIDITY;
+            totalLiquidity = MINIMUM_LIQUIDITY;
+            lpTokens = rootK - MINIMUM_LIQUIDITY;
         } else {
             uint256 lpA = (amountA * totalLiquidity) / reserveA;
             uint256 lpB = (amountB * totalLiquidity) / reserveB;
@@ -117,5 +123,13 @@ contract AMMPool {
 
     function getReserves() external view returns (uint256, uint256) {
         return (reserveA, reserveB);
+    }
+
+    /// @notice Reconcile internal reserves with token balances held by the pool.
+    /// @dev Direct token donations are intentionally ignored by pricing and LP
+    /// accounting until an explicit sync is requested.
+    function sync() external {
+        reserveA = tokenA.balanceOf(address(this));
+        reserveB = tokenB.balanceOf(address(this));
     }
 }
