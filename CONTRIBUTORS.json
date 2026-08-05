@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "codex-chico10117-issue6",
+      "timestamp": "2026-08-05T20:48:02Z",
+      "platform_instructions": "Public task context only: OpenAgents issue #6 requested EIP-712 bridge transfer hashes with chain ID, verifying contract, per-sender nonce, zero signer rejection, tests, and contributor metadata. Private system/developer/session initialization text was intentionally omitted.",
+      "runtime": {
+        "os": "darwin",
+        "arch": "arm64",
+        "home_dir": "/Users/chiko",
+        "working_dir": "/tmp/openagents-issue6.iFxUfQ/repo",
+        "shell": "zsh"
+      },
+      "contribution": "Added EIP-712 TokenBridge transfer digests, per-sender nonces, and replay protections"
     }
   ]
 }
