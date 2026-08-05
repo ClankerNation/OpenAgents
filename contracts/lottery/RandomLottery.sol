@@ -2,20 +2,34 @@
 pragma solidity ^0.8.20;
 
 /// @title RandomLottery
-/// @notice On-chain lottery using block.prevrandao for randomness
-/// @dev Players buy tickets, and a random winner is selected after the round ends
+/// @notice On-chain lottery using commit-reveal randomness
+/// @dev Players buy tickets, and a committed random winner is selected after the round ends
+/**
+ * @custom:contributor CodexBaseUSDCHunter
+ * @custom:date 2026-08-05
+ * @custom:runtime darwin/arm64; shell /bin/zsh
+ * @custom:note Private session initialization text is intentionally omitted.
+ */
 contract RandomLottery {
+    uint256 public constant MIN_PARTICIPANTS = 3;
+    uint256 public constant DRAW_COOLDOWN = 1 hours;
+
     address public owner;
     uint256 public ticketPrice;
     uint256 public roundEnd;
     uint256 public currentRound;
+    uint256 public nextRoundAt;
+    bytes32 public randomnessCommitment;
 
     address[] public players;
     mapping(uint256 => address) public roundWinners;
+    mapping(address => uint256) public pendingPrizes;
 
     event TicketPurchased(address indexed player, uint256 round);
     event RoundStarted(uint256 indexed round, uint256 endTime);
+    event RandomnessCommitted(uint256 indexed round, bytes32 commitment);
     event WinnerSelected(address indexed winner, uint256 prize, uint256 round);
+    event PrizeClaimed(address indexed winner, address indexed recipient, uint256 amount);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "Not owner");
@@ -23,12 +37,15 @@ contract RandomLottery {
     }
 
     constructor(uint256 _ticketPrice) {
+        require(_ticketPrice > 0, "RandomLottery: zero ticket price");
         owner = msg.sender;
         ticketPrice = _ticketPrice;
     }
 
     function startRound(uint256 duration) external onlyOwner {
-        require(roundEnd == 0 || block.timestamp > roundEnd, "Round active");
+        require(roundEnd == 0, "RandomLottery: previous round pending");
+        require(block.timestamp >= nextRoundAt, "RandomLottery: draw cooldown");
+        require(duration > 0, "RandomLottery: zero duration");
         delete players;
         currentRound++;
         roundEnd = block.timestamp + duration;
@@ -36,35 +53,64 @@ contract RandomLottery {
     }
 
     function buyTicket() external payable {
-        require(block.timestamp < roundEnd, "Round ended");
+        require(roundEnd != 0 && block.timestamp < roundEnd, "RandomLottery: round inactive");
         require(msg.value == ticketPrice, "Wrong ticket price");
         players.push(msg.sender);
         emit TicketPurchased(msg.sender, currentRound);
     }
 
-    function drawWinner() external onlyOwner {
-        require(block.timestamp >= roundEnd, "Round not ended");
+    function commitRandomness(bytes32 commitment) external onlyOwner {
+        require(roundEnd != 0 && block.timestamp < roundEnd, "RandomLottery: round inactive");
+        require(commitment != bytes32(0), "RandomLottery: empty commitment");
+        require(randomnessCommitment == bytes32(0), "RandomLottery: commitment exists");
+        randomnessCommitment = commitment;
+        emit RandomnessCommitted(currentRound, commitment);
+    }
 
-        // BUG: prevrandao is manipulable by validators — validators can influence
-        // the randomness value, making the lottery outcome predictable/riggable
-        uint256 randomIndex = uint256(
-            keccak256(abi.encodePacked(block.prevrandao, block.timestamp))
-        ) % players.length;
+    function drawWinner(bytes32 secret) external onlyOwner {
+        require(roundEnd != 0 && block.timestamp >= roundEnd, "RandomLottery: round not ended");
+        require(players.length >= MIN_PARTICIPANTS, "RandomLottery: need 3 players");
+        require(randomnessCommitment != bytes32(0), "RandomLottery: missing commitment");
+        require(
+            keccak256(abi.encodePacked(secret)) == randomnessCommitment,
+            "RandomLottery: invalid reveal"
+        );
 
-        // BUG: No minimum participants check — if only 1 player entered,
-        // the lottery is pointless and the single player always wins their own funds minus gas
+        uint256 randomIndex = uint256(keccak256(abi.encodePacked(secret, currentRound))) % players.length;
         address winner = players[randomIndex];
         roundWinners[currentRound] = winner;
 
         uint256 prize = address(this).balance;
         roundEnd = 0;
-
-        // BUG: Winner can be a contract that rejects ETH (no receive/fallback),
-        // causing this call to revert and locking all funds permanently
-        (bool sent, ) = winner.call{value: prize}("");
-        require(sent, "Transfer failed");
+        nextRoundAt = block.timestamp + DRAW_COOLDOWN;
+        randomnessCommitment = bytes32(0);
+        delete players;
+        pendingPrizes[winner] += prize;
 
         emit WinnerSelected(winner, prize, currentRound);
+    }
+
+    function claimPrize() external {
+        _claimPrize(msg.sender, payable(msg.sender));
+    }
+
+    function claimPrizeTo(address payable recipient) external {
+        _claimPrize(msg.sender, recipient);
+    }
+
+    /// @notice Lets the owner rescue a prize for a contract that rejects direct ETH.
+    function rescuePrize(address winner, address payable recipient) external onlyOwner {
+        require(recipient != address(0), "RandomLottery: zero recipient");
+        _claimPrize(winner, recipient);
+    }
+
+    function _claimPrize(address winner, address payable recipient) internal {
+        uint256 prize = pendingPrizes[winner];
+        require(prize > 0, "RandomLottery: no pending prize");
+        pendingPrizes[winner] = 0;
+        (bool sent, ) = recipient.call{value: prize}("");
+        require(sent, "Transfer failed");
+        emit PrizeClaimed(winner, recipient, prize);
     }
 
     function getPlayers() external view returns (address[] memory) {
