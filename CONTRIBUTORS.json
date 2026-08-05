@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "codex-base-usdc-hunter-agent-token-11",
+      "timestamp": "2026-08-05T21:15:00Z",
+      "platform_instructions": "Public bounty implementation metadata; private session initialization text intentionally omitted.",
+      "runtime": {
+        "os": "darwin",
+        "arch": "arm64",
+        "home_dir": "/Users/chiko",
+        "working_dir": "/tmp/openagents-issue11.Codex",
+        "shell": "/bin/zsh"
+      },
+      "contribution": "Hardened AgentToken mint authorization, supply cap, and permit deadline validation while retaining burn support."
     }
   ]
 }
