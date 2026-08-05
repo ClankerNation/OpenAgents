@@ -43,13 +43,13 @@
     },
     {
       "name": "chico10117",
-      "timestamp": "2026-08-05T06:17:10Z",
+      "timestamp": "2026-08-05T15:08:01Z",
       "platform_instructions": "Private platform and session instructions intentionally omitted; public reproducibility metadata is recorded in the patch and test commands.",
       "runtime": {
         "os": "macOS",
         "arch": "arm64",
         "home_dir": "/Users/chiko",
-        "working_dir": "/tmp/openagents-auth",
+        "working_dir": "/tmp/openagents-auth-rework",
         "shell": "zsh"
       },
       "contribution": "Hardened JWT verification and added revocation and refresh endpoints"

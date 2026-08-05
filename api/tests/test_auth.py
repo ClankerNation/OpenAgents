@@ -63,9 +63,19 @@ def test_refresh_requires_refresh_token_and_issues_access_token():
     assert payload["type"] == "access"
     assert payload["sub"] == "agent-1"
     assert payload["roles"] == ["solver"]
+    assert refreshed["refresh_token"]
+
+    with pytest.raises(HTTPException) as error:
+        auth.refresh_access_token(tokens["refresh_token"])
+    assert error.value.status_code == 401
 
     with pytest.raises(HTTPException) as error:
         auth.refresh_access_token(tokens["token"])
+    assert error.value.status_code == 401
+
+    malformed_refresh = auth.create_refresh_token({"address": "0xabc"})
+    with pytest.raises(HTTPException) as error:
+        auth.refresh_access_token(malformed_refresh)
     assert error.value.status_code == 401
 
 
@@ -79,6 +89,7 @@ def test_auth_endpoints_refresh_and_revoke():
     )
     assert refresh_response.status_code == 200
     assert refresh_response.json()["token"]
+    assert refresh_response.json()["refresh_token"]
 
     revoke_response = client.post(
         "/auth/revoke",

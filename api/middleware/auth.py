@@ -1,8 +1,8 @@
 """JWT authentication middleware for the OpenAgents API.
 
 @generated-by: chico10117
-@generated-at: 2026-08-05T06:17:10Z
-@runtime: macOS arm64, working_dir=/tmp/openagents-auth, shell=zsh
+@generated-at: 2026-08-05T15:08:01Z
+@runtime: macOS arm64, working_dir=/tmp/openagents-auth-rework, shell=zsh
 @platform-instructions: private session material intentionally omitted
 """
 
@@ -87,6 +87,14 @@ def _is_revoked(jti: Optional[str]) -> bool:
         return bool(jti) and jti in revoked_tokens
 
 
+def _revoke_jti(jti: Optional[str]) -> str:
+    if not jti:
+        raise HTTPException(status_code=401, detail="Token has no revocation ID")
+    with _revocation_lock:
+        revoked_tokens.add(jti)
+    return jti
+
+
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     return _encode_token(
         data,
@@ -113,12 +121,7 @@ def decode_token(token: str) -> dict:
 def revoke_token(token: str) -> str:
     """Revoke a signed token by its unique JWT ID."""
     payload = _decode_token(token, verify_exp=False)
-    jti = payload.get("jti")
-    if not jti:
-        raise HTTPException(status_code=401, detail="Token has no revocation ID")
-    with _revocation_lock:
-        revoked_tokens.add(jti)
-    return jti
+    return _revoke_jti(payload.get("jti"))
 
 
 def refresh_access_token(refresh_token: str) -> dict:
@@ -132,10 +135,15 @@ def refresh_access_token(refresh_token: str) -> dict:
         for key in ("sub", "address", "roles")
         if key in payload
     }
-    return {
-        "token": create_access_token(identity),
-        "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-    }
+    if not identity.get("sub"):
+        raise HTTPException(status_code=401, detail="Invalid refresh token payload")
+    # Rotate the refresh token so a stolen token cannot be replayed after use.
+    _revoke_jti(payload.get("jti"))
+    return generate_login_tokens(
+        identity["sub"],
+        identity.get("address", ""),
+        identity.get("roles", []),
+    )
 
 
 async def get_current_user(
