@@ -24,18 +24,21 @@ contract GovernorAlpha {
 
     function setQuorumVotes(uint _quorumVotes) public onlyAdmin {
         quorumVotes = _quorumVotes;
+    function execute(uint proposalId) public {
+    function execute(uint proposalId) public {
+        require(proposals[proposalId].forVotes >= quorumVotes, "Proposal does not meet quorum");
+        // Existing execute logic...
     }
-
-    function setQuorumVotes(uint _quorumVotes) public onlyAdmin {
-        quorumVotes = _quorumVotes;
     }
-// Create a new function in GovernorAlpha.sol to set QUORUM_VOTES by admin
+        // Existing execute logic...
+    }
+    }
 //
 // This is one self-contained piece of a larger issue: https://github.com/ClankerNation/OpenAgents/issues/107
 //
 // OTHER WORK IS HAPPENING ON THIS REPOSITORY AT THE SAME TIME.
 // Do NOT implement, prepare for, or depend on any of these — they are being done separately and will arrive in their own pull requests:
-        quorumVotes = _quorumVotes;
+        require(proposal.forVotes >= quorumVotes, 'GovernorAlpha::execute: quorum not reached');
 //   - Write tests to ensure proposals above quorum with majority execute normally
 //   - Write tests to ensure admin can update QUORUM_VOTES
     function setQuorumVotes(uint _quorumVotes) public onlyAdmin {
