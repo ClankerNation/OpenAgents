@@ -30,7 +30,9 @@ contract GovernorAlpha is ReentrancyGuard {
     uint256 public constant VOTING_DELAY = 1; // blocks
     uint256 public constant VOTING_PERIOD = 17280; // ~3 days at 15s blocks
     uint256 public constant PROPOSAL_THRESHOLD = 100_000e18;
-
+    uint256 public constant VOTING_PERIOD = 17280; // ~3 days at 15s blocks
+    uint256 public constant PROPOSAL_THRESHOLD = 100_000e18;
+uint256 public constant QUORUM_VOTES = 40000e18; // 4% of total supply
     mapping(uint256 => Proposal) public proposals;
 
     event ProposalCreated(uint256 indexed id, address proposer, uint256 startBlock, uint256 endBlock);
