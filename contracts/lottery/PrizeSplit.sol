@@ -46,7 +46,7 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 
-function claimPrize(address[] calldata winners, uint256[] calldata amounts) external nonReentrant {
+    function claimPrize(address[] calldata winners, uint256[] calldata amounts) external nonReentrant {
         require(winners.length > 0, "No winners");
         require(winners.length == amounts.length, "Mismatched winners and amounts");
         uint256 totalAmount;
