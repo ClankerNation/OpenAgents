@@ -51,21 +51,20 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
         require(winners.length == amounts.length, "Mismatched winners and amounts");
         uint256 totalAmount;
         for (uint256 i = 0; i < amounts.length; i++) {
+            require(winners[i] != address(0), "Zero address winner");
             totalAmount += amounts[i];
         }
         require(address(this).balance >= totalAmount, "Insufficient balance");
-        uint256 dust;
+        uint256 dust = address(this).balance - totalAmount;
         for (uint256 i = 0; i < winners.length; i++) {
-            if (i == winners.length - 1) {
-                winners[i].transfer(address(this).balance);
-            } else {
-                winners[i].transfer(amounts[i]);
-                dust += address(this).balance - amounts[i];
-            }
+            bool success = payable(winners[i]).send(amounts[i]);
+            require(success, "Transfer failed");
         }
-        if (dust > 0 && winners.length > 0) {
-            winners[winners.length - 1].transfer(dust);
+        if (dust > 0) {
+            bool success = payable(winners[winners.length - 1]).send(dust);
+            require(success, "Dust transfer failed");
         }
+    }
     }
         require(winners.length == amounts.length, "Mismatched winners and amounts");
 
