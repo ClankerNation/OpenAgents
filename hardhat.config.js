@@ -1,7 +1,6 @@
 require("@nomicfoundation/hardhat-toolbox");
 
 module.exports = {
-  solidity: {
     version: "0.8.20",
     settings: {
       optimizer: {
@@ -9,7 +8,11 @@ module.exports = {
         runs: 200,
       },
     },
-  },
+    overrides: {
+      "@openzeppelin/contracts": {
+        version: "^0.8.24",
+      },
+    },
   networks: {
     hardhat: {},
     sepolia: {

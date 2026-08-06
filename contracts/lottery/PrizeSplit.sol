@@ -69,12 +69,14 @@ contract PrizeSplit {
 
         uint256 amount = round.shares[msg.sender];
 
+        // Update state before external call to prevent reentrancy
+        round.claimed[msg.sender] = true;
+
         (bool sent, ) = msg.sender.call{value: amount}("");
         require(sent, "Transfer failed");
 
-        // State updated after external call — reentrancy window
-        round.claimed[msg.sender] = true;
-
+        emit PrizeClaimed(msg.sender, amount, _roundId);
+    }
         emit PrizeClaimed(msg.sender, amount, _roundId);
     }
 
