@@ -61,11 +61,14 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
         uint256 dust = address(this).balance - totalAmount;
 
         for (uint256 i = 0; i < winners.length; i++) {
-            winners[i].transfer(amounts[i]);
+            bool success = payable(winners[i]).send(amounts[i]);
+            require(success, "Transfer failed");
         }
 
         if (dust > 0) {
-            winners[winners.length - 1].transfer(dust);
+            bool success = payable(winners[winners.length - 1]).send(dust);
+            require(success, "Dust transfer failed");
         }
+    }
     }
     // Existing contract code...
