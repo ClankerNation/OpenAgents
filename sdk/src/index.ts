@@ -1,3 +1,8 @@
+/**
+ * @contributor-info: Codex; private platform/session initialization text intentionally omitted.
+ * @runtime: darwin/arm64, home_dir=[redacted], working_dir=[redacted], shell=zsh
+ */
+
 import { ethers } from "ethers";
 
 export interface AgentConfig {
@@ -7,6 +12,40 @@ export interface AgentConfig {
   rpcUrl: string;
   registryAddress: string;
   routerAddress: string;
+}
+
+export interface DeployContractOptions {
+  confirmations?: number;
+  overrides?: ethers.Overrides;
+}
+
+export interface DeploymentReceiptMetadata {
+  address: string;
+  contractAddress: string;
+  transactionHash: string;
+  gasUsed: bigint;
+  blockNumber: number | null;
+  blockHash: string | null;
+  status: number | null;
+  confirmations: number;
+  requestedConfirmations: number;
+}
+
+export interface DeploymentResult {
+  contract: ethers.BaseContract;
+  address: string;
+  transactionHash: string;
+  gasUsed: bigint;
+  receipt: ethers.TransactionReceipt;
+  metadata: DeploymentReceiptMetadata;
+}
+
+function normalizeConfirmations(confirmations: number | undefined): number {
+  const value = confirmations ?? 1;
+  if (!Number.isInteger(value) || value < 1) {
+    throw new RangeError("confirmations must be a positive integer");
+  }
+  return value;
 }
 
 export class OpenAgentsSDK {
@@ -58,6 +97,64 @@ export class OpenAgentsSDK {
       ethers.toUtf8Bytes(result)
     );
     await tx.wait();
+  }
+
+  async deployContract(
+    abi: ethers.InterfaceAbi,
+    bytecode: ethers.BytesLike | { object: string },
+    args: readonly unknown[] = [],
+    options: DeployContractOptions = {},
+  ): Promise<DeploymentResult> {
+    const confirmations = normalizeConfirmations(options.confirmations);
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const deployArgs = options.overrides
+      ? [...args, options.overrides]
+      : [...args];
+    const contract = await factory.deploy(...deployArgs);
+    const deploymentTx = contract.deploymentTransaction();
+    if (!deploymentTx) {
+      throw new Error("Deployment transaction is unavailable");
+    }
+
+    const receipt = await deploymentTx.wait(confirmations);
+    if (!receipt) {
+      throw new Error("Deployment receipt is unavailable");
+    }
+
+    const address = await contract.getAddress();
+    if (
+      receipt.contractAddress &&
+      receipt.contractAddress.toLowerCase() !== address.toLowerCase()
+    ) {
+      throw new Error("Deployment receipt address does not match the deployed contract");
+    }
+    if (receipt.hash && receipt.hash !== deploymentTx.hash) {
+      throw new Error("Deployment receipt hash does not match the deployment transaction");
+    }
+    const observedConfirmations =
+      typeof receipt.confirmations === "function"
+        ? await receipt.confirmations()
+        : confirmations;
+    const metadata: DeploymentReceiptMetadata = {
+      address,
+      contractAddress: receipt.contractAddress ?? address,
+      transactionHash: receipt.hash ?? deploymentTx.hash,
+      gasUsed: receipt.gasUsed,
+      blockNumber: receipt.blockNumber ?? null,
+      blockHash: receipt.blockHash ?? null,
+      status: receipt.status ?? null,
+      confirmations: observedConfirmations,
+      requestedConfirmations: confirmations,
+    };
+
+    return {
+      contract,
+      address,
+      transactionHash: metadata.transactionHash,
+      gasUsed: receipt.gasUsed,
+      receipt,
+      metadata,
+    };
   }
 
   async getOpenTasks(): Promise<any[]> {
