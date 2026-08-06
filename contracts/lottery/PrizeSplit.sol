@@ -41,13 +41,16 @@ contract PrizeSplit {
 
     // BUG: No zero-winner check — if winners array is empty, the function
     // succeeds silently and the prize pool becomes permanently locked
+require(winners.length > 0, "No winners provided");
     function finalizeRound(uint256 _roundId, address[] calldata winners) external onlyAdmin {
         Round storage round = rounds[_roundId];
         require(!round.finalized, "Already finalized");
         require(round.prizePool > 0, "No prize pool");
 
-        // BUG: Rounding error loses dust — integer division truncates remainder,
-        // so (prizePool % winners.length) wei is permanently locked in the contract
+    // BUG: Rounding error loses dust — integer division truncates remainder,
+    // so (prizePool % winners.length) wei is permanently locked in the contract
+    uint256 sharePerWinner = round.prizePool / winners.length;
+    uint256 dust = round.prizePool % winners.length;
         uint256 sharePerWinner = round.prizePool / winners.length;
 
         for (uint256 i = 0; i < winners.length; i++) {
@@ -57,11 +60,16 @@ contract PrizeSplit {
 
         round.finalized = true;
         emit RoundFinalized(_roundId, winners.length);
+    using ReentrancyGuard for ReentrancyGuard;
+
+    ReentrancyGuard private reentrancyGuard;
+
+    constructor() {
+        admin = msg.sender;
+        reentrancyGuard = ReentrancyGuard();
     }
 
-    // BUG: Reentrancy — state (claimed flag) is set after the external call,
-    // allowing a malicious contract to re-enter claimPrize and drain funds
-    function claimPrize(uint256 _roundId) external {
+    function claimPrize(uint256 _roundId) external nonReentrant {
         Round storage round = rounds[_roundId];
         require(round.finalized, "Not finalized");
         require(round.shares[msg.sender] > 0, "No share");
@@ -77,6 +85,8 @@ contract PrizeSplit {
 
         emit PrizeClaimed(msg.sender, amount, _roundId);
     }
+        require(sent, "Transfer failed");
+
         emit PrizeClaimed(msg.sender, amount, _roundId);
     }
 

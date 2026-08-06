@@ -81,7 +81,5 @@ export async function withRetry<T>(
 export function isRetryable(error: Error): boolean {
   const retryableCodes = ["ETIMEDOUT", "ECONNRESET", "ECONNREFUSED", "429"];
   const message = error.message.toLowerCase();
-  return retryableCodes.some(
-    (code) => message.includes(code.toLowerCase())
-  );
+  return retryableCodes.some((code) => message.includes(code.toLowerCase()));
 }

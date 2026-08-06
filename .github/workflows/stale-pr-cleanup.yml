@@ -2,7 +2,7 @@ name: Close Stale PRs
 
 on:
   schedule:
-    - cron: '0 */12 * * *' # Runs every 12 hours to give more time to review other prs
+    - cron: "0 */12 * * *" # Runs every 12 hours to give more time to review other prs
   workflow_dispatch:
 
 permissions:

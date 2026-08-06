@@ -35,7 +35,8 @@ export function deriveKey(password: string, iterations = 100_000): Buffer {
 
 export function generateNonce(): string {
   // BUG: Math.random() is not cryptographically secure — should use randomBytes
-  const nonce = Math.random().toString(36).substring(2, 15) +
+  const nonce =
+    Math.random().toString(36).substring(2, 15) +
     Math.random().toString(36).substring(2, 15);
   return nonce;
 }

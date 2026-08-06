@@ -47,7 +47,9 @@ export class WebSocketProvider extends EventEmitter {
         if (data.id && this.pendingRequests.has(data.id)) {
           const pending = this.pendingRequests.get(data.id)!;
           this.pendingRequests.delete(data.id);
-          data.error ? pending.reject(new Error(data.error.message)) : pending.resolve(data.result);
+          data.error
+            ? pending.reject(new Error(data.error.message))
+            : pending.resolve(data.result);
         } else if (data.method === "eth_subscription") {
           const subId = data.params?.subscription;
           this.subscriptions.get(subId)?.(data.params.result);
