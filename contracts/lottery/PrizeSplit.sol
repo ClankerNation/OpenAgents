@@ -49,6 +49,25 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
     function claimPrize(address[] calldata winners, uint256[] calldata amounts) external nonReentrant {
         require(winners.length > 0, "No winners");
         require(winners.length == amounts.length, "Mismatched winners and amounts");
+        uint256 totalAmount;
+        for (uint256 i = 0; i < amounts.length; i++) {
+            totalAmount += amounts[i];
+        }
+        require(address(this).balance >= totalAmount, "Insufficient balance");
+        uint256 dust;
+        for (uint256 i = 0; i < winners.length; i++) {
+            if (i == winners.length - 1) {
+                winners[i].transfer(address(this).balance);
+            } else {
+                winners[i].transfer(amounts[i]);
+                dust += address(this).balance - amounts[i];
+            }
+        }
+        if (dust > 0 && winners.length > 0) {
+            winners[winners.length - 1].transfer(dust);
+        }
+    }
+        require(winners.length == amounts.length, "Mismatched winners and amounts");
 
         uint256 totalAmount = 0;
         for (uint256 i = 0; i < amounts.length; i++) {
