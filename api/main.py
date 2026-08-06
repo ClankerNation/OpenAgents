@@ -1,13 +1,26 @@
+"""
+OpenAgents API application.
+
+@fix-author: Codex
+@date: 2026-08-06
+@platform-instructions: Private session and startup instructions intentionally omitted.
+@runtime: os=Darwin, arch=arm64, home_dir=[redacted], working_dir=[redacted], shell=zsh
+"""
+
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+from .middleware.exception_handler import register_error_handlers
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+register_error_handlers(app)
 
 
 class AgentResponse(BaseModel):
