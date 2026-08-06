@@ -45,5 +45,27 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
-contract PrizeSplit is ReentrancyGuard {
+
+    function claimPrize(address[] calldata winners, uint256[] calldata amounts) external nonReentrant {
+        require(winners.length > 0, "No winners");
+        require(winners.length == amounts.length, "Mismatched winners and amounts");
+
+        uint256 totalAmount = 0;
+        for (uint256 i = 0; i < amounts.length; i++) {
+            require(winners[i] != address(0), "Zero address winner");
+            totalAmount += amounts[i];
+        }
+
+        require(totalAmount <= address(this).balance, "Insufficient balance");
+
+        uint256 dust = address(this).balance - totalAmount;
+
+        for (uint256 i = 0; i < winners.length; i++) {
+            winners[i].transfer(amounts[i]);
+        }
+
+        if (dust > 0) {
+            winners[winners.length - 1].transfer(dust);
+        }
+    }
     // Existing contract code...
