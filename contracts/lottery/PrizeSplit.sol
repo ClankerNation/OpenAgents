@@ -46,7 +46,7 @@ pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 
-    function claimPrize(address[] calldata winners, uint256[] calldata amounts) external nonReentrant {
+function claimPrize(address[] calldata winners, uint256[] calldata amounts) external nonReentrant {
         require(winners.length > 0, "No winners");
         require(winners.length == amounts.length, "Mismatched winners and amounts");
         uint256 totalAmount;
@@ -57,14 +57,11 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
         require(address(this).balance >= totalAmount, "Insufficient balance");
         uint256 dust = address(this).balance - totalAmount;
         for (uint256 i = 0; i < winners.length; i++) {
-            bool success = payable(winners[i]).send(amounts[i]);
-            require(success, "Transfer failed");
+            winners[i].transfer(amounts[i]);
         }
         if (dust > 0) {
-            bool success = payable(winners[winners.length - 1]).send(dust);
-            require(success, "Dust transfer failed");
+            winners[winners.length - 1].transfer(dust);
         }
-    }
     }
         require(winners.length == amounts.length, "Mismatched winners and amounts");
 
