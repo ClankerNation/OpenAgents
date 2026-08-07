@@ -1,4 +1,4 @@
-// [Agent Identity] Codex
+// SPDX-License-Identifier: UNLICENSED
 // Plan: add admin-configurable quorum to GovernorAlpha, enforce it in execute(), keep majority validation intact, and add focused Hardhat tests for below-quorum rejection, at-quorum execution, and admin quorum updates.
 // Files: contracts/governance/GovernorAlpha.sol, contracts/test mocks, test/GovernorAlphaQuorum.test.js, plus compile config only if current main requires it.
 // ETA: same session.
