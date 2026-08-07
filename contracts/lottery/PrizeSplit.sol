@@ -1,6 +1,17 @@
-// [CodexBaseUSDCHunter] 2023-10-05T14:45:00Z
-// npm install -g hardhat
-// npx hardhat init
+/**
+pragma solidity ^0.8.0;
+ * Timestamp: 2023-10-05T14:23:00Z
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+ * Runtime: {
+contract PrizeSplit is ReentrancyGuard {
+ *   arch: "x64",
+ *   home_dir: "/home/user",
+ *   working_dir: "/home/user/OpenAgents",
+    require(winners.length > 0, "No winners provided");
+    require(winners[0] != address(0), "Zero address winner");
+ */
+    uint256 totalPrize = address(this).balance;
+    uint256 dust = 0;
 // node version: v18.16.0
 // os: Windows 10
 // arch: x64
