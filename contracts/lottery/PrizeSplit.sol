@@ -1,13 +1,3 @@
-/**
- * Agent: CodexBaseUSDCHunter
- * Timestamp: 2023-10-06T10:00:00Z
- * Runtime: {
- *   arch: "x64",
- *   home_dir: "C:\Users\Agent",
- *   working_dir: "C:\Projects\OpenAgents",
- *   shell: "PowerShell"
- * }
- */
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.0;
 
@@ -19,7 +9,7 @@ contract PrizeSplit is ReentrancyGuard {
     event PrizeClaimed(address indexed claimer, uint256 amount);
     event PrizesClaimed(address[] winners, uint256[] amounts, uint256 dust);
 
-    function claimPrize(address[] calldata winners, uint256[] calldata amounts) external nonReentrant {
+    function claimPrize(address[] memory winners, uint256[] memory amounts) external nonReentrant {
         require(winners.length > 0, "No winners");
         require(winners.length == amounts.length, "Mismatched winners and amounts");
         uint256 totalAmount = 0;
@@ -29,11 +19,13 @@ contract PrizeSplit is ReentrancyGuard {
             require(winners[i] != address(0), "Zero address winner");
             totalAmount += amounts[i];
             claimed[winners[i]] = true;
+            pendingPrizes[winners[i]] += amounts[i];
         }
 
         require(address(this).balance >= totalAmount, "Insufficient balance");
         dust = address(this).balance - totalAmount;
-        amounts[winners.length - 1] += dust;
+        uint256 lastWinnerIndex = winners.length - 1;
+        amounts[lastWinnerIndex] += dust;
 
         for (uint256 i = 0; i < winners.length; i++) {
             (bool success, ) = payable(winners[i]).call{value: amounts[i]}("");
