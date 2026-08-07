@@ -1,7 +1,10 @@
 pragma solidity ^0.8.0;
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
-contract MultiTokenStaking is ReentrancyGuard {
+pragma solidity ^0.8.20;
+{
+    // Your contract code here
+}
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
