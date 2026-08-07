@@ -82,9 +82,7 @@ export class RpcProvider {
     });
 
     const responses: JsonRpcResponse[] = await res.json();
-    return responses
-      .sort((a, b) => a.id - b.id)
-      .map((r) => r.result);
+    return responses.sort((a, b) => a.id - b.id).map((r) => r.result);
   }
 
   async getBlockNumber(): Promise<number> {
@@ -93,7 +91,10 @@ export class RpcProvider {
   }
 
   async getBalance(address: string): Promise<bigint> {
-    const hex = (await this.call("eth_getBalance", [address, "latest"])) as string;
+    const hex = (await this.call("eth_getBalance", [
+      address,
+      "latest",
+    ])) as string;
     return BigInt(hex);
   }
 

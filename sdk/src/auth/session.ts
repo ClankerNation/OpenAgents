@@ -42,7 +42,10 @@ export class SessionManager {
   private persistSession(token: SessionToken): void {
     this.currentToken = token;
     if (typeof window !== "undefined" && window.localStorage) {
-      localStorage.setItem(`session_${this.wallet.address}`, JSON.stringify(token));
+      localStorage.setItem(
+        `session_${this.wallet.address}`,
+        JSON.stringify(token)
+      );
     }
   }
 

@@ -18,13 +18,19 @@ describe("StakingRewards", function () {
     await rewardToken.deployed();
 
     const StakingRewards = await ethers.getContractFactory("StakingRewards");
-    stakingRewards = await StakingRewards.deploy(stakingToken.address, rewardToken.address);
+    stakingRewards = await StakingRewards.deploy(
+      stakingToken.address,
+      rewardToken.address
+    );
     await stakingRewards.deployed();
 
     // Mint tokens for testing
     await stakingToken.mint(staker1.address, ethers.utils.parseEther("1000"));
     await stakingToken.mint(staker2.address, ethers.utils.parseEther("1000"));
-    await rewardToken.mint(stakingRewards.address, ethers.utils.parseEther("10000"));
+    await rewardToken.mint(
+      stakingRewards.address,
+      ethers.utils.parseEther("10000")
+    );
   });
 
   it("should allow staking tokens", async function () {

@@ -53,10 +53,7 @@ export class OpenAgentsSDK {
       ["function completeTask(uint256,bytes)"],
       this.signer
     );
-    const tx = await router.completeTask(
-      taskId,
-      ethers.toUtf8Bytes(result)
-    );
+    const tx = await router.completeTask(taskId, ethers.toUtf8Bytes(result));
     await tx.wait();
   }
 
