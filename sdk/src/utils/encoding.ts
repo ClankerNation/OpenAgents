@@ -1,27 +1,47 @@
 /**
  * ABI encoding/decoding utilities for EVM-compatible contract interactions.
+ * @fix-author ARO-Agentic | 2026-08-18
+ * @runtime os=linux arch=x64 working_dir=/tmp/OpenAgents shell=bash
  */
 
-export type AbiType = "uint256" | "address" | "bytes32" | "string" | "bool";
+export type AbiType =
+  | "uint256"
+  | "address"
+  | "bytes32"
+  | "string"
+  | "bool"
+  | "bytes"
+  | "tuple";
 
 export interface AbiParam {
   type: AbiType;
-  value: string | number | bigint | boolean;
+  value: string | number | bigint | boolean | Uint8Array | AbiParam[];
+  components?: AbiParam[]; // For tuple types
 }
+
+const MAX_UINT256 = BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
 
 export function encodeUint256(value: bigint | number): string {
   const n = BigInt(value);
-  // BUG: No overflow check — values > 2^256-1 silently wrap/truncate
+  if (n < 0n || n > MAX_UINT256) {
+    throw new Error(`encodeUint256: value out of range [0, 2^256-1], got ${n}`);
+  }
   return n.toString(16).padStart(64, "0");
 }
 
 export function encodeAddress(address: string): string {
   const cleaned = address.startsWith("0x") ? address.slice(2) : address;
+  if (!/^[0-9a-fA-F]{40}$/.test(cleaned)) {
+    throw new Error(`encodeAddress: invalid address length or chars: ${address}`);
+  }
   return cleaned.toLowerCase().padStart(64, "0");
 }
 
 export function encodeBytes32(data: string): string {
   const cleaned = data.startsWith("0x") ? data.slice(2) : data;
+  if (cleaned.length > 64) {
+    throw new Error("encodeBytes32: data exceeds 32 bytes");
+  }
   return cleaned.padEnd(64, "0");
 }
 
@@ -29,51 +49,174 @@ export function encodeBool(value: boolean): string {
   return value ? "1".padStart(64, "0") : "0".padStart(64, "0");
 }
 
+export function encodeString(value: string): string {
+  const hex = Buffer.from(value, "utf-8").toString("hex");
+  const lenHex = BigInt(hex.length / 2).toString(16).padStart(64, "0");
+  const paddedData = hex.padEnd(Math.ceil(hex.length / 64) * 64, "0");
+  return lenHex + paddedData;
+}
+
+export function encodeDynamicBytes(value: Uint8Array | string): string {
+  const buf = typeof value === "string" ? Buffer.from(value.replace(/^0x/, ""), "hex") : Buffer.from(value);
+  const lenHex = BigInt(buf.length).toString(16).padStart(64, "0");
+  const hex = buf.toString("hex");
+  const paddedData = hex.padEnd(Math.ceil(hex.length / 64) * 64, "0");
+  return lenHex + paddedData;
+}
+
+function isDynamic(type: AbiType): boolean {
+  return type === "string" || type === "bytes" || type === "tuple";
+}
+
 export function encodeParams(params: AbiParam[]): string {
-  let encoded = "0x";
+  let head = "";
+  let tail = "";
+  let dynamicOffset = params.length * 32;
+
   for (const param of params) {
-    switch (param.type) {
-      case "uint256":
-        encoded += encodeUint256(BigInt(param.value as number));
-        break;
-      case "address":
-        encoded += encodeAddress(param.value as string);
-        break;
-      case "bytes32":
-        encoded += encodeBytes32(param.value as string);
-        break;
-      case "bool":
-        encoded += encodeBool(param.value as boolean);
-        break;
-      case "string":
-        const hexStr = Buffer.from(param.value as string).toString("hex");
-        encoded += hexStr.padEnd(64, "0");
-        break;
+    if (isDynamic(param.type)) {
+      head += BigInt(dynamicOffset).toString(16).padStart(64, "0");
+      let encodedTail = "";
+      if (param.type === "string") {
+        encodedTail = encodeString(param.value as string);
+      } else if (param.type === "bytes") {
+        encodedTail = encodeDynamicBytes(param.value as Uint8Array | string);
+      } else if (param.type === "tuple") {
+        encodedTail = encodeParams(param.components || []).slice(2);
+      }
+      tail += encodedTail;
+      dynamicOffset += (encodedTail.length / 2);
+    } else {
+      switch (param.type) {
+        case "uint256":
+          head += encodeUint256(BigInt(param.value as number | bigint));
+          break;
+        case "address":
+          head += encodeAddress(param.value as string);
+          break;
+        case "bytes32":
+          head += encodeBytes32(param.value as string);
+          break;
+        case "bool":
+          head += encodeBool(param.value as boolean);
+          break;
+        default:
+          throw new Error(`encodeParams: unsupported static type ${param.type}`);
+      }
     }
   }
-  return encoded;
+  return "0x" + head + tail;
 }
 
 export function decodeHex(hex: string): bigint {
-  // BUG: Doesn't validate "0x" prefix — a bare decimal string like "255"
-  // would be parsed as hex 0x255 = 597, silently returning wrong value
+  if (!hex) throw new Error("decodeHex: empty input");
   const cleaned = hex.startsWith("0x") ? hex.slice(2) : hex;
+  if (!/^[0-9a-fA-F]+$/.test(cleaned)) {
+    throw new Error(`decodeHex: invalid hex characters in "${hex}"`);
+  }
   return BigInt("0x" + cleaned);
 }
 
 export function decodeUint256(slot: string): bigint {
-  // BUG: Doesn't handle short values — if slot is less than 64 chars,
-  // no left-padding is applied before parsing, giving wrong results
-  return BigInt("0x" + slot);
+  const cleaned = slot.startsWith("0x") ? slot.slice(2) : slot;
+  const padded = cleaned.padStart(64, "0");
+  return BigInt("0x" + padded);
 }
 
 export function decodeAddress(slot: string): string {
-  const raw = slot.slice(-40);
-  return "0x" + raw.toLowerCase();
+  const raw = slot.startsWith("0x") ? slot.slice(2) : slot;
+  const addr = raw.padStart(64, "0").slice(-40);
+  return "0x" + addr.toLowerCase();
 }
 
 export function decodeBool(slot: string): boolean {
-  return BigInt("0x" + slot) !== 0n;
+  return decodeUint256(slot) !== 0n;
+}
+
+export function decodeString(data: string, offset: number = 0): string {
+  const hex = data.startsWith("0x") ? data.slice(2) : data;
+  const lenSlot = hex.substr(offset, 64);
+  const len = Number(decodeUint256(lenSlot));
+  const dataStart = offset + 64;
+  const strHex = hex.substr(dataStart, len * 2);
+  return Buffer.from(strHex, "hex").toString("utf-8");
+}
+
+export function decodeBytes(data: string, offset: number = 0): Uint8Array {
+  const hex = data.startsWith("0x") ? data.slice(2) : data;
+  const lenSlot = hex.substr(offset, 64);
+  const len = Number(decodeUint256(lenSlot));
+  const dataStart = offset + 64;
+  const bytesHex = hex.substr(dataStart, len * 2);
+  return Uint8Array.from(Buffer.from(bytesHex, "hex"));
+}
+
+export function decodeParameter(data: string, type: AbiType, offset: number = 0): any {
+  const hex = data.startsWith("0x") ? data.slice(2) : data;
+
+  if (type === "uint256") {
+    return decodeUint256(hex.substr(offset, 64));
+  }
+  if (type === "address") {
+    return decodeAddress(hex.substr(offset, 64));
+  }
+  if (type === "bytes32") {
+    return "0x" + hex.substr(offset, 64);
+  }
+  if (type === "bool") {
+    return decodeBool(hex.substr(offset, 64));
+  }
+  if (type === "string") {
+    const ptrSlot = hex.substr(offset, 64);
+    const ptr = Number(decodeUint256(ptrSlot));
+    return decodeString(hex, ptr * 2);
+  }
+  if (type === "bytes") {
+    const ptrSlot = hex.substr(offset, 64);
+    const ptr = Number(decodeUint256(ptrSlot));
+    return decodeBytes(hex, ptr * 2);
+  }
+  if (type === "tuple") {
+    // Simplified tuple decode: assumes all components are static for now
+    // Full recursive dynamic tuple support requires component metadata at call site
+    throw new Error("decodeParameter: tuple decoding requires component metadata; use decodeParams with components");
+  }
+  throw new Error(`decodeParameter: unsupported type ${type}`);
+}
+
+export function decodeParams(data: string, types: AbiParam[]): any[] {
+  const hex = data.startsWith("0x") ? data.slice(2) : data;
+  const results: any[] = [];
+  let headOffset = 0;
+
+  for (const param of types) {
+    if (isDynamic(param.type)) {
+      const ptrSlot = hex.substr(headOffset, 64);
+      const ptr = Number(decodeUint256(ptrSlot));
+      const byteOffset = ptr * 2;
+
+      if (param.type === "string") {
+        results.push(decodeString(hex, byteOffset));
+      } else if (param.type === "bytes") {
+        results.push(decodeBytes(hex, byteOffset));
+      } else if (param.type === "tuple" && param.components) {
+        // Recursive decode for nested tuples at the pointed location
+        const subResults: any[] = [];
+        let subOffset = byteOffset;
+        for (const comp of param.components) {
+          subResults.push(decodeParameter("0x" + hex.substr(subOffset), comp.type, 0));
+          subOffset += 64; // Simplified: only works for static sub-components
+        }
+        results.push(subResults);
+      } else {
+        results.push(null);
+      }
+    } else {
+      results.push(decodeParameter("0x" + hex, param.type, headOffset));
+    }
+    headOffset += 64;
+  }
+  return results;
 }
 
 export function functionSelector(signature: string): string {
