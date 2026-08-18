@@ -1,13 +1,35 @@
-from fastapi import FastAPI, HTTPException, Query
+"""
+OpenAgents API Entry Point
+@fix-author ARO-Agentic | 2026-08-18
+@runtime os=linux arch=x64 working_dir=/tmp/OpenAgents shell=bash
+"""
+
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+from .middleware.errors import (
+    api_error_handler,
+    validation_error_handler,
+    http_exception_handler,
+    RequestIDMiddleware,
+    APIError,
+    NotFoundError,
+)
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+# Register middleware and exception handlers for structured error responses
+app.add_middleware(RequestIDMiddleware)
+app.add_exception_handler(APIError, api_error_handler)
+app.add_exception_handler(RequestValidationError, validation_error_handler)
+app.add_exception_handler(HTTPException, http_exception_handler)
 
 
 class AgentResponse(BaseModel):
@@ -61,7 +83,7 @@ async def list_agents(
 @app.get("/agents/{agent_id}", response_model=AgentResponse)
 async def get_agent(agent_id: str):
     if agent_id not in agents_cache:
-        raise HTTPException(status_code=404, detail="Agent not found")
+        raise NotFoundError(message=f"Agent '{agent_id}' not found", details={"agent_id": agent_id})
     return agents_cache[agent_id]
 
 
@@ -80,7 +102,7 @@ async def list_tasks(
 @app.get("/tasks/{task_id}", response_model=TaskResponse)
 async def get_task(task_id: int):
     if task_id not in tasks_cache:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise NotFoundError(message=f"Task {task_id} not found", details={"task_id": task_id})
     return tasks_cache[task_id]
 
 
