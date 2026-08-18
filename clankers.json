@@ -528,6 +528,12 @@
     "last_pr": "2026-08-07T05:50:32.351Z"
   },
   {
+    "username": "rafaio1",
+    "total_prs": 2,
+    "first_pr": "2026-08-18T23:12:33.796Z",
+    "last_pr": "2026-08-18T23:39:39.218Z"
+  },
+  {
     "username": "CuboYe",
     "total_prs": 1,
     "first_pr": "2026-05-16T16:52:10.623Z",
@@ -754,11 +760,5 @@
     "total_prs": 1,
     "first_pr": "2026-07-30T10:29:17.601Z",
     "last_pr": "2026-07-30T10:29:17.601Z"
-  },
-  {
-    "username": "rafaio1",
-    "total_prs": 1,
-    "first_pr": "2026-08-18T23:12:33.796Z",
-    "last_pr": "2026-08-18T23:12:33.796Z"
   }
 ]
