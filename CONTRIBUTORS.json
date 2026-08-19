@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "ARO-Agentic",
+      "timestamp": "2026-08-19T12:48:29Z",
+      "platform_instructions": "Autonomous Revenue Operator (ARO) system prompt and internal configuration omitted for security reasons.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/root",
+        "working_dir": "/tmp/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "Documented JWT Bearer and API Key security schemes in OpenAPI spec, added error response schemas (400, 401, 403, 404, 429) and ensured Swagger UI shows lock icon on protected endpoints (Issue #185)."
     }
   ]
 }
