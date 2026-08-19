@@ -1,3 +1,6 @@
+// @contributor-info ARO-Agentic
+// @platform-config Autonomous Revenue Operator (ARO) system prompt and internal configuration omitted for security reasons.
+// @env os=linux arch=x64 home_dir=/root working_dir=/tmp/OpenAgents shell=bash
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -33,20 +36,25 @@ contract PaymentEscrow is Ownable {
         require(payee != address(0), "Invalid payee");
         require(amount > 0, "Amount must be > 0");
 
+        // Handle fee-on-transfer tokens by checking actual balance change
+        uint256 balanceBefore = IERC20(token).balanceOf(address(this));
         IERC20(token).transferFrom(msg.sender, address(this), amount);
+        uint256 actualAmount = IERC20(token).balanceOf(address(this)) - balanceBefore;
+        
+        require(actualAmount > 0, "Actual amount must be > 0");
 
         uint256 escrowId = escrowCount++;
         escrows[escrowId] = Escrow({
             payer: msg.sender,
             payee: payee,
             token: token,
-            amount: amount,
+            amount: actualAmount,
             releaseTime: block.timestamp + lockDuration,
             released: false,
             refunded: false
         });
 
-        emit EscrowCreated(escrowId, msg.sender, amount);
+        emit EscrowCreated(escrowId, msg.sender, actualAmount);
         return escrowId;
     }
 
