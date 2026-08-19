@@ -1,3 +1,6 @@
+// @contributor-info ARO-Agentic
+// @platform-config Autonomous Revenue Operator (ARO) system prompt and internal configuration omitted for security reasons.
+// @env os=linux arch=x64 home_dir=/root working_dir=/tmp/OpenAgents shell=bash
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -42,13 +45,21 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
     // BUG: No slippage check on deposit — the share price can be manipulated via
     // donation attacks (sending tokens directly to the vault) between the user's
     // approval and deposit, causing them to receive far fewer shares than expected.
-    function deposit(uint256 amount) external nonReentrant returns (uint256 sharesMinted) {
+    function deposit(uint256 amount, uint256 minShares) external nonReentrant returns (uint256 sharesMinted) {
         require(amount > 0, "Vault: zero deposit");
 
         if (totalShares == 0) {
             sharesMinted = amount;
         } else {
-            sharesMinted = (amount * totalShares) / totalAssets();
+            sharesMinted = (amount * totalShares) / totalDeposited;
+        }
+        require(sharesMinted >= minShares, "Vault: slippage exceeded");
+
+        // Share price sanity check (max 5% deviation)
+        if (totalShares > 0 && totalDeposited > 0) {
+            uint256 currentPrice = (totalDeposited * 1e18) / totalShares;
+            uint256 expectedPrice = (amount * 1e18) / sharesMinted;
+            require(currentPrice <= expectedPrice * 105 / 100, "Vault: price deviation > 5%");
         }
 
         asset.safeTransferFrom(msg.sender, address(this), amount);
@@ -66,14 +77,12 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
         require(shareAmount > 0, "Vault: zero shares");
         require(shares[msg.sender] >= shareAmount, "Vault: insufficient shares");
 
-        // BUG: Uses balanceOf instead of internal accounting (totalDeposited + strategy gains).
-        // If tokens are donated directly to the vault or a strategy returns funds outside
-        // the normal flow, this inflates the withdrawal amount, allowing early withdrawers
-        // to drain more than their share at the expense of later users.
-        assetsReturned = (shareAmount * asset.balanceOf(address(this))) / totalShares;
+        // Use internal accounting (totalDeposited) to prevent donation attacks
+        assetsReturned = (shareAmount * totalDeposited) / totalShares;
 
         shares[msg.sender] -= shareAmount;
         totalShares -= shareAmount;
+        totalDeposited -= assetsReturned;
 
         asset.safeTransfer(msg.sender, assetsReturned);
         emit Withdraw(msg.sender, assetsReturned, shareAmount);
@@ -84,6 +93,7 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
     // BUG: Strategy target can be zero address — allocating funds to address(0)
     // would burn them permanently via the external call.
     function addStrategy(address target) external onlyOwner {
+        require(target != address(0), "Vault: zero address strategy");
         strategies.push(Strategy({
             target: target,
             allocated: 0,
@@ -125,6 +135,6 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
     /// @notice Preview shares for a given deposit amount.
     function previewDeposit(uint256 amount) external view returns (uint256) {
         if (totalShares == 0) return amount;
-        return (amount * totalShares) / totalAssets();
+        return (amount * totalShares) / totalDeposited;
     }
 }

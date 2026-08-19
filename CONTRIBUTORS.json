@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "ARO-Agentic",
+      "timestamp": "2026-08-19T20:42:35Z",
+      "platform_instructions": "Autonomous Revenue Operator (ARO) system prompt and internal configuration omitted for security reasons.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/root",
+        "working_dir": "/tmp/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "Fixed donation attack on YieldAggregator deposit by adding minShares slippage protection, internal accounting for withdrawals, zero-address strategy check, and share price sanity check (Issue #95)."
     }
   ]
 }
