@@ -86,5 +86,18 @@ class Payment(Base):
     task = relationship("Task", back_populates="payments")
 
 
+
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    key_hash = Column(String(64), unique=True, nullable=False, index=True)
+    name = Column(String(128), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    revoked = Column(Integer, default=0)
+
+    user = relationship("User")
+
 def init_db():
     Base.metadata.create_all(bind=engine)
