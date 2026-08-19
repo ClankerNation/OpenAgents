@@ -1,10 +1,21 @@
+// @contributor-info ARO-Agentic
+// @platform-config Autonomous Revenue Operator (ARO) system prompt and internal configuration omitted for security reasons.
+// @env os=linux arch=x64 home_dir=/root working_dir=/tmp/OpenAgents shell=bash
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 import "./AgentRegistry.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+
 
 contract TaskRouter {
+    using SafeERC20 for IERC20;
+
     AgentRegistry public registry;
+    IERC20 public rewardToken;
+    address public owner;
+    uint256 public collectedFees;
 
     enum TaskStatus { Open, Assigned, Completed, Disputed, Cancelled }
 
@@ -27,27 +38,31 @@ contract TaskRouter {
     event TaskCompleted(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskDisputed(uint256 indexed taskId);
 
-    constructor(address _registry, uint256 _platformFee) {
+    constructor(address _registry, uint256 _platformFee, address _rewardToken) {
         registry = AgentRegistry(_registry);
         platformFee = _platformFee;
+        rewardToken = IERC20(_rewardToken);
+        owner = msg.sender;
     }
 
-    function createTask(string calldata description, uint256 deadline) external payable returns (uint256) {
-        require(msg.value > 0, "Reward required");
+    function createTask(string calldata description, uint256 deadline, uint256 rewardAmount) external returns (uint256) {
+        require(rewardAmount > 0, "Reward required");
         require(deadline > block.timestamp, "Invalid deadline");
+
+        rewardToken.safeTransferFrom(msg.sender, address(this), rewardAmount);
 
         uint256 taskId = taskCount++;
         tasks[taskId] = Task({
             creator: msg.sender,
             assignedAgent: bytes32(0),
             description: description,
-            reward: msg.value,
+            reward: rewardAmount,
             deadline: deadline,
             status: TaskStatus.Open,
             result: ""
         });
 
-        emit TaskCreated(taskId, msg.sender, msg.value);
+        emit TaskCreated(taskId, msg.sender, rewardAmount);
         return taskId;
     }
 
@@ -78,9 +93,9 @@ contract TaskRouter {
 
         uint256 fee = task.reward * platformFee / 10000;
         uint256 payout = task.reward - fee;
+        collectedFees += fee;
 
-        (bool success, ) = msg.sender.call{value: payout}("");
-        require(success, "Payout failed");
+        rewardToken.safeTransfer(msg.sender, payout);
 
         emit TaskCompleted(taskId, task.assignedAgent);
     }
@@ -90,9 +105,10 @@ contract TaskRouter {
         require(task.creator == msg.sender, "Not creator");
         require(task.status == TaskStatus.Open, "Cannot cancel");
 
+        uint256 refundAmount = task.reward;
+        task.reward = 0;
         task.status = TaskStatus.Cancelled;
-        (bool success, ) = msg.sender.call{value: task.reward}("");
-        require(success, "Refund failed");
+        rewardToken.safeTransfer(msg.sender, refundAmount);
     }
 
     function disputeTask(uint256 taskId) external {
@@ -104,4 +120,12 @@ contract TaskRouter {
         task.status = TaskStatus.Disputed;
         emit TaskDisputed(taskId);
     }
+
+    function withdrawFees(address to) external {
+        require(msg.sender == owner, "Not owner");
+        uint256 amount = collectedFees;
+        collectedFees = 0;
+        rewardToken.safeTransfer(to, amount);
+    }
+
 }
