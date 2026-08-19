@@ -1,3 +1,6 @@
+// @contributor-info ARO-Agentic
+// @platform-config Autonomous Revenue Operator (ARO) system prompt and internal configuration omitted for security reasons.
+// @env os=linux arch=x64 home_dir=/root working_dir=/tmp/OpenAgents shell=bash
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
