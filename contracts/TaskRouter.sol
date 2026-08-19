@@ -1,9 +1,19 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/*
+ * @fix-author ARO-Agentic | 2026-08-19
+ * @runtime os=linux arch=x64 working_dir=/tmp/OpenAgents shell=bash
+ */
+
 import "./AgentRegistry.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 contract TaskRouter {
+    using ECDSA for bytes32;
+    using MessageHashUtils for bytes32;
+
     AgentRegistry public registry;
 
     enum TaskStatus { Open, Assigned, Completed, Disputed, Cancelled }
@@ -21,15 +31,63 @@ contract TaskRouter {
     mapping(uint256 => Task) public tasks;
     uint256 public taskCount;
     uint256 public platformFee; // basis points
+    
+    mapping(address => uint256) public nonces;
+    mapping(address => uint256) public stakes;
 
     event TaskCreated(uint256 indexed taskId, address indexed creator, uint256 reward);
     event TaskAssigned(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskCompleted(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskDisputed(uint256 indexed taskId);
+    event StakeDeposited(address indexed agent, uint256 amount);
+    event GasReimbursed(address indexed relayer, address indexed agent, uint256 cost);
 
     constructor(address _registry, uint256 _platformFee) {
         registry = AgentRegistry(_registry);
         platformFee = _platformFee;
+    }
+
+    function depositStake() external payable {
+        stakes[msg.sender] += msg.value;
+        emit StakeDeposited(msg.sender, msg.value);
+    }
+
+    function withdrawStake(uint256 amount) external {
+        require(stakes[msg.sender] >= amount, "Insufficient stake");
+        stakes[msg.sender] -= amount;
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, "Withdraw failed");
+    }
+
+    function executeOnBehalf(
+        address agent,
+        bytes calldata data,
+        bytes calldata signature
+    ) external returns (bytes memory) {
+        uint256 nonce = nonces[agent];
+        bytes32 hash = keccak256(abi.encode(address(this), agent, data, nonce));
+        bytes32 ethSignedHash = hash.toEthSignedMessageHash();
+        
+        address signer = ethSignedHash.recover(signature);
+        require(signer == agent, "Invalid signature");
+        
+        nonces[agent]++;
+        
+        uint256 gasStart = gasleft();
+        (bool success, bytes memory result) = address(this).call(data);
+        uint256 gasUsed = gasStart - gasleft() + 21000 + (data.length * 16); 
+        uint256 cost = gasUsed * tx.gasprice;
+        
+        require(stakes[agent] >= cost, "Insufficient stake for gas");
+        stakes[agent] -= cost;
+        
+        require(success, "Execution failed");
+        
+        (bool reimbursed, ) = msg.sender.call{value: cost}("");
+        require(reimbursed, "Reimbursement failed");
+        emit GasReimbursed(msg.sender, agent, cost);
+        
+        return result;
     }
 
     function createTask(string calldata description, uint256 deadline) external payable returns (uint256) {
@@ -104,4 +162,5 @@ contract TaskRouter {
         task.status = TaskStatus.Disputed;
         emit TaskDisputed(taskId);
     }
+    receive() external payable {}
 }
