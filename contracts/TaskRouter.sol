@@ -1,9 +1,14 @@
+// @contributor-info ARO-Agentic
+// @platform-config Autonomous Revenue Operator (ARO) system prompt and internal configuration omitted for security reasons.
+// @env os=linux arch=x64 home_dir=/root working_dir=/tmp/OpenAgents shell=bash
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 import "./AgentRegistry.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 
-contract TaskRouter {
+contract TaskRouter is EIP712 {
     AgentRegistry public registry;
 
     enum TaskStatus { Open, Assigned, Completed, Disputed, Cancelled }
@@ -26,8 +31,17 @@ contract TaskRouter {
     event TaskAssigned(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskCompleted(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskDisputed(uint256 indexed taskId);
+    // Gas sponsorship relay state
+    mapping(bytes32 => uint256) public nonces;
+    mapping(bytes32 => uint256) public agentStake; // Simplified stake tracking for gas reimbursement
+    
+    bytes32 private constant EXECUTE_TYPEHASH = keccak256("ExecuteOnBehalf(address agent,bytes calldata,uint256 nonce)");
+    
+    event GasSponsored(bytes32 indexed agentId, address indexed relayer, uint256 gasUsed);
+    event StakeDeposited(bytes32 indexed agentId, uint256 amount);
 
-    constructor(address _registry, uint256 _platformFee) {
+
+    constructor(address _registry, uint256 _platformFee) EIP712("OpenAgentsTaskRouter", "1") {
         registry = AgentRegistry(_registry);
         platformFee = _platformFee;
     }
@@ -104,4 +118,57 @@ contract TaskRouter {
         task.status = TaskStatus.Disputed;
         emit TaskDisputed(taskId);
     }
+
+    /// @notice Deposit stake for gas sponsorship reimbursement.
+    /// @param agentId The agent ID to credit stake to.
+    function depositStake(bytes32 agentId) external payable {
+        require(msg.value > 0, "Zero stake");
+        agentStake[agentId] += msg.value;
+        emit StakeDeposited(agentId, msg.value);
+    }
+
+    /// @notice Execute a transaction on behalf of an agent using meta-transaction.
+    /// @param agent Address of the agent who signed the request.
+    /// @param data Encoded calldata to execute.
+    /// @param nonce Replay protection nonce.
+    /// @param signature ECDSA signature from the agent.
+    function executeOnBehalf(
+        address agent,
+        bytes calldata data,
+        uint256 nonce,
+        bytes calldata signature
+    ) external returns (bytes memory) {
+        // Verify nonce
+        bytes32 agentId = keccak256(abi.encodePacked(agent));
+        require(nonce == nonces[agentId], "Invalid nonce");
+        
+        // Verify signature using EIP-712
+        bytes32 structHash = keccak256(abi.encode(EXECUTE_TYPEHASH, agent, keccak256(data), nonce));
+        bytes32 digest = _hashTypedDataV4(structHash);
+        address signer = ECDSA.recover(digest, signature);
+        require(signer == agent, "Invalid signature");
+        
+        // Increment nonce to prevent replay
+        nonces[agentId]++;
+        
+        // Execute the call
+        uint256 gasBefore = gasleft();
+        (bool success, bytes memory result) = address(this).call(data);
+        uint256 gasUsed = gasBefore - gasleft();
+        
+        require(success, "Execution failed");
+        
+        // Reimburse relayer from agent's stake (simplified: fixed gas price estimate)
+        // In production, use block.basefee or oracle price
+        uint256 reimbursement = gasUsed * tx.gasprice;
+        require(agentStake[agentId] >= reimbursement, "Insufficient stake for gas");
+        agentStake[agentId] -= reimbursement;
+        
+        (bool paid, ) = msg.sender.call{value: reimbursement}("");
+        require(paid, "Reimbursement failed");
+        
+        emit GasSponsored(agentId, msg.sender, gasUsed);
+        return result;
+    }
+
 }
