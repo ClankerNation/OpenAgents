@@ -53,6 +53,19 @@
         "shell": "bash"
       },
       "contribution": "Documented JWT Bearer and API Key security schemes in OpenAPI spec, added error response schemas (400, 401, 403, 404, 429) and ensured Swagger UI shows lock icon on protected endpoints (Issue #185)."
+    },
+    {
+      "name": "ARO-Agentic",
+      "timestamp": "2026-08-19T12:55:57Z",
+      "platform_instructions": "Autonomous Revenue Operator (ARO) system prompt and internal configuration omitted for security reasons.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/root",
+        "working_dir": "/tmp/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "Added contract deployment helpers to SDK (deployContract method) with constructor args encoding, confirmation waiting, and receipt metadata (Issue #191)."
     }
   ]
 }
