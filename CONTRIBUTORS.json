@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "ARO-Agentic",
+      "timestamp": "2026-08-19T23:51:33Z",
+      "platform_instructions": "Autonomous Revenue Operator (ARO) system prompt and internal configuration omitted for security reasons.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/root",
+        "working_dir": "/tmp/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "Added uint256/int256 bounds checking, 0x prefix validation, 32-byte padding, and signed integer support to ABI encoding utilities (Issue #47)."
     }
   ]
 }
