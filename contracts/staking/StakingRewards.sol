@@ -1,9 +1,13 @@
+// @contributor-info ARO-Agentic
+// @platform-config Autonomous Revenue Operator (ARO) system prompt and internal configuration omitted for security reasons.
+// @env os=linux arch=x64 home_dir=/root working_dir=/tmp/OpenAgents shell=bash
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "../interfaces/IPermit2.sol";
 
 /// @title StakingRewards
 /// @notice Synthetix-style staking rewards distribution contract.
@@ -13,6 +17,7 @@ contract StakingRewards is ReentrancyGuard {
 
     IERC20 public immutable stakingToken;
     IERC20 public immutable rewardsToken;
+    IPermit2 public immutable permit2;
     address public owner;
 
     uint256 public periodFinish;
@@ -42,9 +47,10 @@ contract StakingRewards is ReentrancyGuard {
         _;
     }
 
-    constructor(address _stakingToken, address _rewardsToken) {
+    constructor(address _stakingToken, address _rewardsToken, address _permit2) {
         stakingToken = IERC20(_stakingToken);
         rewardsToken = IERC20(_rewardsToken);
+        permit2 = IPermit2(_permit2);
         owner = msg.sender;
     }
 
@@ -87,6 +93,34 @@ contract StakingRewards is ReentrancyGuard {
         _totalSupply += amount;
         _balances[msg.sender] += amount;
         stakingToken.safeTransferFrom(msg.sender, address(this), amount);
+        emit Staked(msg.sender, amount);
+    }
+
+
+    /// @notice Stake tokens using Permit2 signature.
+    function stakeWithPermit(
+        uint256 amount,
+        uint256 nonce,
+        uint256 deadline,
+        bytes calldata signature
+    ) external nonReentrant updateReward(msg.sender) {
+        require(amount > 0, "Cannot stake 0");
+        
+        ISignatureTransfer.PermitTransferFrom memory permit = ISignatureTransfer.PermitTransferFrom({
+            permitted: ISignatureTransfer.TokenPermissions({token: address(stakingToken), amount: amount}),
+            nonce: nonce,
+            deadline: deadline
+        });
+        
+        ISignatureTransfer.SignatureTransferDetails memory transferDetails = ISignatureTransfer.SignatureTransferDetails({
+            to: address(this),
+            requestedAmount: amount
+        });
+        
+        permit2.permitTransferFrom(permit, transferDetails, msg.sender, signature);
+        
+        _totalSupply += amount;
+        _balances[msg.sender] += amount;
         emit Staked(msg.sender, amount);
     }
 

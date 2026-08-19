@@ -1,5 +1,10 @@
+// @contributor-info ARO-Agentic
+// @platform-config Autonomous Revenue Operator (ARO) system prompt and internal configuration omitted for security reasons.
+// @env os=linux arch=x64 home_dir=/root working_dir=/tmp/OpenAgents shell=bash
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
+
+import "../interfaces/IPermit2.sol";
 
 interface IPriceFeed {
     function getPrice(address token) external view returns (uint256);
@@ -18,6 +23,7 @@ contract LendingPool {
     IPriceFeed public oracle;
     IERC20 public collateralToken;
     IERC20 public borrowToken;
+    IPermit2 public permit2;
 
     // BUG: Liquidation threshold hardcoded to 150% (1.5e18) but the check uses >=,
     // meaning positions at exactly 150% collateral ratio are liquidatable when they
@@ -39,15 +45,43 @@ contract LendingPool {
     event Repaid(address indexed user, uint256 amount);
     event Liquidated(address indexed user, address indexed liquidator, uint256 debtRepaid);
 
-    constructor(address _oracle, address _collateralToken, address _borrowToken) {
+    constructor(address _oracle, address _collateralToken, address _borrowToken, address _permit2) {
         oracle = IPriceFeed(_oracle);
         collateralToken = IERC20(_collateralToken);
         borrowToken = IERC20(_borrowToken);
+        permit2 = IPermit2(_permit2);
     }
 
     function deposit(uint256 amount) external {
         require(amount > 0, "Zero amount");
         require(collateralToken.transferFrom(msg.sender, address(this), amount), "Transfer failed");
+        positions[msg.sender].collateralAmount += amount;
+        totalDeposits += amount;
+        emit Deposited(msg.sender, amount);
+    }
+
+
+    function depositWithPermit(
+        uint256 amount,
+        uint256 nonce,
+        uint256 deadline,
+        bytes calldata signature
+    ) external {
+        require(amount > 0, "Zero amount");
+        
+        ISignatureTransfer.PermitTransferFrom memory permit = ISignatureTransfer.PermitTransferFrom({
+            permitted: ISignatureTransfer.TokenPermissions({token: address(collateralToken), amount: amount}),
+            nonce: nonce,
+            deadline: deadline
+        });
+        
+        ISignatureTransfer.SignatureTransferDetails memory transferDetails = ISignatureTransfer.SignatureTransferDetails({
+            to: address(this),
+            requestedAmount: amount
+        });
+        
+        permit2.permitTransferFrom(permit, transferDetails, msg.sender, signature);
+        
         positions[msg.sender].collateralAmount += amount;
         totalDeposits += amount;
         emit Deposited(msg.sender, amount);

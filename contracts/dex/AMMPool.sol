@@ -1,5 +1,10 @@
+// @contributor-info ARO-Agentic
+// @platform-config Autonomous Revenue Operator (ARO) system prompt and internal configuration omitted for security reasons.
+// @env os=linux arch=x64 home_dir=/root working_dir=/tmp/OpenAgents shell=bash
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
+
+import "../interfaces/IPermit2.sol";
 
 interface IERC20 {
     function transferFrom(address from, address to, uint256 amount) external returns (bool);
@@ -13,6 +18,7 @@ interface IERC20 {
 contract AMMPool {
     IERC20 public tokenA;
     IERC20 public tokenB;
+    IPermit2 public permit2;
 
     uint256 public reserveA;
     uint256 public reserveB;
@@ -25,9 +31,10 @@ contract AMMPool {
     event LiquidityRemoved(address indexed provider, uint256 amountA, uint256 amountB);
     event Swap(address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut);
 
-    constructor(address _tokenA, address _tokenB) {
+    constructor(address _tokenA, address _tokenB, address _permit2) {
         tokenA = IERC20(_tokenA);
         tokenB = IERC20(_tokenB);
+        permit2 = IPermit2(_permit2);
     }
 
     // BUG: No minimum liquidity lock — first LP can add tiny liquidity then remove it all,
@@ -46,6 +53,57 @@ contract AMMPool {
 
         require(tokenA.transferFrom(msg.sender, address(this), amountA), "Transfer A failed");
         require(tokenB.transferFrom(msg.sender, address(this), amountB), "Transfer B failed");
+
+        reserveA += amountA;
+        reserveB += amountB;
+        liquidity[msg.sender] += lpTokens;
+        totalLiquidity += lpTokens;
+
+        emit LiquidityAdded(msg.sender, amountA, amountB, lpTokens);
+    }
+
+
+    function addLiquidityWithPermit(
+        uint256 amountA,
+        uint256 amountB,
+        uint256 nonceA,
+        uint256 deadlineA,
+        bytes calldata signatureA,
+        uint256 nonceB,
+        uint256 deadlineB,
+        bytes calldata signatureB
+    ) external returns (uint256 lpTokens) {
+        require(amountA > 0 && amountB > 0, "Zero amounts");
+
+        ISignatureTransfer.PermitTransferFrom memory permitA = ISignatureTransfer.PermitTransferFrom({
+            permitted: ISignatureTransfer.TokenPermissions({token: address(tokenA), amount: amountA}),
+            nonce: nonceA,
+            deadline: deadlineA
+        });
+        ISignatureTransfer.SignatureTransferDetails memory detailsA = ISignatureTransfer.SignatureTransferDetails({
+            to: address(this),
+            requestedAmount: amountA
+        });
+        permit2.permitTransferFrom(permitA, detailsA, msg.sender, signatureA);
+
+        ISignatureTransfer.PermitTransferFrom memory permitB = ISignatureTransfer.PermitTransferFrom({
+            permitted: ISignatureTransfer.TokenPermissions({token: address(tokenB), amount: amountB}),
+            nonce: nonceB,
+            deadline: deadlineB
+        });
+        ISignatureTransfer.SignatureTransferDetails memory detailsB = ISignatureTransfer.SignatureTransferDetails({
+            to: address(this),
+            requestedAmount: amountB
+        });
+        permit2.permitTransferFrom(permitB, detailsB, msg.sender, signatureB);
+
+        if (totalLiquidity == 0) {
+            lpTokens = _sqrt(amountA * amountB);
+        } else {
+            uint256 lpA = (amountA * totalLiquidity) / reserveA;
+            uint256 lpB = (amountB * totalLiquidity) / reserveB;
+            lpTokens = lpA < lpB ? lpA : lpB;
+        }
 
         reserveA += amountA;
         reserveB += amountB;
