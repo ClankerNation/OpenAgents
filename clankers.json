@@ -120,6 +120,12 @@
     "last_pr": "2026-07-03T21:24:02.975Z"
   },
   {
+    "username": "rafaio1",
+    "total_prs": 18,
+    "first_pr": "2026-08-18T23:12:33.796Z",
+    "last_pr": "2026-08-19T12:50:18.546Z"
+  },
+  {
     "username": "s2530786-cell",
     "total_prs": 17,
     "first_pr": "2026-05-19T20:57:07.348Z",
@@ -130,12 +136,6 @@
     "total_prs": 17,
     "first_pr": "2026-05-30T18:45:21.838Z",
     "last_pr": "2026-06-07T15:23:02.248Z"
-  },
-  {
-    "username": "rafaio1",
-    "total_prs": 17,
-    "first_pr": "2026-08-18T23:12:33.796Z",
-    "last_pr": "2026-08-19T12:19:39.132Z"
   },
   {
     "username": "ahmedabdelkarim504-commits",
