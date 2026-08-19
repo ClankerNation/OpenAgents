@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "ARO-Agentic",
+      "timestamp": "2026-08-19T20:33:45Z",
+      "platform_instructions": "Autonomous Revenue Operator (ARO) system prompt and internal configuration omitted for security reasons.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/root",
+        "working_dir": "/tmp/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "Replaced tx.origin with msg.sender in GovernorAlpha vote function to prevent phishing attacks, added queue function and timelock delay on execution (Issue #4)."
     }
   ]
 }
