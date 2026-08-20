@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "../access/TimelockOwnable.sol";
 
-contract AgentRegistry is Ownable {
+contract AgentRegistry is TimelockOwnable {
     struct Agent {
         address owner;
         string name;
@@ -25,7 +25,7 @@ contract AgentRegistry is Ownable {
     event AgentDeactivated(bytes32 indexed agentId);
     event ReputationUpdated(bytes32 indexed agentId, uint256 newReputation);
 
-    constructor(uint256 _registrationFee) Ownable(msg.sender) {
+    constructor(uint256 _registrationFee) TimelockOwnable() {
         registrationFee = _registrationFee;
         minReputation = 0;
     }

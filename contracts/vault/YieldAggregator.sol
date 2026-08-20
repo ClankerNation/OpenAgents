@@ -4,14 +4,14 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "../access/TimelockOwnable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /// @title YieldAggregator
 /// @notice Vault that accepts deposits and allocates capital across yield strategies.
 /// @dev Implements a simplified vault pattern. Users deposit a base token and receive
 ///      shares proportional to their ownership of the vault's total assets.
-contract YieldAggregator is Ownable, ReentrancyGuard {
+contract YieldAggregator is TimelockOwnable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     struct Strategy {
@@ -32,7 +32,7 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
     event StrategyAdded(uint256 indexed strategyId, address target);
     event StrategyAllocated(uint256 indexed strategyId, uint256 amount);
 
-    constructor(address _asset) Ownable(msg.sender) {
+    constructor(address _asset) TimelockOwnable() {
         asset = IERC20(_asset);
     }
 

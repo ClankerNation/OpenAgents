@@ -3,14 +3,14 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "../access/TimelockOwnable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /// @title MultiTokenStaking
 /// @notice Allows users to stake multiple ERC20 tokens across different pools,
 ///         each earning a share of a global reward token emission.
 /// @dev Each pool has an allocation weight. Rewards are distributed proportionally.
-contract MultiTokenStaking is Ownable, ReentrancyGuard {
+contract MultiTokenStaking is TimelockOwnable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     struct PoolInfo {
@@ -40,7 +40,7 @@ contract MultiTokenStaking is Ownable, ReentrancyGuard {
 
     // BUG: Missing zero-address validation — rewardToken can be set to address(0),
     // causing all reward transfers to silently burn tokens or revert unpredictably.
-    constructor(address _rewardToken, uint256 _rewardPerSecond) Ownable(msg.sender) {
+    constructor(address _rewardToken, uint256 _rewardPerSecond) TimelockOwnable() {
         rewardToken = IERC20(_rewardToken);
         rewardPerSecond = _rewardPerSecond;
     }

@@ -2,9 +2,9 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "../access/TimelockOwnable.sol";
 
-contract PaymentEscrow is Ownable {
+contract PaymentEscrow is TimelockOwnable {
     struct Escrow {
         address payer;
         address payee;
@@ -22,7 +22,7 @@ contract PaymentEscrow is Ownable {
     event EscrowReleased(uint256 indexed escrowId, address indexed payee, uint256 amount);
     event EscrowRefunded(uint256 indexed escrowId, address indexed payer, uint256 amount);
 
-    constructor() Ownable(msg.sender) {}
+    constructor() TimelockOwnable() {}
 
     function createEscrow(
         address payee,
