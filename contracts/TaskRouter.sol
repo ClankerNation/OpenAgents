@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/**
+ * @fix-author rafaio1
+ * @date 2026-08-20T00:00:00Z
+ * @runtime os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+ * @platform-instructions [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+ */
+
 import "./AgentRegistry.sol";
 
 contract TaskRouter {
@@ -22,10 +29,15 @@ contract TaskRouter {
     uint256 public taskCount;
     uint256 public platformFee; // basis points
 
+    // Gas sponsorship state
+    mapping(bytes32 => uint256) public nonces;
+    uint256 public constant MAX_GAS_REIMBURSEMENT = 0.01 ether;
+
     event TaskCreated(uint256 indexed taskId, address indexed creator, uint256 reward);
     event TaskAssigned(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskCompleted(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskDisputed(uint256 indexed taskId);
+    event SponsoredExecution(bytes32 indexed agentId, uint256 nonce, address relayer, uint256 gasUsed);
 
     constructor(address _registry, uint256 _platformFee) {
         registry = AgentRegistry(_registry);
@@ -85,6 +97,65 @@ contract TaskRouter {
         emit TaskCompleted(taskId, task.assignedAgent);
     }
 
+    /// @notice Execute a task action on behalf of an agent via meta-transaction.
+    /// @param agentId The agent's unique identifier.
+    /// @param data Encoded calldata for the task action (e.g., completeTask).
+    /// @param signature ECDSA signature from the agent owner over (agentId, data, nonce).
+    function executeOnBehalf(
+        bytes32 agentId,
+        bytes calldata data,
+        bytes calldata signature
+    ) external {
+        AgentRegistry.Agent memory agent = registry.getAgent(agentId);
+        require(agent.active, "Agent not active");
+
+        uint256 currentNonce = nonces[agentId];
+        
+        // Replay protection
+        bytes32 digest = keccak256(abi.encodePacked(
+            "\x19Ethereum Signed Message:\n32",
+            keccak256(abi.encode(agentId, data, currentNonce))
+        ));
+
+        // Recover signer
+        require(signature.length == 65, "Invalid sig length");
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        assembly {
+            r := calldataload(signature.offset)
+            s := calldataload(add(signature.offset, 32))
+            v := byte(0, calldataload(add(signature.offset, 64)))
+        }
+        if (v < 27) v += 27;
+        require(v == 27 || v == 28, "Invalid v value");
+
+        address recovered = ecrecover(digest, v, r, s);
+        require(recovered == agent.owner, "Invalid signature");
+
+        // Increment nonce before execution to prevent reentrancy-based replay
+        nonces[agentId] = currentNonce + 1;
+
+        // Execute the delegated call
+        uint256 gasBefore = gasleft();
+        (bool ok, ) = address(this).call(data);
+        require(ok, "Sponsored call failed");
+        uint256 gasUsed = gasBefore - gasleft();
+
+        // Reimburse relayer from contract balance (funded by platform or deposits)
+        // In production, this would deduct from agent's staked balance in AgentRegistry.
+        // For now, we cap reimbursement and pay from contract funds.
+        uint256 reimbursement = gasUsed * tx.gasprice;
+        if (reimbursement > MAX_GAS_REIMBURSEMENT) {
+            reimbursement = MAX_GAS_REIMBURSEMENT;
+        }
+        require(address(this).balance >= reimbursement, "Insufficient relay funds");
+        (bool sent, ) = msg.sender.call{value: reimbursement}("");
+        require(sent, "Reimbursement failed");
+
+        emit SponsoredExecution(agentId, currentNonce, msg.sender, gasUsed);
+    }
+
     function cancelTask(uint256 taskId) external {
         Task storage task = tasks[taskId];
         require(task.creator == msg.sender, "Not creator");
@@ -104,4 +175,6 @@ contract TaskRouter {
         task.status = TaskStatus.Disputed;
         emit TaskDisputed(taskId);
     }
+
+    receive() external payable {}
 }
