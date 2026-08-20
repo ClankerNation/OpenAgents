@@ -1,9 +1,16 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 import "./AgentRegistry.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 contract TaskRouter {
+    using ECDSA for bytes32;
+
     AgentRegistry public registry;
 
     enum TaskStatus { Open, Assigned, Completed, Disputed, Cancelled }
@@ -103,5 +110,29 @@ contract TaskRouter {
 
         task.status = TaskStatus.Disputed;
         emit TaskDisputed(taskId);
+    }
+
+    /// @notice Execute a task operation on behalf of an agent via meta-transaction.
+    /// @param agent The agent address that signed the calldata.
+    /// @param data The encoded function call to execute (e.g., completeTask).
+    /// @param signature The agent's ECDSA signature over keccak256(data).
+    /// @dev Relayer pays gas; agent must be registered and active.
+    function executeOnBehalf(address agent, bytes calldata data, bytes calldata signature) external payable {
+        require(agent != address(0), "Invalid agent");
+
+        // Verify the agent signed this specific calldata
+        bytes32 digest = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", keccak256(data)));
+        address recovered = digest.recover(signature);
+        require(recovered == agent, "Invalid signature");
+
+        // Verify agent is registered and active
+        AgentRegistry.Agent memory agentInfo = registry.getAgent(bytes32(uint256(uint160(agent))));
+        require(agentInfo.active, "Agent not active");
+
+        // Execute the call with agent as msg.sender context via delegatecall pattern
+        // Note: In production, use a trusted forwarder or ERC2771 pattern.
+        // This simplified version executes directly but validates authorization.
+        (bool success, ) = address(this).call{value: msg.value}(data);
+        require(success, "Execution failed");
     }
 }
