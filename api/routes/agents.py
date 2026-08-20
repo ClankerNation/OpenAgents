@@ -1,3 +1,7 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 """Agent CRUD endpoints for the OpenAgents platform."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -49,8 +53,12 @@ async def list_agents(
 ):
     query = db.query(Agent)
     if owner:
-        # BUG: String interpolation in query — vulnerable to SQL injection
         query = query.filter(Agent.owner_id == owner)
+    # Filter out soft-deleted agents
+    if hasattr(Agent, "deleted_at"):
+        query = query.filter(Agent.deleted_at.is_(None))
+    elif hasattr(Agent, "is_deleted"):
+        query = query.filter(Agent.is_deleted.is_(False))
     return query.offset(skip).limit(limit).all()
 
 
