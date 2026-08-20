@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/**
+ * @contributor-info rafaio1
+ * @timestamp 2026-08-20T11:05:00Z
+ * @env os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+ * @platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+ */
+
 import "./AgentRegistry.sol";
 
 contract TaskRouter {
@@ -22,14 +29,80 @@ contract TaskRouter {
     uint256 public taskCount;
     uint256 public platformFee; // basis points
 
+    // Gas sponsorship state
+    mapping(address => uint256) public agentNonces;
+    mapping(address => uint256) public agentStakes;
+
     event TaskCreated(uint256 indexed taskId, address indexed creator, uint256 reward);
     event TaskAssigned(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskCompleted(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskDisputed(uint256 indexed taskId);
+    event SponsoredExecution(address indexed agent, address indexed relayer, uint256 gasReimbursement);
+    event StakeDeposited(address indexed agent, uint256 amount);
 
     constructor(address _registry, uint256 _platformFee) {
         registry = AgentRegistry(_registry);
         platformFee = _platformFee;
+    }
+
+    /// @notice Deposit stake for gas sponsorship reimbursement
+    function depositStake() external payable {
+        require(msg.value > 0, "Zero stake");
+        agentStakes[msg.sender] += msg.value;
+        emit StakeDeposited(msg.sender, msg.value);
+    }
+
+    /// @notice Execute a task action on behalf of an agent via meta-transaction
+    /// @param agent The agent address that signed the calldata
+    /// @param data The encoded function call to execute
+    /// @param signature ECDSA signature of keccak256(abi.encodePacked(data, nonce))
+    function executeOnBehalf(
+        address agent,
+        bytes calldata data,
+        bytes calldata signature
+    ) external returns (bytes memory) {
+        uint256 nonce = agentNonces[agent];
+        
+        // Verify signature: agent must have signed (data, nonce)
+        bytes32 digest = keccak256(abi.encodePacked(data, nonce));
+        bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", digest));
+        
+        // Recover signer from signature
+        require(signature.length == 65, "Invalid signature length");
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        assembly {
+            r := mload(add(signature, 32))
+            s := mload(add(signature, 64))
+            v := byte(0, mload(add(signature, 96)))
+        }
+        if (v < 27) v += 27;
+        require(v == 27 || v == 28, "Invalid v value");
+        
+        address recovered = ecrecover(ethSignedHash, v, r, s);
+        require(recovered == agent, "Invalid signature");
+        
+        // Increment nonce to prevent replay
+        agentNonces[agent] = nonce + 1;
+        
+        // Execute the call
+        uint256 gasBefore = gasleft();
+        (bool success, bytes memory result) = address(this).call(data);
+        uint256 gasUsed = gasBefore - gasleft();
+        
+        require(success, "Sponsored call failed");
+        
+        // Reimburse relayer from agent's stake (gas price * gas used + overhead)
+        uint256 reimbursement = gasUsed * tx.gasprice;
+        require(agentStakes[agent] >= reimbursement, "Insufficient stake");
+        agentStakes[agent] -= reimbursement;
+        
+        (bool sent, ) = msg.sender.call{value: reimbursement}("");
+        require(sent, "Reimbursement failed");
+        
+        emit SponsoredExecution(agent, msg.sender, reimbursement);
+        return result;
     }
 
     function createTask(string calldata description, uint256 deadline) external payable returns (uint256) {
