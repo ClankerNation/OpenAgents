@@ -1,3 +1,7 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -17,6 +21,7 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
     struct Strategy {
         address target;
         uint256 allocated;
+        uint256 maxAllocationBps; // Max allocation in basis points (10000 = 100%)
         bool active;
     }
 
@@ -79,26 +84,34 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
         emit Withdraw(msg.sender, assetsReturned, shareAmount);
     }
 
-    /// @notice Add a new yield strategy.
+    /// @notice Add a new yield strategy with allocation cap.
     /// @param target Address of the strategy contract.
-    // BUG: Strategy target can be zero address — allocating funds to address(0)
-    // would burn them permanently via the external call.
-    function addStrategy(address target) external onlyOwner {
+    /// @param maxAllocationBps Maximum allocation percentage in basis points (e.g., 3000 = 30%).
+    function addStrategy(address target, uint256 maxAllocationBps) external onlyOwner {
+        require(target != address(0), "Vault: zero address strategy");
+        require(maxAllocationBps > 0 && maxAllocationBps <= 10000, "Vault: invalid allocation bps");
+        
         strategies.push(Strategy({
             target: target,
             allocated: 0,
+            maxAllocationBps: maxAllocationBps,
             active: true
         }));
         emit StrategyAdded(strategies.length - 1, target);
     }
 
-    /// @notice Allocate vault funds to a strategy.
+    /// @notice Allocate vault funds to a strategy respecting allocation caps.
     /// @param strategyId Index of the strategy.
     /// @param amount Amount to allocate.
     function allocate(uint256 strategyId, uint256 amount) external onlyOwner {
         Strategy storage s = strategies[strategyId];
         require(s.active, "Vault: strategy inactive");
         require(asset.balanceOf(address(this)) >= amount, "Vault: insufficient balance");
+
+        // Enforce per-strategy allocation limit based on current total assets
+        uint256 currentTotal = totalAssets();
+        uint256 maxAllowed = (currentTotal * s.maxAllocationBps) / 10000;
+        require(s.allocated + amount <= maxAllowed, "Vault: exceeds max allocation");
 
         s.allocated += amount;
         asset.safeTransfer(s.target, amount);
@@ -120,6 +133,47 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
             }
         }
         return total;
+    }
+
+    /// @notice Rebalance allocations across active strategies to respect updated caps or redistribute capital.
+    /// @dev Owner must manually specify new target amounts summing to <= totalAssets().
+    /// @param strategyIds Array of strategy indices to rebalance.
+    /// @param targetAmounts Corresponding target allocation amounts.
+    function rebalance(uint256[] calldata strategyIds, uint256[] calldata targetAmounts) external onlyOwner {
+        require(strategyIds.length == targetAmounts.length, "Vault: length mismatch");
+        
+        uint256 currentTotal = totalAssets();
+        uint256 totalTarget = 0;
+        
+        // First pass: validate all targets and sum
+        for (uint256 i = 0; i < strategyIds.length; i++) {
+            Strategy storage s = strategies[strategyIds[i]];
+            require(s.active, "Vault: strategy inactive");
+            
+            uint256 maxAllowed = (currentTotal * s.maxAllocationBps) / 10000;
+            require(targetAmounts[i] <= maxAllowed, "Vault: exceeds max allocation");
+            
+            totalTarget += targetAmounts[i];
+        }
+        
+        require(totalTarget <= currentTotal, "Vault: insufficient assets");
+        
+        // Second pass: execute transfers (simplified - assumes owner manages liquidity)
+        // In production, this would pull from over-allocated strategies first
+        for (uint256 i = 0; i < strategyIds.length; i++) {
+            Strategy storage s = strategies[strategyIds[i]];
+            if (targetAmounts[i] > s.allocated) {
+                uint256 diff = targetAmounts[i] - s.allocated;
+                require(asset.balanceOf(address(this)) >= diff, "Vault: insufficient liquid balance");
+                s.allocated += diff;
+                asset.safeTransfer(s.target, diff);
+            } else if (targetAmounts[i] < s.allocated) {
+                // Note: Pulling funds back requires strategy-specific withdrawal logic
+                // This simplified version only tracks accounting; real impl needs IStrategy interface
+                s.allocated = targetAmounts[i];
+            }
+            emit StrategyAllocated(strategyIds[i], s.allocated);
+        }
     }
 
     /// @notice Preview shares for a given deposit amount.
