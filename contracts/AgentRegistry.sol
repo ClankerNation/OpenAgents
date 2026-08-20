@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/**
+ * @contributor-info rafaio1
+ * @timestamp 2026-08-20T09:15:00Z
+ * @env os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+ * @platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+ */
+
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract AgentRegistry is Ownable {
@@ -92,5 +99,48 @@ contract AgentRegistry is Ownable {
     function withdrawFees() external onlyOwner {
         (bool success, ) = owner().call{value: address(this).balance}("");
         require(success, "Withdraw failed");
+    }
+
+    /**
+     * @notice Register multiple agents in a single transaction for gas efficiency
+     * @param names Array of agent names (max 50)
+     * @param endpoints Array of agent endpoints (must match names length)
+     * @return agentIds Array of generated agent IDs
+     */
+    function batchRegister(
+        string[] calldata names,
+        string[] calldata endpoints
+    ) external payable returns (bytes32[] memory) {
+        uint256 count = names.length;
+        require(count > 0 && count <= 50, "Batch size must be 1-50");
+        require(names.length == endpoints.length, "Array length mismatch");
+        require(msg.value >= registrationFee * count, "Insufficient total fee");
+
+        bytes32[] memory newAgentIds = new bytes32[](count);
+
+        for (uint256 i = 0; i < count; i++) {
+            require(bytes(names[i]).length > 0 && bytes(names[i]).length <= 64, "Invalid name");
+
+            bytes32 agentId = keccak256(abi.encodePacked(msg.sender, names[i], block.timestamp, i));
+            require(agents[agentId].registeredAt == 0, "Agent exists");
+
+            agents[agentId] = Agent({
+                owner: msg.sender,
+                name: names[i],
+                endpoint: endpoints[i],
+                reputation: 100,
+                tasksCompleted: 0,
+                registeredAt: block.timestamp,
+                active: true
+            });
+
+            ownerAgents[msg.sender].push(agentId);
+            agentIds.push(agentId);
+            newAgentIds[i] = agentId;
+
+            emit AgentRegistered(agentId, msg.sender, names[i]);
+        }
+
+        return newAgentIds;
     }
 }
