@@ -1,3 +1,10 @@
+/**
+ * @fix-author rafaio1
+ * @date 2026-08-20
+ * @runtime os=linux, arch=x64, working_dir=/tmp/OpenAgents, shell=bash
+ * @platform-instructions [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+ */
+
 import { ethers } from "ethers";
 
 export interface AgentConfig {
@@ -13,6 +20,7 @@ export class OpenAgentsSDK {
   private provider: ethers.JsonRpcProvider;
   private signer: ethers.Wallet;
   private config: AgentConfig;
+  private _taskCountCache: { value: number; blockNumber: number } | null = null;
 
   constructor(config: AgentConfig) {
     this.config = config;
@@ -60,7 +68,15 @@ export class OpenAgentsSDK {
     await tx.wait();
   }
 
-  async getOpenTasks(): Promise<any[]> {
+  async getOpenTasks(options?: {
+    offset?: number;
+    limit?: number;
+    status?: number;
+  }): Promise<any[]> {
+    const offset = options?.offset ?? 0;
+    const limit = options?.limit ?? 50;
+    const statusFilter = options?.status ?? 0; // Default to Open (0)
+
     const router = new ethers.Contract(
       this.config.routerAddress,
       [
@@ -70,19 +86,43 @@ export class OpenAgentsSDK {
       this.provider
     );
 
-    const count = await router.taskCount();
-    const openTasks = [];
+    // Cache task count per block
+    const currentBlock = await this.provider.getBlockNumber();
+    let count: bigint;
 
-    for (let i = 0; i < count; i++) {
-      const task = await router.tasks(i);
-      if (task[5] === 0) {
-        openTasks.push({
-          id: i,
-          creator: task[0],
-          description: task[2],
-          reward: task[3],
-          deadline: task[4],
-        });
+    if (this._taskCountCache && this._taskCountCache.blockNumber === currentBlock) {
+      count = BigInt(this._taskCountCache.value);
+    } else {
+      count = await router.taskCount();
+      this._taskCountCache = { value: Number(count), blockNumber: currentBlock };
+    }
+
+    const end = Math.min(offset + limit, Number(count));
+    if (offset >= Number(count)) return [];
+
+    const openTasks = [];
+    const batchSize = 10;
+
+    for (let i = offset; i < end; i += batchSize) {
+      const batchEnd = Math.min(i + batchSize, end);
+      const promises = [];
+      for (let j = i; j < batchEnd; j++) {
+        promises.push(router.tasks(j).then((t: any) => ({ id: j, data: t })));
+      }
+
+      const results = await Promise.all(promises);
+      for (const result of results) {
+        const task = result.data;
+        if (task[5] === statusFilter) {
+          openTasks.push({
+            id: result.id,
+            creator: task[0],
+            description: task[2],
+            reward: task[3],
+            deadline: task[4],
+            status: task[5],
+          });
+        }
       }
     }
 
