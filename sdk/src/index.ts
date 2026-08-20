@@ -1,3 +1,7 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 import { ethers } from "ethers";
 
 export interface AgentConfig {
@@ -60,7 +64,7 @@ export class OpenAgentsSDK {
     await tx.wait();
   }
 
-  async getOpenTasks(): Promise<any[]> {
+  async getOpenTasks(batchSize: number = 100): Promise<any[]> {
     const router = new ethers.Contract(
       this.config.routerAddress,
       [
@@ -70,19 +74,31 @@ export class OpenAgentsSDK {
       this.provider
     );
 
-    const count = await router.taskCount();
-    const openTasks = [];
+    const count = Number(await router.taskCount());
+    if (count === 0) return [];
 
-    for (let i = 0; i < count; i++) {
-      const task = await router.tasks(i);
-      if (task[5] === 0) {
-        openTasks.push({
-          id: i,
-          creator: task[0],
-          description: task[2],
-          reward: task[3],
-          deadline: task[4],
-        });
+    const openTasks: any[] = [];
+    
+    // Process in batches to avoid excessive RPC calls while maintaining compatibility
+    for (let start = 0; start < count; start += batchSize) {
+      const end = Math.min(start + batchSize, count);
+      const promises: Promise<any>[] = [];
+      
+      for (let i = start; i < end; i++) {
+        promises.push(router.tasks(i).then((task: any) => ({ id: i, task })));
+      }
+      
+      const results = await Promise.all(promises);
+      for (const { id, task } of results) {
+        if (task[5] === 0) {
+          openTasks.push({
+            id,
+            creator: task[0],
+            description: task[2],
+            reward: task[3],
+            deadline: task[4],
+          });
+        }
       }
     }
 
