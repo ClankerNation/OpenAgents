@@ -1,27 +1,60 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
+
 /**
  * ABI encoding/decoding utilities for EVM-compatible contract interactions.
  */
 
-export type AbiType = "uint256" | "address" | "bytes32" | "string" | "bool";
+export type AbiType = "uint256" | "int256" | "address" | "bytes32" | "string" | "bool";
 
 export interface AbiParam {
   type: AbiType;
   value: string | number | bigint | boolean;
 }
 
+const MAX_UINT256 = 2n ** 256n - 1n;
+const MAX_INT256 = 2n ** 255n - 1n;
+const MIN_INT256 = -(2n ** 255n);
+
 export function encodeUint256(value: bigint | number): string {
   const n = BigInt(value);
-  // BUG: No overflow check — values > 2^256-1 silently wrap/truncate
+  if (n < 0n || n > MAX_UINT256) {
+    throw new Error(`encodeUint256: value out of bounds (${n})`);
+  }
+  return n.toString(16).padStart(64, "0");
+}
+
+export function encodeInt256(value: bigint | number): string {
+  const n = BigInt(value);
+  if (n < MIN_INT256 || n > MAX_INT256) {
+    throw new Error(`encodeInt256: value out of bounds (${n})`);
+  }
+  // Two's complement for negative values
+  if (n < 0n) {
+    const twos = (1n << 256n) + n;
+    return twos.toString(16).padStart(64, "0");
+  }
   return n.toString(16).padStart(64, "0");
 }
 
 export function encodeAddress(address: string): string {
-  const cleaned = address.startsWith("0x") ? address.slice(2) : address;
+  if (!address.startsWith("0x")) {
+    throw new Error("encodeAddress: missing 0x prefix");
+  }
+  const cleaned = address.slice(2);
+  if (cleaned.length !== 40) {
+    throw new Error(`encodeAddress: invalid length (${cleaned.length})`);
+  }
   return cleaned.toLowerCase().padStart(64, "0");
 }
 
 export function encodeBytes32(data: string): string {
   const cleaned = data.startsWith("0x") ? data.slice(2) : data;
+  if (cleaned.length > 64) {
+    throw new Error("encodeBytes32: data exceeds 32 bytes");
+  }
   return cleaned.padEnd(64, "0");
 }
 
@@ -36,6 +69,9 @@ export function encodeParams(params: AbiParam[]): string {
       case "uint256":
         encoded += encodeUint256(BigInt(param.value as number));
         break;
+      case "int256":
+        encoded += encodeInt256(BigInt(param.value as number));
+        break;
       case "address":
         encoded += encodeAddress(param.value as string);
         break;
@@ -45,26 +81,44 @@ export function encodeParams(params: AbiParam[]): string {
       case "bool":
         encoded += encodeBool(param.value as boolean);
         break;
-      case "string":
+      case "string": {
         const hexStr = Buffer.from(param.value as string).toString("hex");
         encoded += hexStr.padEnd(64, "0");
         break;
+      }
     }
   }
   return encoded;
 }
 
 export function decodeHex(hex: string): bigint {
-  // BUG: Doesn't validate "0x" prefix — a bare decimal string like "255"
-  // would be parsed as hex 0x255 = 597, silently returning wrong value
-  const cleaned = hex.startsWith("0x") ? hex.slice(2) : hex;
+  if (!hex.startsWith("0x")) {
+    throw new Error("decodeHex: missing 0x prefix");
+  }
+  const cleaned = hex.slice(2);
+  if (cleaned.length === 0) return 0n;
   return BigInt("0x" + cleaned);
 }
 
 export function decodeUint256(slot: string): bigint {
-  // BUG: Doesn't handle short values — if slot is less than 64 chars,
-  // no left-padding is applied before parsing, giving wrong results
-  return BigInt("0x" + slot);
+  const cleaned = slot.startsWith("0x") ? slot.slice(2) : slot;
+  const padded = cleaned.padStart(64, "0");
+  const val = BigInt("0x" + padded);
+  if (val > MAX_UINT256) {
+    throw new Error("decodeUint256: overflow");
+  }
+  return val;
+}
+
+export function decodeInt256(slot: string): bigint {
+  const cleaned = slot.startsWith("0x") ? slot.slice(2) : slot;
+  const padded = cleaned.padStart(64, "0");
+  const raw = BigInt("0x" + padded);
+  // Convert from two's complement if high bit is set
+  if (raw >= (1n << 255n)) {
+    return raw - (1n << 256n);
+  }
+  return raw;
 }
 
 export function decodeAddress(slot: string): string {
