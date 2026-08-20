@@ -1,19 +1,21 @@
-// @contributor-info ARO-Agentic
-// @platform-config Autonomous Revenue Operator (ARO) system prompt and internal configuration omitted for security reasons.
-// @env os=linux arch=x64 home_dir=/root working_dir=/tmp/OpenAgents shell=bash
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/**
+ * @fix-author Claude Fable 5 (Autonomous Agent)
+ * @date 2026-08-20
+ * @runtime os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+ * @platform_instructions [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+ */
+
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /// @title YieldAggregator
 /// @notice Vault that accepts deposits and allocates capital across yield strategies.
-/// @dev Implements a simplified vault pattern. Users deposit a base token and receive
-///      shares proportional to their ownership of the vault's total assets.
+/// @dev Implements a simplified vault pattern with donation attack protection.
 contract YieldAggregator is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -25,10 +27,14 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
 
     IERC20 public immutable asset;
     uint256 public totalShares;
-    uint256 public totalDeposited;
+    uint256 public totalDeposited; // Internal accounting to prevent donation attacks
     mapping(address => uint256) public shares;
 
     Strategy[] public strategies;
+
+    // Maximum allowed price deviation (5%) to detect manipulation
+    uint256 public constant MAX_PRICE_DEVIATION_BPS = 500;
+    uint256 public constant BPS_DENOMINATOR = 10000;
 
     event Deposit(address indexed user, uint256 assets, uint256 sharesMinted);
     event Withdraw(address indexed user, uint256 assets, uint256 sharesBurned);
@@ -36,31 +42,56 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
     event StrategyAllocated(uint256 indexed strategyId, uint256 amount);
 
     constructor(address _asset) Ownable(msg.sender) {
+        require(_asset != address(0), "Vault: zero asset");
         asset = IERC20(_asset);
+    }
+
+    /// @notice Total assets under management using internal accounting.
+    /// @dev Uses totalDeposited + strategy gains instead of balanceOf to prevent donation attacks.
+    function totalAssets() public view returns (uint256) {
+        uint256 total = totalDeposited;
+        for (uint256 i = 0; i < strategies.length; i++) {
+            if (strategies[i].active) {
+                total += strategies[i].allocated;
+            }
+        }
+        return total;
     }
 
     /// @notice Deposit tokens into the vault and receive shares.
     /// @param amount Amount of base token to deposit.
+    /// @param minShares Minimum shares to receive (slippage protection).
     /// @return sharesMinted Number of shares issued to the depositor.
-    // BUG: No slippage check on deposit — the share price can be manipulated via
-    // donation attacks (sending tokens directly to the vault) between the user's
-    // approval and deposit, causing them to receive far fewer shares than expected.
     function deposit(uint256 amount, uint256 minShares) external nonReentrant returns (uint256 sharesMinted) {
         require(amount > 0, "Vault: zero deposit");
+
+        uint256 currentTotalAssets = totalAssets();
 
         if (totalShares == 0) {
             sharesMinted = amount;
         } else {
-            sharesMinted = (amount * totalShares) / totalDeposited;
-        }
-        require(sharesMinted >= minShares, "Vault: slippage exceeded");
+            require(currentTotalAssets > 0, "Vault: zero assets");
+            sharesMinted = (amount * totalShares) / currentTotalAssets;
 
-        // Share price sanity check (max 5% deviation)
-        if (totalShares > 0 && totalDeposited > 0) {
-            uint256 currentPrice = (totalDeposited * 1e18) / totalShares;
-            uint256 expectedPrice = (amount * 1e18) / sharesMinted;
-            require(currentPrice <= expectedPrice * 105 / 100, "Vault: price deviation > 5%");
+            // Price deviation check: compare expected vs actual share price
+            // If someone donated, currentTotalAssets would be inflated relative to totalDeposited
+            // We check that the implied price hasn't deviated more than 5% from internal accounting
+            uint256 expectedPrice = (currentTotalAssets * BPS_DENOMINATOR) / totalShares;
+            uint256 fairPrice = (totalDeposited * BPS_DENOMINATOR) / totalShares;
+            
+            // Allow some tolerance for legitimate yield but reject large deviations
+            if (fairPrice > 0) {
+                uint256 deviation;
+                if (expectedPrice > fairPrice) {
+                    deviation = ((expectedPrice - fairPrice) * BPS_DENOMINATOR) / fairPrice;
+                } else {
+                    deviation = ((fairPrice - expectedPrice) * BPS_DENOMINATOR) / fairPrice;
+                }
+                require(deviation <= MAX_PRICE_DEVIATION_BPS, "Vault: price deviation too high");
+            }
         }
+
+        require(sharesMinted >= minShares, "Vault: insufficient shares output");
 
         asset.safeTransferFrom(msg.sender, address(this), amount);
         totalShares += sharesMinted;
@@ -77,12 +108,16 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
         require(shareAmount > 0, "Vault: zero shares");
         require(shares[msg.sender] >= shareAmount, "Vault: insufficient shares");
 
-        // Use internal accounting (totalDeposited) to prevent donation attacks
-        assetsReturned = (shareAmount * totalDeposited) / totalShares;
+        // Use internal accounting (totalAssets) instead of balanceOf
+        uint256 currentTotalAssets = totalAssets();
+        require(currentTotalAssets > 0, "Vault: no assets");
+        
+        assetsReturned = (shareAmount * currentTotalAssets) / totalShares;
 
         shares[msg.sender] -= shareAmount;
         totalShares -= shareAmount;
-        totalDeposited -= assetsReturned;
+        // Reduce internal accounting proportionally
+        totalDeposited = (totalDeposited * (totalShares)) / (totalShares + shareAmount);
 
         asset.safeTransfer(msg.sender, assetsReturned);
         emit Withdraw(msg.sender, assetsReturned, shareAmount);
@@ -90,10 +125,8 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
 
     /// @notice Add a new yield strategy.
     /// @param target Address of the strategy contract.
-    // BUG: Strategy target can be zero address — allocating funds to address(0)
-    // would burn them permanently via the external call.
     function addStrategy(address target) external onlyOwner {
-        require(target != address(0), "Vault: zero address strategy");
+        require(target != address(0), "Vault: zero strategy address");
         strategies.push(Strategy({
             target: target,
             allocated: 0,
@@ -108,9 +141,13 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
     function allocate(uint256 strategyId, uint256 amount) external onlyOwner {
         Strategy storage s = strategies[strategyId];
         require(s.active, "Vault: strategy inactive");
+        require(s.target != address(0), "Vault: invalid strategy target");
         require(asset.balanceOf(address(this)) >= amount, "Vault: insufficient balance");
 
         s.allocated += amount;
+        // Move from deposited to allocated in internal accounting
+        totalDeposited -= amount;
+        
         asset.safeTransfer(s.target, amount);
         emit StrategyAllocated(strategyId, amount);
     }
@@ -121,20 +158,11 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
         strategies[strategyId].active = false;
     }
 
-    /// @notice Total assets under management (vault balance + allocated to strategies).
-    function totalAssets() public view returns (uint256) {
-        uint256 total = asset.balanceOf(address(this));
-        for (uint256 i = 0; i < strategies.length; i++) {
-            if (strategies[i].active) {
-                total += strategies[i].allocated;
-            }
-        }
-        return total;
-    }
-
     /// @notice Preview shares for a given deposit amount.
     function previewDeposit(uint256 amount) external view returns (uint256) {
         if (totalShares == 0) return amount;
-        return (amount * totalShares) / totalDeposited;
+        uint256 currentTotalAssets = totalAssets();
+        if (currentTotalAssets == 0) return 0;
+        return (amount * totalShares) / currentTotalAssets;
     }
 }

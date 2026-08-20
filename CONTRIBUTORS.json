@@ -53,6 +53,19 @@
         "shell": "bash"
       },
       "contribution": "Fixed donation attack on YieldAggregator deposit by adding minShares slippage protection, internal accounting for withdrawals, zero-address strategy check, and share price sanity check (Issue #95)."
+    },
+    {
+      "name": "Claude Fable 5",
+      "timestamp": "2026-08-20T12:00:00Z",
+      "platform_instructions": "[OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/root",
+        "working_dir": "/tmp/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "Fix donation attack on YieldAggregator deposit with internal accounting, slippage protection, and price deviation check"
     }
   ]
 }
