@@ -1,3 +1,10 @@
+/**
+ * @contributor-info rafaio1
+ * @timestamp 2026-08-20T12:15:00Z
+ * @env os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+ * @platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+ */
+
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -15,7 +22,10 @@ contract AgentToken is ERC20, ERC20Burnable {
     bytes32 public constant PERMIT_TYPEHASH = keccak256(
         "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
     );
-    bytes32 public immutable DOMAIN_SEPARATOR;
+    // Cached domain separator and chain ID for fork detection
+    bytes32 private _domainSeparator;
+    uint256 private _domainChainId;
+    
     mapping(address => uint256) public nonces;
 
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
@@ -27,13 +37,33 @@ contract AgentToken is ERC20, ERC20Burnable {
     ) ERC20(name_, symbol_) {
         owner = msg.sender;
         _mint(msg.sender, initialSupply);
-        DOMAIN_SEPARATOR = keccak256(abi.encode(
+        
+        // Initialize domain separator with current chain ID
+        _domainChainId = block.chainid;
+        _domainSeparator = _computeDomainSeparator(name_);
+    }
+    
+    /// @notice Compute EIP-712 domain separator dynamically
+    /// @param name_ Token name for domain encoding
+    /// @return Domain separator hash
+    function _computeDomainSeparator(string memory name_) internal view returns (bytes32) {
+        return keccak256(abi.encode(
             keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
             keccak256(bytes(name_)),
             keccak256(bytes("1")),
             block.chainid,
             address(this)
         ));
+    }
+    
+    /// @notice Returns the current EIP-712 domain separator
+    /// @dev Recomputes if chain ID changed (fork protection)
+    /// @return Current domain separator
+    function DOMAIN_SEPARATOR() external view returns (bytes32) {
+        if (block.chainid == _domainChainId) {
+            return _domainSeparator;
+        }
+        return _computeDomainSeparator(name());
     }
 
     /// @notice Mint new tokens to a recipient.
