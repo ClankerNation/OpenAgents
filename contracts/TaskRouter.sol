@@ -1,9 +1,20 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+// @fix-author rafaio1
+// @date 2026-08-20
+// @runtime os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+// @platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+
 import "./AgentRegistry.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 contract TaskRouter {
+    using ECDSA for bytes32;
+    using SafeERC20 for IERC20;
+
     AgentRegistry public registry;
 
     enum TaskStatus { Open, Assigned, Completed, Disputed, Cancelled }
@@ -22,14 +33,23 @@ contract TaskRouter {
     uint256 public taskCount;
     uint256 public platformFee; // basis points
 
+    // Gas sponsorship state
+    mapping(address => uint256) public agentStake;
+    mapping(address => uint256) public agentNonce;
+    address public relayer;
+
     event TaskCreated(uint256 indexed taskId, address indexed creator, uint256 reward);
     event TaskAssigned(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskCompleted(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskDisputed(uint256 indexed taskId);
+    event GasSponsored(address indexed agent, uint256 gasCost, uint256 nonce);
+    event StakeDeposited(address indexed agent, uint256 amount);
+    event StakeWithdrawn(address indexed agent, uint256 amount);
 
     constructor(address _registry, uint256 _platformFee) {
         registry = AgentRegistry(_registry);
         platformFee = _platformFee;
+        relayer = msg.sender;
     }
 
     function createTask(string calldata description, uint256 deadline) external payable returns (uint256) {
@@ -85,6 +105,56 @@ contract TaskRouter {
         emit TaskCompleted(taskId, task.assignedAgent);
     }
 
+    /// @notice Execute a task action on behalf of an agent via meta-transaction.
+    /// @param agent The agent address that signed the calldata.
+    /// @param data The encoded function call to execute.
+    /// @param signature The agent's signature over keccak256(data, nonce).
+    function executeOnBehalf(
+        address agent,
+        bytes calldata data,
+        bytes calldata signature
+    ) external {
+        require(msg.sender == relayer, "Only relayer");
+
+        uint256 nonce = agentNonce[agent];
+        bytes32 hash = keccak256(abi.encodePacked(data, nonce));
+        bytes32 ethSignedHash = hash.toEthSignedMessageHash();
+        address recovered = ethSignedHash.recover(signature);
+        require(recovered == agent, "Invalid signature");
+
+        uint256 gasBefore = gasleft();
+        (bool success, ) = address(this).call(data);
+        require(success, "Sponsored call failed");
+        uint256 gasUsed = gasBefore - gasleft();
+
+        // Reimburse relayer from agent stake (simplified gas cost estimation)
+        uint256 gasCost = gasUsed * tx.gasprice;
+        require(agentStake[agent] >= gasCost, "Insufficient stake");
+        agentStake[agent] -= gasCost;
+        agentNonce[agent] = nonce + 1;
+
+        (bool reimbursed, ) = relayer.call{value: gasCost}("");
+        require(reimbursed, "Reimbursement failed");
+
+        emit GasSponsored(agent, gasCost, nonce);
+    }
+
+    /// @notice Deposit ETH stake for gas sponsorship.
+    function depositStake() external payable {
+        require(msg.value > 0, "Zero stake");
+        agentStake[msg.sender] += msg.value;
+        emit StakeDeposited(msg.sender, msg.value);
+    }
+
+    /// @notice Withdraw unused stake.
+    function withdrawStake(uint256 amount) external {
+        require(agentStake[msg.sender] >= amount, "Insufficient stake");
+        agentStake[msg.sender] -= amount;
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, "Withdraw failed");
+        emit StakeWithdrawn(msg.sender, amount);
+    }
+
     function cancelTask(uint256 taskId) external {
         Task storage task = tasks[taskId];
         require(task.creator == msg.sender, "Not creator");
@@ -104,4 +174,6 @@ contract TaskRouter {
         task.status = TaskStatus.Disputed;
         emit TaskDisputed(taskId);
     }
+
+    receive() external payable {}
 }
