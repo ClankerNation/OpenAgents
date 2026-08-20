@@ -1,3 +1,7 @@
+// @contributor rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -61,30 +65,70 @@ contract ChainlinkAdapter {
         emit FeedDeactivated(token);
     }
 
-    // BUG: No roundId completeness check — answeredInRound should equal roundId to
-    // confirm the answer is from the current round; without this check, the contract
-    // may return an answer from a previous round that hasn't been updated
-    // BUG: Stale price allowed — updatedAt is not checked against the heartbeat,
-    // so a feed that hasn't updated in days will still return the last known price
-    // BUG: Negative price not rejected — Chainlink can return negative prices for
-    // certain feeds; casting a negative int256 to uint256 produces a huge incorrect value
+    /// @notice Get the price for a token with full validation and fallback support.
+    /// @param token The token address to get the price for.
+    /// @return price The normalized price in 18 decimals.
     function getPrice(address token) external view returns (uint256) {
         FeedConfig storage config = feeds[token];
         require(config.active, "Feed not active");
 
         (
-            uint80 /* roundId */,
+            uint80 roundId,
             int256 answer,
             /* uint256 startedAt */,
-            uint256 /* updatedAt */,
-            uint80 /* answeredInRound */
+            uint256 updatedAt,
+            uint80 answeredInRound
         ) = config.feed.latestRoundData();
 
-        // No validation of roundId, staleness, or negative price
+        // Validate round completeness
+        require(answeredInRound >= roundId, "ChainlinkAdapter: stale round");
+        // Validate staleness against heartbeat
+        require(block.timestamp - updatedAt <= config.heartbeat, "ChainlinkAdapter: stale price");
+        // Validate positive price
+        require(answer > 0, "ChainlinkAdapter: invalid price");
+
         uint256 price = uint256(answer);
 
         // Normalize to 18 decimals
         uint8 feedDecimals = config.feed.decimals();
+        if (feedDecimals < TARGET_DECIMALS) {
+            price = price * (10 ** (TARGET_DECIMALS - feedDecimals));
+        } else if (feedDecimals > TARGET_DECIMALS) {
+            price = price / (10 ** (feedDecimals - TARGET_DECIMALS));
+        }
+
+        return price;
+    }
+
+    /// @notice Get price with fallback to another token's feed if primary fails.
+    /// @param token Primary token address.
+    /// @param fallbackToken Fallback token address if primary is stale or invalid.
+    /// @return price The normalized price in 18 decimals.
+    function getPriceWithFallback(address token, address fallbackToken) external view returns (uint256) {
+        FeedConfig storage config = feeds[token];
+        if (config.active) {
+            try this.getPrice(token) returns (uint256 price) {
+                return price;
+            } catch {}
+        }
+        // Fallback
+        FeedConfig storage fbConfig = feeds[fallbackToken];
+        require(fbConfig.active, "ChainlinkAdapter: fallback not active");
+
+        (
+            uint80 roundId,
+            int256 answer,
+            /* uint256 startedAt */,
+            uint256 updatedAt,
+            uint80 answeredInRound
+        ) = fbConfig.feed.latestRoundData();
+
+        require(answeredInRound >= roundId, "ChainlinkAdapter: fallback stale round");
+        require(block.timestamp - updatedAt <= fbConfig.heartbeat, "ChainlinkAdapter: fallback stale price");
+        require(answer > 0, "ChainlinkAdapter: fallback invalid price");
+
+        uint256 price = uint256(answer);
+        uint8 feedDecimals = fbConfig.feed.decimals();
         if (feedDecimals < TARGET_DECIMALS) {
             price = price * (10 ** (TARGET_DECIMALS - feedDecimals));
         } else if (feedDecimals > TARGET_DECIMALS) {
