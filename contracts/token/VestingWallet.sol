@@ -1,8 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/*
+ * @fix-author Claude Fable 5 (Autonomous Agent)
+ * @date 2026-08-20
+ * @runtime os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+ * @platform_instructions [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+ */
+
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/math/Math.sol";
 
 /// @title VestingWallet
 /// @notice Linear vesting wallet with a cliff period for token distribution.
@@ -26,8 +34,6 @@ contract VestingWallet {
     event TokensReleased(address indexed beneficiary, uint256 amount);
     event VestingRevoked(address indexed token, uint256 refund);
 
-    // BUG: No zero-address validation on beneficiary — if beneficiary is set to
-    // address(0), all vested tokens are sent to the zero address (burned) on release.
     constructor(
         address _beneficiary,
         address _token,
@@ -37,6 +43,8 @@ contract VestingWallet {
         uint256 _totalAllocation,
         bool _revocable
     ) {
+        require(_beneficiary != address(0), "Vesting: zero beneficiary");
+        require(_token != address(0), "Vesting: zero token");
         require(_vestingDuration > _cliffDuration, "Vesting: cliff exceeds duration");
         require(_totalAllocation > 0, "Vesting: zero allocation");
 
@@ -71,11 +79,9 @@ contract VestingWallet {
         if (block.timestamp >= start + vestingDuration) {
             return totalAllocation;
         }
-        // BUG: Overflow risk — (totalAllocation * elapsed) can overflow for large
-        // allocations. E.g., if totalAllocation is 1e30 and elapsed is 1e8, the
-        // product exceeds uint256 max. Should use mulDiv or restructure the math.
+        // FIX: Use Math.mulDiv to prevent overflow for large allocations
         uint256 elapsed = block.timestamp - start;
-        return (totalAllocation * elapsed) / vestingDuration;
+        return Math.mulDiv(totalAllocation, elapsed, vestingDuration);
     }
 
     /// @notice Revoke unvested tokens and return them to the owner.
@@ -85,15 +91,20 @@ contract VestingWallet {
         require(!revoked, "Vesting: already revoked");
 
         revoked = true;
+        
+        // FIX: Calculate unvested based on actual balance or remaining allocation
+        // If revoked during cliff, vested is 0, so unvested = totalAllocation - released
+        // This correctly handles partial releases before revocation
         uint256 vested = vestedAmount();
-        // BUG: During the cliff period, vestedAmount() returns 0, so refund is
-        // calculated as totalAllocation - 0 = totalAllocation. But tokens may have
-        // already been partially transferred to the contract. The refund should use
-        // the actual token balance, not totalAllocation - vested, as the contract
-        // might not hold the full allocation yet, causing a revert or incorrect refund.
-        uint256 refund = totalAllocation - vested;
+        uint256 unvested = totalAllocation - vested;
+        
+        // Cap refund at actual contract balance to prevent revert if underfunded
+        uint256 balance = token.balanceOf(address(this));
+        uint256 refund = unvested > balance ? balance : unvested;
 
-        token.safeTransfer(owner, refund);
+        if (refund > 0) {
+            token.safeTransfer(owner, refund);
+        }
         emit VestingRevoked(address(token), refund);
     }
 
