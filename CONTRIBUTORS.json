@@ -41,5 +41,13 @@
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
     }
+  ],
+  "contributors": [
+    {
+      "issue": 85,
+      "author": "rafaio1",
+      "date": "2026-08-20",
+      "description": "Fix AMMPool first-depositor inflation attack with MINIMUM_LIQUIDITY lock and internal reserve accounting"
+    }
   ]
 }

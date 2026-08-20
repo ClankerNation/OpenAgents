@@ -1,3 +1,7 @@
+// @contributor rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -18,6 +22,7 @@ contract AMMPool {
     uint256 public reserveB;
     uint256 public totalLiquidity;
     uint256 public constant FEE_BPS = 30; // 0.3%
+    uint256 public constant MINIMUM_LIQUIDITY = 1000;
 
     mapping(address => uint256) public liquidity;
 
@@ -30,27 +35,31 @@ contract AMMPool {
         tokenB = IERC20(_tokenB);
     }
 
-    // BUG: No minimum liquidity lock — first LP can add tiny liquidity then remove it all,
-    // enabling a well-known inflation attack where attacker donates tokens to manipulate
-    // share price and steal from the next depositor
+    /// @notice Add liquidity with protection against first-depositor inflation attack.
+    /// @dev Locks MINIMUM_LIQUIDITY to address(0) permanently on first deposit.
     function addLiquidity(uint256 amountA, uint256 amountB) external returns (uint256 lpTokens) {
         require(amountA > 0 && amountB > 0, "Zero amounts");
 
         if (totalLiquidity == 0) {
             lpTokens = _sqrt(amountA * amountB);
+            require(lpTokens > MINIMUM_LIQUIDITY, "Insufficient initial liquidity");
+            // Permanently lock minimum liquidity to prevent inflation attack
+            liquidity[address(0)] = MINIMUM_LIQUIDITY;
+            lpTokens -= MINIMUM_LIQUIDITY;
         } else {
             uint256 lpA = (amountA * totalLiquidity) / reserveA;
             uint256 lpB = (amountB * totalLiquidity) / reserveB;
             lpTokens = lpA < lpB ? lpA : lpB;
         }
 
+        require(lpTokens > 0, "Insufficient liquidity minted");
         require(tokenA.transferFrom(msg.sender, address(this), amountA), "Transfer A failed");
         require(tokenB.transferFrom(msg.sender, address(this), amountB), "Transfer B failed");
 
         reserveA += amountA;
         reserveB += amountB;
         liquidity[msg.sender] += lpTokens;
-        totalLiquidity += lpTokens;
+        totalLiquidity += lpTokens + (totalLiquidity == 0 ? MINIMUM_LIQUIDITY : 0);
 
         emit LiquidityAdded(msg.sender, amountA, amountB, lpTokens);
     }
@@ -58,8 +67,11 @@ contract AMMPool {
     function removeLiquidity(uint256 lpTokens) external {
         require(lpTokens > 0 && lpTokens <= liquidity[msg.sender], "Invalid amount");
 
+        // Use internal reserves for calculation to prevent donation-based manipulation
         uint256 amountA = (lpTokens * reserveA) / totalLiquidity;
         uint256 amountB = (lpTokens * reserveB) / totalLiquidity;
+
+        require(amountA > 0 && amountB > 0, "Insufficient liquidity burned");
 
         liquidity[msg.sender] -= lpTokens;
         totalLiquidity -= lpTokens;
