@@ -1,3 +1,7 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -18,6 +22,14 @@ contract LendingPool {
     IPriceFeed public oracle;
     IERC20 public collateralToken;
     IERC20 public borrowToken;
+    address public owner;
+
+    // Borrow caps
+    uint256 public maxBorrowPerAsset;      // Max total borrows for this asset
+    uint256 public maxBorrowPerUserPct;    // Max % of pool a single user can borrow (basis points, e.g., 2500 = 25%)
+    uint256 public maxUtilizationPct;      // Max utilization before blocking new borrows (basis points, e.g., 9500 = 95%)
+
+    event CapsUpdated(uint256 maxBorrowPerAsset, uint256 maxBorrowPerUserPct, uint256 maxUtilizationPct);
 
     // BUG: Liquidation threshold hardcoded to 150% (1.5e18) but the check uses >=,
     // meaning positions at exactly 150% collateral ratio are liquidatable when they
@@ -43,6 +55,10 @@ contract LendingPool {
         oracle = IPriceFeed(_oracle);
         collateralToken = IERC20(_collateralToken);
         borrowToken = IERC20(_borrowToken);
+        owner = msg.sender;
+        maxBorrowPerAsset = type(uint256).max; // No cap by default
+        maxBorrowPerUserPct = 2500;            // 25% per user
+        maxUtilizationPct = 9500;              // 95% max utilization
     }
 
     function deposit(uint256 amount) external {
@@ -55,6 +71,24 @@ contract LendingPool {
 
     function borrow(uint256 amount) external {
         require(amount > 0, "Zero amount");
+
+        // Check per-asset borrow cap
+        require(totalBorrowed + amount <= maxBorrowPerAsset, "Exceeds asset borrow cap");
+
+        // Check per-user borrow cap (max % of total pool)
+        uint256 poolBalance = borrowToken.balanceOf(address(this));
+        uint256 poolTotal = poolBalance + totalBorrowed;
+        if (poolTotal > 0) {
+            uint256 userNewDebt = positions[msg.sender].borrowedAmount + amount;
+            require(userNewDebt * 10000 <= poolTotal * maxBorrowPerUserPct, "Exceeds per-user borrow cap");
+        }
+
+        // Check utilization cap
+        if (poolTotal > 0) {
+            uint256 newUtilization = (totalBorrowed + amount) * 10000 / poolTotal;
+            require(newUtilization <= maxUtilizationPct, "Exceeds max utilization");
+        }
+
         positions[msg.sender].borrowedAmount += amount;
         totalBorrowed += amount;
 
@@ -106,6 +140,21 @@ contract LendingPool {
         uint256 borrowValue = (pos.borrowedAmount * borrowPrice) / PRECISION;
 
         return collateralValue >= (borrowValue * LIQUIDATION_THRESHOLD) / PRECISION;
+    }
+
+    /// @notice Update borrow caps. Only callable by owner.
+    function setCaps(
+        uint256 _maxBorrowPerAsset,
+        uint256 _maxBorrowPerUserPct,
+        uint256 _maxUtilizationPct
+    ) external {
+        require(msg.sender == owner, "Not owner");
+        require(_maxBorrowPerUserPct <= 10000, "Invalid user cap");
+        require(_maxUtilizationPct <= 10000, "Invalid utilization cap");
+        maxBorrowPerAsset = _maxBorrowPerAsset;
+        maxBorrowPerUserPct = _maxBorrowPerUserPct;
+        maxUtilizationPct = _maxUtilizationPct;
+        emit CapsUpdated(_maxBorrowPerAsset, _maxBorrowPerUserPct, _maxUtilizationPct);
     }
 
     function getPosition(address user) external view returns (uint256 collateral, uint256 debt) {
