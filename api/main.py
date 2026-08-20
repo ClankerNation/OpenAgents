@@ -1,13 +1,31 @@
-from fastapi import FastAPI, HTTPException, Query
+# @fix-author rafaio1
+# @date 2026-08-20
+# @runtime os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+# @platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+
+import uuid
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
+
+from .errors import (
+    validation_exception_handler,
+    http_exception_handler,
+    generic_exception_handler,
+)
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+# Register structured error handlers
+app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(Exception, generic_exception_handler)
 
 
 class AgentResponse(BaseModel):
@@ -42,6 +60,15 @@ class LeaderboardEntry(BaseModel):
 # In-memory store (placeholder for DB)
 agents_cache: dict = {}
 tasks_cache: dict = {}
+
+
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    request_id = str(uuid.uuid4())
+    request.state.request_id = request_id
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 
 @app.get("/agents", response_model=list[AgentResponse])
@@ -108,5 +135,5 @@ async def health():
         "status": "ok",
         "agents_indexed": len(agents_cache),
         "tasks_indexed": len(tasks_cache),
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
