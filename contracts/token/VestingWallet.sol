@@ -1,3 +1,7 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -37,6 +41,7 @@ contract VestingWallet {
         uint256 _totalAllocation,
         bool _revocable
     ) {
+        require(_beneficiary != address(0), "Vesting: zero beneficiary");
         require(_vestingDuration > _cliffDuration, "Vesting: cliff exceeds duration");
         require(_totalAllocation > 0, "Vesting: zero allocation");
 
@@ -71,11 +76,9 @@ contract VestingWallet {
         if (block.timestamp >= start + vestingDuration) {
             return totalAllocation;
         }
-        // BUG: Overflow risk — (totalAllocation * elapsed) can overflow for large
-        // allocations. E.g., if totalAllocation is 1e30 and elapsed is 1e8, the
-        // product exceeds uint256 max. Should use mulDiv or restructure the math.
         uint256 elapsed = block.timestamp - start;
-        return (totalAllocation * elapsed) / vestingDuration;
+        // Use mulDiv pattern to prevent intermediate overflow
+        return (totalAllocation / vestingDuration) * elapsed + ((totalAllocation % vestingDuration) * elapsed) / vestingDuration;
     }
 
     /// @notice Revoke unvested tokens and return them to the owner.
@@ -86,12 +89,7 @@ contract VestingWallet {
 
         revoked = true;
         uint256 vested = vestedAmount();
-        // BUG: During the cliff period, vestedAmount() returns 0, so refund is
-        // calculated as totalAllocation - 0 = totalAllocation. But tokens may have
-        // already been partially transferred to the contract. The refund should use
-        // the actual token balance, not totalAllocation - vested, as the contract
-        // might not hold the full allocation yet, causing a revert or incorrect refund.
-        uint256 refund = totalAllocation - vested;
+        uint256 refund = token.balanceOf(address(this)) - (vested - released);
 
         token.safeTransfer(owner, refund);
         emit VestingRevoked(address(token), refund);
