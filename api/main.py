@@ -1,4 +1,14 @@
-from fastapi import FastAPI, HTTPException, Query
+"""
+@contributor-info rafaio1
+@timestamp 2026-08-20T10:05:00Z
+@env os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+@platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+"""
+
+import logging
+import uuid
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -8,6 +18,33 @@ app = FastAPI(
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+# Configure logging with request ID format
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] [request_id=%(request_id)s] %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+
+class RequestIdFilter(logging.Filter):
+    def filter(self, record):
+        record.request_id = getattr(record, "request_id", "-")
+        return True
+
+
+logger.addFilter(RequestIdFilter())
+
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    # Accept client-provided X-Request-ID for distributed tracing, else generate UUID
+    request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+    request.state.request_id = request_id
+
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 
 class AgentResponse(BaseModel):
