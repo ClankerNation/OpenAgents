@@ -1,3 +1,7 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 """Agent CRUD endpoints for the OpenAgents platform."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -12,7 +16,7 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 
 
 class AgentCreate(BaseModel):
-    name: str  # BUG: No validation — name can contain SQL injection, XSS, or be empty
+    name: str
     description: Optional[str] = None
     model_type: str = "gpt-4"
     config: Optional[dict] = None
@@ -26,8 +30,13 @@ class AgentUpdate(BaseModel):
 
 @router.post("/")
 async def create_agent(agent: AgentCreate, user=Depends(get_current_user), db=Depends(get_db)):
+    if not agent.name or not agent.name.strip():
+        raise HTTPException(status_code=400, detail="Agent name cannot be empty")
+    if len(agent.name) > 128:
+        raise HTTPException(status_code=400, detail="Agent name too long")
+
     new_agent = Agent(
-        name=agent.name,
+        name=agent.name.strip(),
         description=agent.description,
         model_type=agent.model_type,
         config=agent.config or {},
@@ -49,8 +58,12 @@ async def list_agents(
 ):
     query = db.query(Agent)
     if owner:
-        # BUG: String interpolation in query — vulnerable to SQL injection
         query = query.filter(Agent.owner_id == owner)
+    # Filter out soft-deleted agents if the field exists
+    if hasattr(Agent, "deleted_at"):
+        query = query.filter(Agent.deleted_at.is_(None))
+    elif hasattr(Agent, "is_deleted"):
+        query = query.filter(Agent.is_deleted.is_(False))
     return query.offset(skip).limit(limit).all()
 
 
@@ -79,10 +92,12 @@ async def update_agent(
 
 # BUG: No authentication — anyone can delete any agent
 @router.delete("/{agent_id}")
-async def delete_agent(agent_id: int, db=Depends(get_db)):
+async def delete_agent(agent_id: int, user=Depends(get_current_user), db=Depends(get_db)):
     agent = db.query(Agent).filter(Agent.id == agent_id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+    if agent.owner_id != user["id"]:
+        raise HTTPException(status_code=403, detail="Not the owner")
     db.delete(agent)
     db.commit()
     return {"deleted": True}
