@@ -1,4 +1,10 @@
-from fastapi import FastAPI, HTTPException, Query
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
+from fastapi import FastAPI, HTTPException, Query, Request
+import uuid
+import logging
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -8,6 +14,21 @@ app = FastAPI(
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+# Configure logger with request ID support
+logger = logging.getLogger("openagents.api")
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    # Accept client-provided X-Request-ID for distributed tracing, or generate new one
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    request.state.request_id = request_id
+    
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
 
 
 class AgentResponse(BaseModel):
