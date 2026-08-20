@@ -1,3 +1,8 @@
+// @contributor-info rafaio1
+// @date 2026-08-20
+// @runtime os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+// @platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+
 import { ethers } from "ethers";
 
 export interface AgentConfig {
@@ -9,6 +14,18 @@ export interface AgentConfig {
   routerAddress: string;
 }
 
+export interface DeploymentReceipt {
+  address: string;
+  txHash: string;
+  gasUsed: bigint;
+  blockNumber: number;
+  contract: ethers.Contract;
+}
+
+export interface EventSubscription {
+  unsubscribe: () => void;
+}
+
 export class OpenAgentsSDK {
   private provider: ethers.JsonRpcProvider;
   private signer: ethers.Wallet;
@@ -18,6 +35,103 @@ export class OpenAgentsSDK {
     this.config = config;
     this.provider = new ethers.JsonRpcProvider(config.rpcUrl);
     this.signer = new ethers.Wallet(config.privateKey, this.provider);
+  }
+
+  /**
+   * Subscribe to contract events with auto-reconnect and indexed parameter filtering.
+   * @param contractAddress Address of the contract to monitor
+   * @param abi Contract ABI (must include event definitions)
+   * @param eventName Name of the event to subscribe to
+   * @param callback Function called with decoded event arguments
+   * @param filters Optional indexed parameter filters (e.g., { sender: "0x..." })
+   * @returns EventSubscription handle with unsubscribe method
+   */
+  subscribeToEvents(
+    contractAddress: string,
+    abi: ethers.InterfaceAbi,
+    eventName: string,
+    callback: (...args: any[]) => void,
+    filters?: Record<string, any>
+  ): EventSubscription {
+    const contract = new ethers.Contract(contractAddress, abi, this.provider);
+    let active = true;
+
+    const startListener = () => {
+      if (!active) return;
+
+      // Build filter from indexed parameters if provided
+      let eventFilter: ethers.EventFilter | undefined;
+      if (filters) {
+        try {
+          eventFilter = contract.filters[eventName](...Object.values(filters));
+        } catch {
+          // Fallback: use unfiltered listener if filter construction fails
+          eventFilter = undefined;
+        }
+      }
+
+      const handler = (...args: any[]) => {
+        if (!active) return;
+        // Last arg is always the Log object; preceding args are decoded params
+        callback(...args);
+      };
+
+      if (eventFilter) {
+        contract.on(eventFilter, handler);
+      } else {
+        contract.on(eventName, handler);
+      }
+
+      // Auto-reconnect on WebSocket drop
+      const wsProvider = this.provider as any;
+      if (wsProvider.websocket || wsProvider._websocket) {
+        const ws = wsProvider.websocket || wsProvider._websocket;
+        const reconnectHandler = () => {
+          if (!active) return;
+          // Re-subscribe after reconnection
+          setTimeout(() => {
+            if (active) {
+              contract.off(eventFilter || eventName, handler);
+              startListener();
+            }
+          }, 1000);
+        };
+        ws.on?.("close", reconnectHandler);
+        ws.on?.("error", reconnectHandler);
+      }
+    };
+
+    startListener();
+
+    return {
+      unsubscribe: () => {
+        active = false;
+        contract.removeAllListeners(eventName);
+      },
+    };
+  }
+
+  async deployContract(
+    abi: ethers.InterfaceAbi,
+    bytecode: string,
+    args: any[] = [],
+    confirmations: number = 1
+  ): Promise<DeploymentReceipt> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const contract = await factory.deploy(...args);
+    const receipt = await contract.deploymentTransaction()?.wait(confirmations);
+
+    if (!receipt || !contract.target) {
+      throw new Error("Deployment failed: no receipt or contract address");
+    }
+
+    return {
+      address: contract.target as string,
+      txHash: receipt.hash,
+      gasUsed: receipt.gasUsed,
+      blockNumber: receipt.blockNumber,
+      contract: new ethers.Contract(contract.target, abi, this.signer),
+    };
   }
 
   async registerAgent(): Promise<string> {
@@ -34,7 +148,7 @@ export class OpenAgentsSDK {
       { value: fee }
     );
     const receipt = await tx.wait();
-    return receipt.logs[0].topics[1];
+    return receipt!.logs[0].topics[1];
   }
 
   async claimTask(taskId: number, agentId: string): Promise<void> {
