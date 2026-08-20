@@ -1,3 +1,7 @@
+// @contributor rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -38,18 +42,29 @@ contract Router {
         emit PoolRegistered(_tokenA, _tokenB, _pool);
     }
 
-    // BUG: No slippage protection — minAmountOut is passed as 0 to every intermediate hop,
-    // so a sandwich attacker can extract maximum value from multi-hop trades
-    // BUG: Path validation missing — no check that path[0] != path[path.length-1],
-    // allowing circular swaps (A->B->A) that waste gas and may be used in attacks
-    // BUG: Intermediate amounts not validated — if a pool returns 0 from swap,
-    // subsequent hops proceed with 0 input, silently producing a 0-output trade
+    /// @notice Execute a multi-hop swap with slippage protection and deadline.
+    /// @param path Array of token addresses defining the swap route.
+    /// @param amountIn Amount of input tokens to swap.
+    /// @param minAmountOut Minimum acceptable output tokens (slippage protection).
+    /// @param deadline Timestamp after which the transaction reverts.
+    /// @return amountOut Actual output tokens received.
     function swapMultiHop(
         address[] calldata path,
         uint256 amountIn,
-        uint256 /* minAmountOut */
+        uint256 minAmountOut,
+        uint256 deadline
     ) external returns (uint256 amountOut) {
-        require(path.length >= 2, "Path too short");
+        require(block.timestamp <= deadline, "Router: expired");
+        require(path.length >= 2, "Router: path too short");
+        require(path[0] != path[path.length - 1], "Router: circular path");
+        require(amountIn > 0, "Router: zero amount");
+
+        // Check for duplicate tokens in path (prevents A->B->A patterns)
+        for (uint256 i = 0; i < path.length; i++) {
+            for (uint256 j = i + 1; j < path.length; j++) {
+                require(path[i] != path[j], "Router: duplicate token in path");
+            }
+        }
 
         IERC20(path[0]).transferFrom(msg.sender, address(this), amountIn);
 
@@ -60,17 +75,33 @@ contract Router {
             address tokenOut = path[i + 1];
 
             address pool = pools[tokenIn][tokenOut];
-            require(pool != address(0), "No pool for pair");
+            require(pool != address(0), "Router: no pool for pair");
+
+            // Calculate proportional minimum for this hop based on final minAmountOut
+            // For intermediate hops, use 99% of estimated output as minimum to allow
+            // for price movement while still protecting against severe slippage
+            uint256 hopMinAmount;
+            if (i == path.length - 2) {
+                // Final hop: enforce exact minAmountOut
+                hopMinAmount = minAmountOut;
+            } else {
+                // Intermediate hops: estimate based on reserves and apply 99% floor
+                (uint256 resA, uint256 resB) = IAMMPool(pool).getReserves();
+                address tA = IAMMPool(pool).tokenA();
+                (uint256 resIn, uint256 resOut) = (tokenIn == tA) ? (resA, resB) : (resB, resA);
+                uint256 estimatedOut = (currentAmount * 9970 * resOut) / (resIn * 10000 + currentAmount * 9970);
+                hopMinAmount = (estimatedOut * 99) / 100;
+                require(hopMinAmount > 0, "Router: zero intermediate amount");
+            }
 
             IERC20(tokenIn).approve(pool, currentAmount);
-
-            // Passes 0 as minAmountOut — no slippage protection on intermediate hops
-            currentAmount = IAMMPool(pool).swap(tokenIn, currentAmount, 0);
+            currentAmount = IAMMPool(pool).swap(tokenIn, currentAmount, hopMinAmount);
+            require(currentAmount > 0, "Router: zero output from hop");
         }
 
         amountOut = currentAmount;
+        require(amountOut >= minAmountOut, "Router: insufficient output");
 
-        // Transfer final tokens to user
         IERC20(path[path.length - 1]).transfer(msg.sender, amountOut);
 
         emit MultiHopSwap(msg.sender, path, amountIn, amountOut);
