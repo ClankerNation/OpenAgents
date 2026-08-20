@@ -1,4 +1,11 @@
+# @contributor-info rafaio1
+# @date 2026-08-20
+# @runtime os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+# @platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+
+import os
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -7,6 +14,23 @@ app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
+)
+
+# CORS Configuration
+# In production, ALLOWED_ORIGINS should be a comma-separated list of specific domains.
+# In development, defaults to wildcard "*" if not set.
+allowed_origins_str = os.getenv("ALLOWED_ORIGINS", "*")
+if allowed_origins_str == "*":
+    allowed_origins = ["*"]
+else:
+    allowed_origins = [origin.strip() for origin in allowed_origins_str.split(",")]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
 )
 
 
