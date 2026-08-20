@@ -1,13 +1,31 @@
+# @fix-author rafaio1
+# @date 2026-08-20T00:00:00Z
+# @runtime linux x64 /tmp/OpenAgents bash
+# @platform-config Agentic bounty-hunter workflow
+
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+from .errors import (
+    StructuredError,
+    structured_error_handler,
+    http_exception_handler,
+    validation_exception_handler,
+)
+from pydantic import ValidationError as PydanticValidationError
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+# Register structured error handlers
+app.add_exception_handler(StructuredError, structured_error_handler)
+app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(PydanticValidationError, validation_exception_handler)
 
 
 class AgentResponse(BaseModel):
