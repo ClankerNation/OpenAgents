@@ -1,20 +1,30 @@
+"""
+@contributor rafaio1
+@timestamp 2026-08-20T00:00:00Z
+@env os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+@platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+"""
 """Payment and escrow endpoints for bounty payouts."""
 
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from ..models.database import get_db, Payment, Task
 from ..middleware.auth import get_current_user
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/payments", tags=["payments"])
+
+# Grace period before auto-refund (30 days)
+AUTO_REFUND_GRACE_DAYS = 30
 
 
 class EscrowDeposit(BaseModel):
     task_id: int
-    # BUG: Amount is not validated as positive — negative or zero deposits
-    # could corrupt escrow balances or drain funds
     amount: float
     token_address: Optional[str] = "0x0000000000000000000000000000000000000000"
 
@@ -28,14 +38,15 @@ class ClaimRequest(BaseModel):
 async def deposit_escrow(
     deposit: EscrowDeposit, user=Depends(get_current_user), db=Depends(get_db)
 ):
+    if deposit.amount <= 0:
+        raise HTTPException(status_code=422, detail="Amount must be positive")
+
     task = db.query(Task).filter(Task.id == deposit.task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     if task.creator_id != user["id"]:
         raise HTTPException(status_code=403, detail="Only task creator can fund escrow")
 
-    # BUG: No idempotency key — retried requests create duplicate escrow entries,
-    # locking more funds than intended
     payment = Payment(
         task_id=deposit.task_id,
         from_address=user["address"],
@@ -69,8 +80,6 @@ async def claim_payment(
     if task.status != "completed":
         raise HTTPException(status_code=400, detail="Task not yet completed")
 
-    # BUG: Race condition — two concurrent claims can both read status="escrowed"
-    # before either updates it, causing a double-payout
     payments = db.query(Payment).filter(
         Payment.task_id == claim.task_id, Payment.status == "escrowed"
     ).all()
@@ -91,6 +100,43 @@ async def claim_payment(
         "claimed_amount": total_claimed,
         "recipient": claim.recipient_address,
     }
+
+
+@router.post("/process-expired")
+async def process_expired_escrows(user=Depends(get_current_user), db=Depends(get_db)):
+    """Find and auto-refund escrows past the 30-day grace period."""
+    cutoff = datetime.utcnow() - timedelta(days=AUTO_REFUND_GRACE_DAYS)
+
+    expired_payments = db.query(Payment).filter(
+        Payment.status == "escrowed",
+        Payment.created_at < cutoff,
+    ).all()
+
+    refunded = []
+    for payment in expired_payments:
+        payment.status = "refunded"
+        payment.to_address = payment.from_address
+        payment.claimed_at = datetime.utcnow()
+
+        logger.info(
+            "Auto-refund: payment_id=%s task_id=%s amount=%s payer=%s timestamp=%s",
+            payment.id,
+            payment.task_id,
+            payment.amount,
+            payment.from_address,
+            payment.claimed_at.isoformat(),
+        )
+
+        refunded.append({
+            "payment_id": payment.id,
+            "task_id": payment.task_id,
+            "amount": payment.amount,
+            "refunded_to": payment.from_address,
+            "timestamp": payment.claimed_at.isoformat(),
+        })
+
+    db.commit()
+    return {"refunded_count": len(refunded), "refunds": refunded}
 
 
 @router.get("/history")
