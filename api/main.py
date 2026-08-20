@@ -3,6 +3,8 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+from .routes import webhooks
+
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
@@ -100,6 +102,9 @@ async def leaderboard(limit: int = Query(20, le=50)):
         )
     entries.sort(key=lambda x: x["reputation"], reverse=True)
     return entries[:limit]
+
+
+app.include_router(webhooks.router)
 
 
 @app.get("/health")

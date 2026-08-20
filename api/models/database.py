@@ -86,5 +86,37 @@ class Payment(Base):
     task = relationship("Task", back_populates="payments")
 
 
+class WebhookSubscription(Base):
+    __tablename__ = "webhook_subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    url = Column(String(512), nullable=False)
+    secret = Column(String(128), nullable=True)
+    events = Column(JSON, default=list)  # ["created", "assigned", "completed", "disputed"]
+    active = Column(Integer, default=1)  # SQLite boolean compat
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    deliveries = relationship("WebhookDelivery", back_populates="subscription", cascade="all, delete-orphan")
+
+
+class WebhookDelivery(Base):
+    __tablename__ = "webhook_deliveries"
+    __table_args__ = (Index("ix_webhook_deliveries_subscription_id", "subscription_id"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    subscription_id = Column(Integer, ForeignKey("webhook_subscriptions.id"), nullable=False)
+    event = Column(String(64), nullable=False)
+    payload = Column(JSON, default=dict)
+    status_code = Column(Integer, nullable=True)
+    success = Column(Integer, default=0)
+    attempts = Column(Integer, default=1)
+    error_message = Column(Text, nullable=True)
+    delivered_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    subscription = relationship("WebhookSubscription", back_populates="deliveries")
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)

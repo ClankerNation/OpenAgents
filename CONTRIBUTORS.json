@@ -40,6 +40,12 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "issue": 33,
+      "author": "rafaio1",
+      "date": "2026-08-20",
+      "description": "Add webhook notification system with HMAC-SHA256 signing, 5x retry with backoff, delivery history, and CRUD endpoints for task state changes"
     }
   ]
 }

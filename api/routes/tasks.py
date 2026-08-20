@@ -1,5 +1,10 @@
+# @contributor rafaio1
+# @date 2026-08-20T00:00:00Z
+# @runtime linux x64 /tmp/OpenAgents bash
+# @platform-config Agentic bounty-hunter workflow
 """Task management endpoints for bounty assignments."""
 
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
@@ -7,6 +12,7 @@ from datetime import datetime
 
 from ..models.database import get_db, Task
 from ..middleware.auth import get_current_user
+from ..services.webhook import notify_task_state_change
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -40,6 +46,13 @@ async def create_task(task: TaskCreate, user=Depends(get_current_user), db=Depen
     db.add(new_task)
     db.commit()
     db.refresh(new_task)
+    
+    # Trigger webhook for task creation
+    asyncio.create_task(notify_task_state_change(
+        db, new_task.id, "created",
+        {"id": new_task.id, "title": new_task.title, "status": new_task.status}
+    ))
+    
     return {"id": new_task.id, "status": new_task.status}
 
 
@@ -85,9 +98,27 @@ async def update_task_status(
     if task.creator_id != user["id"]:
         raise HTTPException(status_code=403, detail="Only the creator can update status")
 
+    if update.status not in VALID_STATUSES:
+        raise HTTPException(status_code=400, detail=f"Invalid status: {update.status}")
+    
+    old_status = task.status
     task.status = update.status
     task.updated_at = datetime.utcnow()
     db.commit()
+    
+    # Map status changes to webhook events
+    event_map = {
+        "assigned": "assigned",
+        "completed": "completed",
+        "review": "disputed",  # review state maps to disputed event
+    }
+    event = event_map.get(update.status)
+    if event and old_status != update.status:
+        asyncio.create_task(notify_task_state_change(
+            db, task.id, event,
+            {"id": task.id, "title": task.title, "old_status": old_status, "new_status": update.status}
+        ))
+    
     return {"id": task.id, "status": task.status}
 
 
