@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/*
+ * @fix-author Claude Fable 5 (Autonomous Agent)
+ * @date 2026-08-20
+ * @runtime os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+ * @platform_instructions [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+ */
+
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract AgentRegistry is Ownable {
@@ -20,6 +27,7 @@ contract AgentRegistry is Ownable {
 
     uint256 public registrationFee;
     uint256 public minReputation;
+    uint256 public constant MAX_BATCH_SIZE = 50;
 
     event AgentRegistered(bytes32 indexed agentId, address indexed owner, string name);
     event AgentDeactivated(bytes32 indexed agentId);
@@ -32,9 +40,32 @@ contract AgentRegistry is Ownable {
 
     function registerAgent(string calldata name, string calldata endpoint) external payable returns (bytes32) {
         require(msg.value >= registrationFee, "Insufficient fee");
+        return _registerAgent(name, endpoint);
+    }
+
+    /// @notice Register multiple agents in a single transaction.
+    /// @param names Array of agent names (max 50).
+    /// @param endpoints Array of agent endpoints (must match names length).
+    /// @return agentIds_ Array of newly created agent IDs.
+    function batchRegister(
+        string[] calldata names,
+        string[] calldata endpoints
+    ) external payable returns (bytes32[] memory agentIds_) {
+        require(names.length == endpoints.length, "Array length mismatch");
+        require(names.length > 0 && names.length <= MAX_BATCH_SIZE, "Invalid batch size");
+        require(msg.value >= registrationFee * names.length, "Insufficient total fee");
+
+        agentIds_ = new bytes32[](names.length);
+        for (uint256 i = 0; i < names.length; i++) {
+            agentIds_[i] = _registerAgent(names[i], endpoints[i]);
+        }
+    }
+
+    function _registerAgent(string calldata name, string calldata endpoint) internal returns (bytes32) {
         require(bytes(name).length > 0 && bytes(name).length <= 64, "Invalid name");
 
-        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp));
+        // Use unique salt per agent to prevent ID collision in same block
+        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp, agentIds.length));
 
         require(agents[agentId].registeredAt == 0, "Agent exists");
 
