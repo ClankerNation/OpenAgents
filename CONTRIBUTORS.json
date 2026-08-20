@@ -220,6 +220,19 @@
         "shell": "bash"
       },
       "contribution": "Fixed unchecked ERC20 return values in TaskRouter with SafeERC20 and added completeTaskWithToken"
+    },
+    {
+      "name": "rafaio1",
+      "timestamp": "2026-08-20T00:00:00Z",
+      "platform_instructions": "[OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/root",
+        "working_dir": "/tmp/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "Fixed PaymentEscrow zero-amount check and fee-on-transfer token support with balance-before/after pattern"
     }
   ]
 }
