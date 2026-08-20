@@ -1,12 +1,73 @@
+"""
+@fix-author rafaio1
+@date 2026-08-20T12:25:00Z
+@runtime os=linux, arch=x64, working_dir=/tmp/OpenAgents, shell=bash
+@platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+"""
+
 """Task management endpoints for bounty assignments."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import asyncio
+import json
+import time
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Dict, Set
 from datetime import datetime
 
 from ..models.database import get_db, Task
 from ..middleware.auth import get_current_user
+
+
+# --- WebSocket Manager for Real-Time Task Updates ---
+class TaskWebSocketManager:
+    """Manages WebSocket connections for real-time task updates."""
+    
+    def __init__(self):
+        self.task_subscribers: Dict[int, Set[WebSocket]] = {}
+        self.active_connections: Set[WebSocket] = set()
+    
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.add(websocket)
+    
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.discard(websocket)
+        for task_id in list(self.task_subscribers.keys()):
+            self.task_subscribers[task_id].discard(websocket)
+            if not self.task_subscribers[task_id]:
+                del self.task_subscribers[task_id]
+    
+    def subscribe(self, websocket: WebSocket, task_id: int):
+        if task_id not in self.task_subscribers:
+            self.task_subscribers[task_id] = set()
+        self.task_subscribers[task_id].add(websocket)
+    
+    def unsubscribe(self, websocket: WebSocket, task_id: int):
+        if task_id in self.task_subscribers:
+            self.task_subscribers[task_id].discard(websocket)
+            if not self.task_subscribers[task_id]:
+                del self.task_subscribers[task_id]
+    
+    async def broadcast_task_update(self, task_id: int, data: dict):
+        message = json.dumps({"type": "task_update", "task_id": task_id, "data": data})
+        subscribers = self.task_subscribers.get(task_id, set()).copy()
+        for ws in subscribers:
+            try:
+                await ws.send_text(message)
+            except Exception:
+                self.disconnect(ws)
+    
+    async def send_heartbeat(self, websocket: WebSocket):
+        try:
+            while websocket in self.active_connections:
+                await websocket.send_text(json.dumps({"type": "heartbeat", "timestamp": int(time.time())}))
+                await asyncio.sleep(30)
+        except Exception:
+            self.disconnect(websocket)
+
+
+ws_manager = TaskWebSocketManager()
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -103,3 +164,53 @@ async def cancel_task(task_id: int, user=Depends(get_current_user), db=Depends(g
     task.status = "cancelled"
     db.commit()
     return {"id": task.id, "status": "cancelled"}
+
+
+@router.websocket("/ws")
+async def task_websocket(websocket: WebSocket):
+    """WebSocket endpoint for real-time task updates.
+    
+    Protocol:
+    - Client sends: {"action": "subscribe", "task_id": 123}
+    - Client sends: {"action": "unsubscribe", "task_id": 123}
+    - Server sends: {"type": "task_update", "task_id": 123, "data": {...}}
+    - Server sends: {"type": "heartbeat", "timestamp": 1234567890}
+    """
+    await ws_manager.connect(websocket)
+    heartbeat_task = asyncio.create_task(ws_manager.send_heartbeat(websocket))
+    
+    try:
+        while True:
+            data = await websocket.receive_text()
+            try:
+                message = json.loads(data)
+                action = message.get("action")
+                task_id = message.get("task_id")
+                
+                if action == "subscribe" and task_id is not None:
+                    ws_manager.subscribe(websocket, int(task_id))
+                    await websocket.send_text(json.dumps({
+                        "type": "subscribed",
+                        "task_id": task_id
+                    }))
+                elif action == "unsubscribe" and task_id is not None:
+                    ws_manager.unsubscribe(websocket, int(task_id))
+                    await websocket.send_text(json.dumps({
+                        "type": "unsubscribed",
+                        "task_id": task_id
+                    }))
+                else:
+                    await websocket.send_text(json.dumps({
+                        "type": "error",
+                        "message": "Invalid action. Use 'subscribe' or 'unsubscribe' with 'task_id'"
+                    }))
+            except json.JSONDecodeError:
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "message": "Invalid JSON"
+                }))
+    except WebSocketDisconnect:
+        pass
+    finally:
+        heartbeat_task.cancel()
+        ws_manager.disconnect(websocket)
