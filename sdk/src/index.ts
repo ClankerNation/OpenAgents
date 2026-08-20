@@ -1,3 +1,7 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 import { ethers } from "ethers";
 
 export interface AgentConfig {
@@ -18,6 +22,61 @@ export class OpenAgentsSDK {
     this.config = config;
     this.provider = new ethers.JsonRpcProvider(config.rpcUrl);
     this.signer = new ethers.Wallet(config.privateKey, this.provider);
+  }
+
+  /**
+   * Simulate a transaction before sending to prevent failed transactions and gas waste.
+   * @param tx Transaction request to simulate
+   * @returns Simulation result with success status and optional error/revert reason
+   */
+  async simulateTransaction(tx: ethers.TransactionRequest): Promise<{
+    success: boolean;
+    gasUsed?: bigint;
+    revertReason?: string;
+    returnValue?: string;
+  }> {
+    try {
+      const result = await this.provider.call({
+        ...tx,
+        from: tx.from || this.signer.address,
+      });
+      
+      // Estimate gas for the same transaction
+      const gasUsed = await this.provider.estimateGas({
+        ...tx,
+        from: tx.from || this.signer.address,
+      });
+
+      return {
+        success: true,
+        gasUsed,
+        returnValue: result,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        revertReason: error.reason || error.message || "Unknown revert reason",
+      };
+    }
+  }
+
+  /**
+   * Send a transaction with pre-flight simulation check.
+   * Throws if simulation fails unless skipSimulation is true.
+   */
+  async safeSendTransaction(
+    tx: ethers.TransactionRequest,
+    options?: { skipSimulation?: boolean }
+  ): Promise<ethers.ContractTransactionResponse> {
+    if (!options?.skipSimulation) {
+      const sim = await this.simulateTransaction(tx);
+      if (!sim.success) {
+        throw new Error(`Transaction simulation failed: ${sim.revertReason}`);
+      }
+    }
+
+    const response = await this.signer.sendTransaction(tx);
+    return response as unknown as ethers.ContractTransactionResponse;
   }
 
   async registerAgent(): Promise<string> {
