@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/**
+ * @contributor rafaio1
+ * @timestamp 2026-08-20T00:15:00Z
+ * @env os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+ * @platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+ */
+
+
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -37,6 +45,7 @@ contract MultiTokenStaking is Ownable, ReentrancyGuard {
     event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
     event Harvest(address indexed user, uint256 indexed pid, uint256 amount);
+    event EmergencyWithdraw(address indexed user, uint256 indexed pid, uint256 amount);
 
     // BUG: Missing zero-address validation — rewardToken can be set to address(0),
     // causing all reward transfers to silently burn tokens or revert unpredictably.
@@ -132,6 +141,24 @@ contract MultiTokenStaking is Ownable, ReentrancyGuard {
         emit Withdraw(msg.sender, pid, amount);
     }
 
+
+    /// @notice Emergency withdraw staked tokens without rewards.
+    /// @param pid Pool ID.
+    /// @dev Used when contract is compromised or paused. Resets reward debt and returns principal only.
+    function emergencyWithdraw(uint256 pid) external nonReentrant {
+        PoolInfo storage pool = poolInfo[pid];
+        UserInfo storage user = userInfo[pid][msg.sender];
+        uint256 amount = user.amount;
+        require(amount > 0, "MultiStaking: no stake");
+
+        user.amount = 0;
+        user.rewardDebt = 0;
+        pool.totalStaked -= amount;
+
+        pool.stakeToken.safeTransfer(msg.sender, amount);
+        emit EmergencyWithdraw(msg.sender, pid, amount);
+    }
+
     /// @notice View pending rewards for a user in a pool.
     function pendingReward(uint256 pid, address _user) external view returns (uint256) {
         PoolInfo memory pool = poolInfo[pid];
@@ -144,4 +171,55 @@ contract MultiTokenStaking is Ownable, ReentrancyGuard {
         }
         return user.amount * accRewardPerShare / 1e12 - user.rewardDebt;
     }
+
+    // Timelock ownership transfer
+    address private _pendingOwner;
+    uint256 private _ownershipTransferDeadline;
+    uint256 public constant OWNERSHIP_TIMELOCK = 2 days;
+
+    event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner, uint256 deadline);
+    event OwnershipTransferAccepted(address indexed previousOwner, address indexed newOwner);
+    event OwnershipTransferCancelled(address indexed previousOwner, address indexed cancelledOwner);
+
+    /// @notice Start ownership transfer with 2-day timelock.
+    /// @param newOwner Address of the pending owner.
+    function transferOwnership(address newOwner) public override onlyOwner {
+        require(newOwner != address(0), "Ownable: zero address");
+        require(newOwner != owner(), "Ownable: same owner");
+        _pendingOwner = newOwner;
+        _ownershipTransferDeadline = block.timestamp + OWNERSHIP_TIMELOCK;
+        emit OwnershipTransferStarted(owner(), newOwner, _ownershipTransferDeadline);
+    }
+
+    /// @notice Accept ownership after timelock period.
+    function acceptOwnership() external {
+        require(msg.sender == _pendingOwner, "Ownable: not pending owner");
+        require(block.timestamp >= _ownershipTransferDeadline, "Ownable: timelock active");
+        
+        address oldOwner = owner();
+        _transferOwnership(_pendingOwner);
+        _pendingOwner = address(0);
+        _ownershipTransferDeadline = 0;
+        emit OwnershipTransferAccepted(oldOwner, msg.sender);
+    }
+
+    /// @notice Cancel pending ownership transfer.
+    function cancelOwnershipTransfer() external onlyOwner {
+        require(_pendingOwner != address(0), "Ownable: no pending transfer");
+        address cancelled = _pendingOwner;
+        _pendingOwner = address(0);
+        _ownershipTransferDeadline = 0;
+        emit OwnershipTransferCancelled(owner(), cancelled);
+    }
+
+    /// @notice Get pending owner address.
+    function pendingOwner() external view returns (address) {
+        return _pendingOwner;
+    }
+
+    /// @notice Get ownership transfer deadline.
+    function ownershipTransferDeadline() external view returns (uint256) {
+        return _ownershipTransferDeadline;
+    }
+
 }
