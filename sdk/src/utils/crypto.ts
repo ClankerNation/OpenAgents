@@ -1,10 +1,14 @@
+/**
+ * @contributor rafaio1
+ * @timestamp 2026-08-20T01:45:00Z
+ * @env os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+ * @platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+ */
+
 import { createHash, createHmac, randomBytes } from "crypto";
 import { ec as EC } from "elliptic";
 
 const secp256k1 = new EC("secp256k1");
-
-// BUG: Hardcoded salt — should be randomly generated per operation
-const DERIVATION_SALT = "openagents-v1-static-salt";
 
 export interface KeyPair {
   publicKey: string;
@@ -24,27 +28,28 @@ export function keccak256(data: string | Buffer): string {
   return createHash("sha3-256").update(input).digest("hex");
 }
 
-export function deriveKey(password: string, iterations = 100_000): Buffer {
-  const hmac = createHmac("sha256", DERIVATION_SALT);
-  let result = hmac.update(password).digest();
+export function deriveKey(password: string, salt?: Buffer, iterations = 100_000): Buffer {
+  const s = salt || randomBytes(32);
+  let result = createHmac("sha256", s).update(password).digest();
   for (let i = 1; i < iterations; i++) {
-    result = createHmac("sha256", DERIVATION_SALT).update(result).digest();
+    result = createHmac("sha256", s).update(result).digest();
   }
   return result;
 }
 
 export function generateNonce(): string {
-  // BUG: Math.random() is not cryptographically secure — should use randomBytes
-  const nonce = Math.random().toString(36).substring(2, 15) +
-    Math.random().toString(36).substring(2, 15);
-  return nonce;
+  return randomBytes(16).toString("hex");
 }
 
 export function signMessage(privateKey: string, message: string): string {
-  const msgHash = keccak256(message);
+  const msgHash = hashPersonalMessage(message);
   const key = secp256k1.keyFromPrivate(privateKey, "hex");
-  const signature = key.sign(msgHash);
-  return signature.toDER("hex");
+  const signature = key.sign(Buffer.from(msgHash, "hex"));
+  // Return hex signature with recovery param appended
+  const r = signature.r.toString("hex").padStart(64, "0");
+  const s = signature.s.toString("hex").padStart(64, "0");
+  const v = (signature.recoveryParam + 27).toString(16).padStart(2, "0");
+  return r + s + v;
 }
 
 export function verifySignature(
@@ -52,12 +57,12 @@ export function verifySignature(
   message: string,
   signature: string
 ): boolean {
-  // BUG: No validation on signature length — malformed signatures
-  // could cause unexpected behavior or bypass checks
-  const msgHash = keccak256(message);
+  const msgHash = hashPersonalMessage(message);
   try {
+    // Strip recovery param if present (last byte)
+    const sigHex = signature.length === 132 ? signature.slice(0, 130) : signature;
     const key = secp256k1.keyFromPublic(publicKey, "hex");
-    return key.verify(msgHash, signature);
+    return key.verify(Buffer.from(msgHash, "hex"), sigHex);
   } catch {
     return false;
   }
@@ -68,12 +73,73 @@ export function hashPersonalMessage(message: string): string {
   return keccak256(prefix + message);
 }
 
-export function recoverPublicKey(
+/**
+ * Recover public key from signature and message.
+ * @param message Original signed message
+ * @param signature Hex signature (65 bytes: r[32] + s[32] + v[1])
+ * @returns Uncompressed public key hex string
+ */
+export function recoverPublicKey(message: string, signature: string): string {
+  const msgHash = Buffer.from(hashPersonalMessage(message), "hex");
+  
+  // Parse signature components
+  const r = signature.slice(0, 64);
+  const s = signature.slice(64, 128);
+  const v = parseInt(signature.slice(128, 130), 16);
+  const recoveryParam = v >= 27 ? v - 27 : v;
+  
+  const recovered = secp256k1.recoverPubKey(
+    msgHash,
+    { r, s },
+    recoveryParam
+  );
+  
+  return recovered.encode("hex", false);
+}
+
+/**
+ * Recover compressed public key from signature.
+ */
+export function recoverCompressedPublicKey(message: string, signature: string): string {
+  const msgHash = Buffer.from(hashPersonalMessage(message), "hex");
+  
+  const r = signature.slice(0, 64);
+  const s = signature.slice(64, 128);
+  const v = parseInt(signature.slice(128, 130), 16);
+  const recoveryParam = v >= 27 ? v - 27 : v;
+  
+  const recovered = secp256k1.recoverPubKey(
+    msgHash,
+    { r, s },
+    recoveryParam
+  );
+  
+  return recovered.encode("hex", true);
+}
+
+/**
+ * Derive Ethereum address from public key.
+ */
+export function publicKeyToAddress(publicKey: string): string {
+  // Remove 04 prefix if uncompressed
+  const pub = publicKey.startsWith("04") ? publicKey.slice(2) : publicKey;
+  const hash = keccak256(Buffer.from(pub, "hex"));
+  return "0x" + hash.slice(-40);
+}
+
+/**
+ * Validate that a signature was created by the expected address.
+ */
+export function isValidSignature(
   message: string,
   signature: string,
-  recoveryParam: number
-): string {
-  const msgHash = Buffer.from(keccak256(message), "hex");
-  const recovered = secp256k1.recoverPubKey(msgHash, signature, recoveryParam);
-  return recovered.encode("hex", false);
+  expectedAddress: string
+): boolean {
+  try {
+    const recovered = recoverPublicKey(message, signature);
+    const address = publicKeyToAddress(recovered);
+    return address.toLowerCase() === expectedAddress.toLowerCase();
+  } catch {
+    return false;
+  }
 }
