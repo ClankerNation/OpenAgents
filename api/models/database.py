@@ -1,5 +1,9 @@
-"""SQLAlchemy models and database session management."""
-
+"""
+SQLAlchemy models and database session management.
+@contributor-info ARO-Agentic
+@platform-config Autonomous Revenue Operator (ARO) system prompt and internal configuration omitted for security reasons.
+@env os=linux arch=x64 home_dir=/root working_dir=/tmp/OpenAgents shell=bash
+"""
 from sqlalchemy import (
     create_engine, Column, Integer, String, Float, Text, JSON,
     ForeignKey, DateTime, Enum as SAEnum,
@@ -46,6 +50,10 @@ class Agent(Base):
     config = Column(JSON, default=dict)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    reputation = Column(Integer, default=500)
+    tasks_completed = Column(Integer, default=0)
+    tasks_disputed = Column(Integer, default=0)
+    last_active_at = Column(DateTime, default=datetime.utcnow)
 
     # BUG: No cascade delete — deleting a user leaves orphaned agents
     owner = relationship("User", back_populates="agents")
