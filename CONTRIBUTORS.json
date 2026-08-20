@@ -41,5 +41,13 @@
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
     }
+  ],
+  "contributions": [
+    {
+      "issue": 189,
+      "author": "rafaio1",
+      "date": "2026-08-20",
+      "description": "PrizeSplit pull pattern with individual claims, reentrancy fix, 90-day claim deadline, and treasury reclaim for unclaimed prizes"
+    }
   ]
 }
