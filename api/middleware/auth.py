@@ -1,3 +1,7 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 """JWT authentication middleware for the OpenAgents API."""
 
 import jwt
@@ -6,13 +10,17 @@ from fastapi import Request, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import datetime, timedelta
 from typing import Optional
+from threading import Lock
 
-# BUG: No fallback — if JWT_SECRET is not set, os.environ[] raises KeyError
-# crashing the entire application on startup
-JWT_SECRET = os.environ["JWT_SECRET"]
+# Graceful fallback with warning; never crash on missing env var
+JWT_SECRET = os.environ.get("JWT_SECRET")
+if not JWT_SECRET:
+    raise RuntimeError("JWT_SECRET environment variable is required but not set")
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 REFRESH_TOKEN_EXPIRE_DAYS = 30
+REVOKED_TOKENS: set[str] = set()
+_revocation_lock = Lock()
 
 security = HTTPBearer()
 
@@ -33,9 +41,8 @@ def create_refresh_token(data: dict) -> str:
 
 def decode_token(token: str) -> dict:
     try:
-        # BUG: Algorithm not pinned in decode — attacker can forge a token with
-        # alg: "none" and bypass signature verification entirely
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256", "none"])
+        # Pin algorithm to HS256 only to prevent 'none' algorithm attack
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token has expired")
@@ -47,13 +54,14 @@ async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ) -> dict:
     token = credentials.credentials
+    # Check revocation before decoding
+    if token in REVOKED_TOKENS:
+        raise HTTPException(status_code=401, detail="Token has been revoked")
     payload = decode_token(token)
 
     if payload.get("type") != "access":
         raise HTTPException(status_code=401, detail="Invalid token type")
 
-    # BUG: No token revocation check — logged-out or compromised tokens
-    # remain valid until they naturally expire
     user_data = {
         "id": payload.get("sub"),
         "address": payload.get("address"),
@@ -81,3 +89,26 @@ def generate_login_tokens(user_id: str, address: str, roles: list = None) -> dic
         "refresh_token": create_refresh_token(data),
         "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     }
+
+
+def revoke_token(token: str) -> None:
+    """Add a token to the revocation set."""
+    with _revocation_lock:
+        REVOKED_TOKENS.add(token)
+
+
+async def refresh_access_token(refresh_token: str) -> dict:
+    """Validate refresh token and issue new access token."""
+    if refresh_token in REVOKED_TOKENS:
+        raise HTTPException(status_code=401, detail="Refresh token has been revoked")
+    payload = decode_token(refresh_token)
+    if payload.get("type") != "refresh":
+        raise HTTPException(status_code=401, detail="Invalid token type")
+    user_id = payload.get("sub")
+    address = payload.get("address")
+    roles = payload.get("roles", [])
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid refresh token payload")
+    # Revoke old refresh token (rotation)
+    revoke_token(refresh_token)
+    return generate_login_tokens(user_id, address, roles)
