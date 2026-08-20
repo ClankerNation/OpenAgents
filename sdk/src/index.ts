@@ -1,3 +1,10 @@
+/**
+ * @contributor-info rafaio1
+ * @timestamp 2026-08-20T13:55:00Z
+ * @env os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+ * @platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+ */
+
 import { ethers } from "ethers";
 
 export interface AgentConfig {
@@ -7,6 +14,14 @@ export interface AgentConfig {
   rpcUrl: string;
   registryAddress: string;
   routerAddress: string;
+}
+
+export interface DeploymentReceipt {
+  address: string;
+  txHash: string;
+  gasUsed: bigint;
+  blockNumber: number;
+  contract: ethers.Contract;
 }
 
 export class OpenAgentsSDK {
@@ -58,6 +73,38 @@ export class OpenAgentsSDK {
       ethers.toUtf8Bytes(result)
     );
     await tx.wait();
+  }
+
+  /**
+   * Deploy a contract and wait for confirmation.
+   * @param abi Contract ABI (ethers Interface compatible)
+   * @param bytecode Contract bytecode (hex string)
+   * @param args Constructor arguments
+   * @param confirmations Number of block confirmations to wait (default 1)
+   * @returns DeploymentReceipt with address, tx hash, gas used, and contract instance
+   */
+  async deployContract(
+    abi: ethers.InterfaceAbi,
+    bytecode: string,
+    args: unknown[] = [],
+    confirmations: number = 1
+  ): Promise<DeploymentReceipt> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const contract = await factory.deploy(...args);
+    
+    // Wait for deployment transaction to be mined and confirmed
+    const receipt = await contract.deploymentTransaction()?.wait(confirmations);
+    if (!receipt || !contract.target) {
+      throw new Error("Deployment failed: no receipt or contract address");
+    }
+
+    return {
+      address: contract.target as string,
+      txHash: receipt.hash,
+      gasUsed: receipt.gasUsed,
+      blockNumber: receipt.blockNumber,
+      contract: contract as ethers.Contract,
+    };
   }
 
   async getOpenTasks(): Promise<any[]> {
