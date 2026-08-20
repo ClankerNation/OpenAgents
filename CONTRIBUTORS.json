@@ -41,5 +41,13 @@
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
     }
+  ],
+  "contributions": [
+    {
+      "issue": 168,
+      "author": "rafaio1",
+      "date": "2026-08-20",
+      "description": "CompoundVault strategy loss validation with balance check, totalLoss tracking, proportional share price reduction, and StrategyLoss event"
+    }
   ]
 }
