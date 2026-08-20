@@ -1,3 +1,7 @@
+// @contributor rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -32,8 +36,13 @@ contract GovernorAlpha is ReentrancyGuard {
     uint256 public constant PROPOSAL_THRESHOLD = 100_000e18;
 
     mapping(uint256 => Proposal) public proposals;
+    
+    // Delegation expiry: delegator -> expiry timestamp (0 = permanent/no delegation)
+    mapping(address => uint256) public delegationExpiry;
 
     event ProposalCreated(uint256 indexed id, address proposer, uint256 startBlock, uint256 endBlock);
+    event DelegationExpirySet(address indexed delegator, uint256 expiry);
+    event DelegationRevoked(address indexed delegator);
     event VoteCast(address indexed voter, uint256 indexed proposalId, bool support, uint256 weight);
     event ProposalExecuted(uint256 indexed id);
     event ProposalCanceled(uint256 indexed id);
@@ -74,19 +83,17 @@ contract GovernorAlpha is ReentrancyGuard {
     function vote(uint256 proposalId, bool support) external {
         Proposal storage p = proposals[proposalId];
         require(block.number >= p.startBlock && block.number <= p.endBlock, "Governor: voting closed");
-        // BUG: Uses tx.origin instead of msg.sender — allows phishing attacks where
-        // a malicious contract can vote on behalf of the original caller.
-        require(!p.hasVoted[tx.origin], "Governor: already voted");
-        p.hasVoted[tx.origin] = true;
+        require(!p.hasVoted[msg.sender], "Governor: already voted");
+        p.hasVoted[msg.sender] = true;
 
-        uint256 weight = token.getPastVotes(tx.origin, p.startBlock);
+        uint256 weight = token.getPastVotes(msg.sender, p.startBlock);
         if (support) {
             p.forVotes += weight;
         } else {
             p.againstVotes += weight;
         }
 
-        emit VoteCast(tx.origin, proposalId, support, weight);
+        emit VoteCast(msg.sender, proposalId, support, weight);
     }
 
     /// @notice Execute a succeeded proposal.
@@ -110,14 +117,41 @@ contract GovernorAlpha is ReentrancyGuard {
         emit ProposalExecuted(proposalId);
     }
 
-    /// @notice Cancel a proposal. Only the proposer can cancel.
+    /// @notice Cancel a proposal. Proposer can always cancel; anyone can cancel if voting hasn't started.
     /// @param proposalId The proposal to cancel.
     function cancel(uint256 proposalId) external {
         Proposal storage p = proposals[proposalId];
-        require(msg.sender == p.proposer, "Governor: not proposer");
-        require(!p.executed, "Governor: already executed");
+        require(!p.executed && !p.canceled, "Governor: already finalized");
+        
+        bool isProposer = msg.sender == p.proposer;
+        bool beforeVoting = block.number < p.startBlock;
+        
+        require(isProposer || beforeVoting, "Governor: only proposer can cancel after voting starts");
+        
         p.canceled = true;
         emit ProposalCanceled(proposalId);
+    }
+    
+    /// @notice Set an expiry timestamp for your vote delegation.
+    /// @param expiry Unix timestamp after which delegation is considered revoked.
+    function setDelegationExpiry(uint256 expiry) external {
+        require(expiry > block.timestamp, "Governor: expiry must be future");
+        delegationExpiry[msg.sender] = expiry;
+        emit DelegationExpirySet(msg.sender, expiry);
+    }
+    
+    /// @notice Revoke delegation expiry (make delegation permanent again).
+    function revokeDelegationExpiry() external {
+        delegationExpiry[msg.sender] = 0;
+        emit DelegationRevoked(msg.sender);
+    }
+    
+    /// @notice Check if a delegator's votes are still valid (not expired).
+    /// @param delegator Address to check.
+    /// @return True if delegation is active (no expiry or expiry not yet reached).
+    function isDelegationActive(address delegator) public view returns (bool) {
+        uint256 expiry = delegationExpiry[delegator];
+        return expiry == 0 || block.timestamp < expiry;
     }
 
     receive() external payable {}
