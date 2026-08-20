@@ -1,3 +1,7 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -22,14 +26,77 @@ contract TaskRouter {
     uint256 public taskCount;
     uint256 public platformFee; // basis points
 
+    // Gas sponsorship state
+    mapping(bytes32 => uint256) public agentNonces;
+    mapping(bytes32 => uint256) public agentStake;
+
     event TaskCreated(uint256 indexed taskId, address indexed creator, uint256 reward);
     event TaskAssigned(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskCompleted(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskDisputed(uint256 indexed taskId);
+    event SponsoredExecution(bytes32 indexed agentId, address indexed relayer, uint256 gasReimbursed);
+    event StakeDeposited(bytes32 indexed agentId, uint256 amount);
 
     constructor(address _registry, uint256 _platformFee) {
         registry = AgentRegistry(_registry);
         platformFee = _platformFee;
+    }
+
+    /// @notice Deposit ETH stake for gas sponsorship reimbursement
+    /// @param agentId The agent identifier
+    function depositStake(bytes32 agentId) external payable {
+        require(msg.value > 0, "Zero stake");
+        AgentRegistry.Agent memory agent = registry.getAgent(agentId);
+        require(agent.owner == msg.sender, "Not agent owner");
+        agentStake[agentId] += msg.value;
+        emit StakeDeposited(agentId, msg.value);
+    }
+
+    /// @notice Execute a task operation on behalf of an agent with gas sponsorship
+    /// @param agentId The agent identifier
+    /// @param data The encoded function call to execute
+    /// @param nonce The agent's current nonce for replay protection
+    /// @param signature ECDSA signature of keccak256(abi.encodePacked(agentId, data, nonce, address(this)))
+    function executeOnBehalf(
+        bytes32 agentId,
+        bytes calldata data,
+        uint256 nonce,
+        bytes calldata signature
+    ) external returns (bool success) {
+        // Verify nonce for replay protection
+        require(nonce == agentNonces[agentId], "Invalid nonce");
+
+        // Verify agent has sufficient stake for gas reimbursement
+        require(agentStake[agentId] > 0, "Insufficient stake");
+
+        // Reconstruct signed message and verify signature
+        bytes32 digest = keccak256(abi.encodePacked(agentId, data, nonce, address(this)));
+        bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", digest));
+        address signer = ecrecover(ethSignedHash, uint8(signature[64]), bytes32(signature[:32]), bytes32(signature[32:64]));
+
+        AgentRegistry.Agent memory agent = registry.getAgent(agentId);
+        require(signer == agent.owner, "Invalid signature");
+
+        // Increment nonce before execution to prevent reentrancy-based replay
+        agentNonces[agentId] = nonce + 1;
+
+        // Record gas before execution
+        uint256 gasBefore = gasleft();
+
+        // Execute the delegated call
+        (success, ) = address(this).call(data);
+
+        // Calculate gas used and reimburse relayer from agent stake
+        uint256 gasUsed = gasBefore - gasleft() + 30000; // base overhead
+        uint256 gasCost = gasUsed * tx.gasprice;
+
+        require(agentStake[agentId] >= gasCost, "Stake insufficient for gas");
+        agentStake[agentId] -= gasCost;
+
+        (bool reimbursed, ) = msg.sender.call{value: gasCost}("");
+        require(reimbursed, "Reimbursement failed");
+
+        emit SponsoredExecution(agentId, msg.sender, gasCost);
     }
 
     function createTask(string calldata description, uint256 deadline) external payable returns (uint256) {
@@ -103,5 +170,17 @@ contract TaskRouter {
 
         task.status = TaskStatus.Disputed;
         emit TaskDisputed(taskId);
+    }
+
+    /// @notice Get current nonce for an agent
+    /// @param agentId The agent identifier
+    function getAgentNonce(bytes32 agentId) external view returns (uint256) {
+        return agentNonces[agentId];
+    }
+
+    /// @notice Get staked balance for an agent
+    /// @param agentId The agent identifier
+    function getAgentStake(bytes32 agentId) external view returns (uint256) {
+        return agentStake[agentId];
     }
 }
