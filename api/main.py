@@ -1,4 +1,9 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 from fastapi import FastAPI, HTTPException, Query
+import time
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -41,6 +46,48 @@ class LeaderboardEntry(BaseModel):
 
 # In-memory store (placeholder for DB)
 agents_cache: dict = {}
+
+# Reputation Scoring System
+MAX_REPUTATION = 1000
+REPUTATION_DECAY_RATE = 0.01  # 1% weekly decay
+LAST_ACTIVITY_KEY = "last_active"
+
+def calculate_reputation(agent: dict) -> int:
+    """Calculate reputation score (0-1000) based on completion rate, disputes, and activity."""
+    completed = agent.get("tasks_completed", 0)
+    disputed = agent.get("tasks_disputed", 0)
+    total = completed + disputed
+    
+    if total == 0:
+        base_score = 500  # Neutral starting reputation
+    else:
+        completion_rate = completed / total
+        dispute_penalty = disputed * 50  # Each dispute costs 50 points
+        base_score = int(completion_rate * 1000) - dispute_penalty
+    
+    # Apply time-based decay for inactive agents
+    last_active = agent.get(LAST_ACTIVITY_KEY, agent.get("registered_at"))
+    if isinstance(last_active, datetime):
+        weeks_inactive = (datetime.utcnow() - last_active).days / 7
+        decay = int(base_score * REPUTATION_DECAY_RATE * weeks_inactive)
+        final_score = max(0, min(MAX_REPUTATION, base_score - decay))
+    else:
+        final_score = max(0, min(MAX_REPUTATION, base_score))
+    
+    return final_score
+
+def update_agent_reputation(agent_id: str, success: bool = True):
+    """Update agent reputation after task completion or dispute."""
+    if agent_id in agents_cache:
+        agent = agents_cache[agent_id]
+        if success:
+            agent["tasks_completed"] = agent.get("tasks_completed", 0) + 1
+        else:
+            agent["tasks_disputed"] = agent.get("tasks_disputed", 0) + 1
+        agent[LAST_ACTIVITY_KEY] = datetime.utcnow()
+        agent["reputation"] = calculate_reputation(agent)
+
+
 tasks_cache: dict = {}
 
 
@@ -89,13 +136,17 @@ async def leaderboard(limit: int = Query(20, le=50)):
     entries = []
     for agent in agents_cache.values():
         completed = agent.get("tasks_completed", 0)
+        disputed = agent.get("tasks_disputed", 0)
+        total = completed + disputed
+        reputation = calculate_reputation(agent)
+        success_rate = completed / max(total, 1)
         entries.append(
             {
                 "agent_id": agent["agent_id"],
                 "name": agent["name"],
-                "reputation": agent.get("reputation", 0),
+                "reputation": reputation,
                 "tasks_completed": completed,
-                "success_rate": completed / max(completed + 1, 1),
+                "success_rate": success_rate,
             }
         )
     entries.sort(key=lambda x: x["reputation"], reverse=True)
