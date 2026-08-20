@@ -1,3 +1,10 @@
+"""
+@contributor-info rafaio1
+@timestamp 2026-08-20T08:45:00Z
+@env os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+@platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+"""
+
 """Agent CRUD endpoints for the OpenAgents platform."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -7,6 +14,11 @@ from datetime import datetime
 
 from ..models.database import get_db, Agent
 from ..middleware.auth import get_current_user
+import ipaddress
+import socket
+from urllib.parse import urlparse
+
+import httpx
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -16,6 +28,57 @@ class AgentCreate(BaseModel):
     description: Optional[str] = None
     model_type: str = "gpt-4"
     config: Optional[dict] = None
+    endpoint: Optional[str] = None
+
+
+def _validate_agent_endpoint(url: str) -> str:
+    """Validate agent endpoint URL format, reachability, and SSRF safety."""
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid URL format")
+
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="Endpoint must use http or https scheme")
+    if not parsed.netloc:
+        raise HTTPException(status_code=400, detail="Endpoint missing hostname")
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise HTTPException(status_code=400, detail="Endpoint missing hostname")
+
+    # Resolve and block private/internal IPs (SSRF protection)
+    try:
+        addr_info = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        raise HTTPException(status_code=400, detail=f"Cannot resolve hostname: {hostname}")
+
+    for family, _, _, _, sockaddr in addr_info:
+        ip_str = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(ip_str)
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Private/internal IP addresses are not allowed: {ip_str}",
+                )
+        except ValueError:
+            continue
+
+    # HEAD request to verify reachability (5s timeout)
+    try:
+        resp = httpx.head(url, timeout=5.0, follow_redirects=True)
+        if resp.status_code >= 500:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Endpoint returned server error (HTTP {resp.status_code})",
+            )
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=400, detail="Endpoint unreachable: request timed out after 5s")
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=400, detail=f"Endpoint unreachable: {str(e)}")
+
+    return url
 
 
 class AgentUpdate(BaseModel):
@@ -26,11 +89,16 @@ class AgentUpdate(BaseModel):
 
 @router.post("/")
 async def create_agent(agent: AgentCreate, user=Depends(get_current_user), db=Depends(get_db)):
+    validated_endpoint = None
+    if agent.endpoint is not None:
+        validated_endpoint = _validate_agent_endpoint(agent.endpoint)
+
     new_agent = Agent(
         name=agent.name,
         description=agent.description,
         model_type=agent.model_type,
         config=agent.config or {},
+        endpoint=validated_endpoint,
         owner_id=user["id"],
         created_at=datetime.utcnow(),
     )
