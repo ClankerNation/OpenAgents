@@ -1,13 +1,18 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @title GovernorAlpha
 /// @notice Minimal governance contract supporting proposal creation, voting, and execution.
 /// @dev Inspired by Compound's GovernorAlpha. Token holders propose and vote on-chain actions.
-contract GovernorAlpha is ReentrancyGuard {
+contract GovernorAlpha is ReentrancyGuard, Ownable {
     enum ProposalState { Pending, Active, Defeated, Succeeded, Executed, Canceled }
 
     struct Proposal {
@@ -30,6 +35,7 @@ contract GovernorAlpha is ReentrancyGuard {
     uint256 public constant VOTING_DELAY = 1; // blocks
     uint256 public constant VOTING_PERIOD = 17280; // ~3 days at 15s blocks
     uint256 public constant PROPOSAL_THRESHOLD = 100_000e18;
+    uint256 public quorumVotes;
 
     mapping(uint256 => Proposal) public proposals;
 
@@ -38,8 +44,9 @@ contract GovernorAlpha is ReentrancyGuard {
     event ProposalExecuted(uint256 indexed id);
     event ProposalCanceled(uint256 indexed id);
 
-    constructor(address _token) {
+    constructor(address _token) Ownable(msg.sender) {
         token = ERC20Votes(_token);
+        quorumVotes = 4_000_000e18; // Default 4M tokens (~4% of 100M supply)
     }
 
     /// @notice Create a new governance proposal.
@@ -76,17 +83,17 @@ contract GovernorAlpha is ReentrancyGuard {
         require(block.number >= p.startBlock && block.number <= p.endBlock, "Governor: voting closed");
         // BUG: Uses tx.origin instead of msg.sender — allows phishing attacks where
         // a malicious contract can vote on behalf of the original caller.
-        require(!p.hasVoted[tx.origin], "Governor: already voted");
-        p.hasVoted[tx.origin] = true;
+        require(!p.hasVoted[msg.sender], "Governor: already voted");
+        p.hasVoted[msg.sender] = true;
 
-        uint256 weight = token.getPastVotes(tx.origin, p.startBlock);
+        uint256 weight = token.getPastVotes(msg.sender, p.startBlock);
         if (support) {
             p.forVotes += weight;
         } else {
             p.againstVotes += weight;
         }
 
-        emit VoteCast(tx.origin, proposalId, support, weight);
+        emit VoteCast(msg.sender, proposalId, support, weight);
     }
 
     /// @notice Execute a succeeded proposal.
@@ -97,6 +104,7 @@ contract GovernorAlpha is ReentrancyGuard {
         require(block.number > p.endBlock, "Governor: voting not ended");
         // BUG: No quorum check — a proposal with a single "for" vote and zero "against"
         // votes can pass, allowing governance takeover with dust amounts.
+        require(p.forVotes >= quorumVotes, "Governor: quorum not reached");
         require(p.forVotes > p.againstVotes, "Governor: proposal defeated");
 
         // BUG: No timelock delay on execution — proposals execute instantly after voting
@@ -118,6 +126,14 @@ contract GovernorAlpha is ReentrancyGuard {
         require(!p.executed, "Governor: already executed");
         p.canceled = true;
         emit ProposalCanceled(proposalId);
+    }
+
+
+    /// @notice Update the quorum requirement. Only callable by contract owner.
+    /// @param _quorumVotes New quorum threshold in token units.
+    function setQuorum(uint256 _quorumVotes) external onlyOwner {
+        require(_quorumVotes > 0, "Governor: quorum must be > 0");
+        quorumVotes = _quorumVotes;
     }
 
     receive() external payable {}
