@@ -1,3 +1,7 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -47,9 +51,12 @@ contract Router {
     function swapMultiHop(
         address[] calldata path,
         uint256 amountIn,
-        uint256 /* minAmountOut */
+        uint256 minAmountOut,
+        uint256 deadline
     ) external returns (uint256 amountOut) {
+        require(block.timestamp <= deadline, "Router: expired");
         require(path.length >= 2, "Path too short");
+        require(path[0] != path[path.length - 1], "Router: circular path");
 
         IERC20(path[0]).transferFrom(msg.sender, address(this), amountIn);
 
@@ -64,11 +71,14 @@ contract Router {
 
             IERC20(tokenIn).approve(pool, currentAmount);
 
-            // Passes 0 as minAmountOut — no slippage protection on intermediate hops
-            currentAmount = IAMMPool(pool).swap(tokenIn, currentAmount, 0);
+            // Only enforce minAmountOut on the final hop; intermediate hops use 0
+            uint256 hopMinOut = (i == path.length - 2) ? minAmountOut : 0;
+            currentAmount = IAMMPool(pool).swap(tokenIn, currentAmount, hopMinOut);
+            require(currentAmount > 0, "Router: zero output from hop");
         }
 
         amountOut = currentAmount;
+        require(amountOut >= minAmountOut, "Router: insufficient output");
 
         // Transfer final tokens to user
         IERC20(path[path.length - 1]).transfer(msg.sender, amountOut);
