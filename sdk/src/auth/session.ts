@@ -1,3 +1,12 @@
+/**
+ * Session management for OpenAgents SDK.
+ *
+ * @fix-author Claude Fable 5 (Autonomous Agent)
+ * @date 2026-08-20
+ * @runtime os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+ * @platform_instructions [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+ */
+
 import { Wallet } from "./wallet";
 import { keccak256 } from "../utils/crypto";
 
@@ -25,25 +34,7 @@ export class SessionManager {
     this.wallet = config.wallet;
     this.apiBaseUrl = config.apiBaseUrl;
     this.autoRefresh = config.autoRefresh ?? true;
-    this.loadStoredSession();
-  }
-
-  private loadStoredSession(): void {
-    // BUG: Storing tokens in localStorage is vulnerable to XSS attacks —
-    // any injected script can steal the session token
-    if (typeof window !== "undefined" && window.localStorage) {
-      const stored = localStorage.getItem(`session_${this.wallet.address}`);
-      if (stored) {
-        this.currentToken = JSON.parse(stored);
-      }
-    }
-  }
-
-  private persistSession(token: SessionToken): void {
-    this.currentToken = token;
-    if (typeof window !== "undefined" && window.localStorage) {
-      localStorage.setItem(`session_${this.wallet.address}`, JSON.stringify(token));
-    }
+    // Tokens are kept in memory only to prevent XSS theft via localStorage
   }
 
   async authenticate(): Promise<SessionToken> {
@@ -69,51 +60,62 @@ export class SessionManager {
 
     if (!res.ok) throw new Error(`Auth failed: ${res.status}`);
     const token: SessionToken = await res.json();
-    this.persistSession(token);
+    this.currentToken = token;
     return token;
   }
 
   async getToken(): Promise<string> {
-    // BUG: No expiry check — returns the cached token even if it has expired,
-    // causing 401 errors on subsequent API calls
-    if (this.currentToken) {
+    const now = Math.floor(Date.now() / 1000);
+    if (this.currentToken && this.currentToken.expiresAt > now) {
       return this.currentToken.token;
     }
-    const session = await this.authenticate();
+    
+    // Token is missing or expired, refresh it
+    const session = await this.refresh();
     return session.token;
   }
 
   async refresh(): Promise<SessionToken> {
-    // BUG: Race condition — multiple concurrent callers can trigger parallel
-    // refresh requests, and only the last one's token survives
-    if (!this.currentToken?.refreshToken) {
-      return this.authenticate();
+    // Coalesce concurrent refresh requests to prevent race conditions and token rotation issues
+    if (this.refreshPromise) {
+      return this.refreshPromise;
     }
 
-    const res = await fetch(`${this.apiBaseUrl}/auth/refresh`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refreshToken: this.currentToken.refreshToken }),
-    });
+    this.refreshPromise = (async () => {
+      try {
+        if (!this.currentToken?.refreshToken) {
+          return await this.authenticate();
+        }
 
-    if (!res.ok) {
-      this.currentToken = null;
-      return this.authenticate();
-    }
+        const res = await fetch(`${this.apiBaseUrl}/auth/refresh`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refreshToken: this.currentToken.refreshToken }),
+        });
 
-    const token: SessionToken = await res.json();
-    this.persistSession(token);
-    return token;
+        if (!res.ok) {
+          this.currentToken = null;
+          return await this.authenticate();
+        }
+
+        const token: SessionToken = await res.json();
+        // Token rotation: update the stored token with the new refresh token
+        this.currentToken = token;
+        return token;
+      } finally {
+        this.refreshPromise = null;
+      }
+    })();
+
+    return this.refreshPromise;
   }
 
   logout(): void {
     this.currentToken = null;
-    if (typeof window !== "undefined" && window.localStorage) {
-      localStorage.removeItem(`session_${this.wallet.address}`);
-    }
   }
 
   isAuthenticated(): boolean {
-    return this.currentToken !== null;
+    const now = Math.floor(Date.now() / 1000);
+    return this.currentToken !== null && this.currentToken.expiresAt > now;
   }
 }
