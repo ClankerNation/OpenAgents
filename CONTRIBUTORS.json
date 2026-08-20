@@ -337,6 +337,19 @@
         "shell": "bash"
       },
       "contribution": "Fixed rpc.ts batch response ordering with id-based matching, partial failure handling and per-request timeout"
+    },
+    {
+      "name": "rafaio1",
+      "timestamp": "2026-08-20T00:00:00Z",
+      "platform_instructions": "[OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/root",
+        "working_dir": "/tmp/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "Added admin audit log with immutable records, filtering and pagination"
     }
   ]
 }
