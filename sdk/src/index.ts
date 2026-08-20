@@ -1,3 +1,7 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 import { ethers } from "ethers";
 
 export interface AgentConfig {
@@ -87,5 +91,53 @@ export class OpenAgentsSDK {
     }
 
     return openTasks;
+  }
+
+  /**
+   * Deploy a contract with constructor arguments and wait for confirmation.
+   * @param bytecode Contract bytecode (hex string)
+   * @param abi Contract ABI for encoding constructor args
+   * @param args Constructor arguments array
+   * @param overrides Optional transaction overrides (gasLimit, value, etc.)
+   * @returns Deployed contract address
+   */
+  async deployContract(
+    bytecode: string,
+    abi: any[],
+    args: any[] = [],
+    overrides?: ethers.Overrides
+  ): Promise<string> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const contract = await factory.deploy(...args, overrides || {});
+    await contract.waitForDeployment();
+    return contract.target as string;
+  }
+
+  /**
+   * Encode constructor arguments for manual deployment or verification.
+   * @param abi Contract ABI
+   * @param args Constructor arguments
+   * @returns Encoded constructor data (hex)
+   */
+  encodeConstructorArgs(abi: any[], args: any[]): string {
+    const iface = new ethers.Interface(abi);
+    const fragment = iface.deploy;
+    if (!fragment) return "0x";
+    return iface.encodeDeploy(args);
+  }
+
+  /**
+   * Wait for a transaction to be mined with configurable confirmations.
+   * @param txHash Transaction hash to wait for
+   * @param confirmations Number of block confirmations (default: 1)
+   * @returns Transaction receipt
+   */
+  async waitForTransaction(
+    txHash: string,
+    confirmations: number = 1
+  ): Promise<ethers.TransactionReceipt> {
+    const receipt = await this.provider.waitForTransaction(txHash, confirmations);
+    if (!receipt) throw new Error("Transaction receipt not found");
+    return receipt;
   }
 }
