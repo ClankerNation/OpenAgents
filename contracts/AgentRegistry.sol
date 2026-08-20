@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/**
+ * @contributor-info rafaio1
+ * @timestamp 2026-08-20T09:45:00Z
+ * @env os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+ * @platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+ */
+
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract AgentRegistry is Ownable {
@@ -17,6 +24,7 @@ contract AgentRegistry is Ownable {
     mapping(bytes32 => Agent) public agents;
     mapping(address => bytes32[]) public ownerAgents;
     bytes32[] public agentIds;
+    uint256 public nextAgentId;
 
     uint256 public registrationFee;
     uint256 public minReputation;
@@ -34,7 +42,9 @@ contract AgentRegistry is Ownable {
         require(msg.value >= registrationFee, "Insufficient fee");
         require(bytes(name).length > 0 && bytes(name).length <= 64, "Invalid name");
 
-        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp));
+        // Use incrementing counter for deterministic, frontrunning-resistant IDs
+        bytes32 agentId = bytes32(nextAgentId);
+        nextAgentId++;
 
         require(agents[agentId].registeredAt == 0, "Agent exists");
 
