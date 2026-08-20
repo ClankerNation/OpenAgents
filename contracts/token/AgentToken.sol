@@ -1,3 +1,7 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -15,7 +19,10 @@ contract AgentToken is ERC20, ERC20Burnable {
     bytes32 public constant PERMIT_TYPEHASH = keccak256(
         "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
     );
-    bytes32 public immutable DOMAIN_SEPARATOR;
+    // @dev Domain separator is computed dynamically to prevent permit replay across chain forks.
+    // Cached value for gas optimization on non-forked chains.
+    bytes32 private _CACHED_DOMAIN_SEPARATOR;
+    uint256 private _CACHED_CHAIN_ID;
     mapping(address => uint256) public nonces;
 
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
@@ -27,13 +34,29 @@ contract AgentToken is ERC20, ERC20Burnable {
     ) ERC20(name_, symbol_) {
         owner = msg.sender;
         _mint(msg.sender, initialSupply);
-        DOMAIN_SEPARATOR = keccak256(abi.encode(
+        _CACHED_DOMAIN_SEPARATOR = keccak256(abi.encode(
             keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
             keccak256(bytes(name_)),
             keccak256(bytes("1")),
             block.chainid,
             address(this)
         ));
+        _CACHED_CHAIN_ID = block.chainid;
+    }
+
+    /// @notice Returns the current domain separator, recomputing if chain ID changed (fork protection).
+    function DOMAIN_SEPARATOR() public view returns (bytes32) {
+        if (block.chainid == _CACHED_CHAIN_ID) {
+            return _CACHED_DOMAIN_SEPARATOR;
+        } else {
+            return keccak256(abi.encode(
+                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+                keccak256(bytes(name())),
+                keccak256(bytes("1")),
+                block.chainid,
+                address(this)
+            ));
+        }
     }
 
     /// @notice Mint new tokens to a recipient.
@@ -71,8 +94,7 @@ contract AgentToken is ERC20, ERC20Burnable {
         bytes32 r,
         bytes32 s
     ) external {
-        // BUG: Deadline is not checked — expired permits are still accepted, allowing
-        // old signatures to be used indefinitely. Should require(block.timestamp <= deadline).
+        require(block.timestamp <= deadline, "AgentToken: permit expired");
         bytes32 structHash = keccak256(abi.encode(
             PERMIT_TYPEHASH,
             _owner,
