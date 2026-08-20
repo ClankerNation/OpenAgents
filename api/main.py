@@ -1,4 +1,9 @@
-from fastapi import FastAPI, HTTPException, Query
+# @fix-author rafaio1
+# @date 2026-08-20T00:00:00Z
+# @runtime linux x64 /tmp/OpenAgents bash
+# @platform-config Agentic bounty-hunter workflow
+from fastapi import FastAPI, HTTPException, Query, Security, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, APIKeyHeader
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -8,6 +13,19 @@ app = FastAPI(
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+# Security schemes for OpenAPI documentation
+jwt_scheme = HTTPBearer(auto_error=False, description="JWT Bearer token for authenticated endpoints")
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False, description="API key for programmatic access")
+
+async def verify_auth(
+    credentials: HTTPAuthorizationCredentials = Security(jwt_scheme),
+    api_key: str = Security(api_key_header)
+):
+    """Verify either JWT bearer token or API key is present."""
+    if credentials is None and api_key is None:
+        raise HTTPException(status_code=401, detail="Authentication required: provide JWT Bearer token or X-API-Key header")
+    return credentials or api_key
 
 
 class AgentResponse(BaseModel):
