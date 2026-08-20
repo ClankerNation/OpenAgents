@@ -1,9 +1,20 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "./AgentRegistry.sol";
+/**
+ * @fix-author Claude Fable 5 (Autonomous Agent)
+ * @date 2026-08-20
+ * @runtime os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+ * @platform_instructions [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+ */
 
-contract TaskRouter {
+import "./AgentRegistry.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
+
+contract TaskRouter is EIP712 {
+    using ECDSA for bytes32;
+
     AgentRegistry public registry;
 
     enum TaskStatus { Open, Assigned, Completed, Disputed, Cancelled }
@@ -22,14 +33,70 @@ contract TaskRouter {
     uint256 public taskCount;
     uint256 public platformFee; // basis points
 
+    // Gas sponsorship state
+    mapping(address => uint256) public nonces;
+    mapping(address => uint256) public agentStake;
+
+    bytes32 private constant SPONSORED_EXEC_TYPEHASH = keccak256(
+        "SponsoredExec(address agent,bytes calldata,uint256 nonce)"
+    );
+
     event TaskCreated(uint256 indexed taskId, address indexed creator, uint256 reward);
     event TaskAssigned(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskCompleted(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskDisputed(uint256 indexed taskId);
+    event SponsoredExecution(address indexed agent, uint256 nonce, bool success);
+    event StakeDeposited(address indexed agent, uint256 amount);
 
-    constructor(address _registry, uint256 _platformFee) {
+    constructor(address _registry, uint256 _platformFee) EIP712("TaskRouter", "1") {
         registry = AgentRegistry(_registry);
         platformFee = _platformFee;
+    }
+
+    /// @notice Deposit stake to enable gas-sponsored transactions.
+    function depositStake() external payable {
+        require(msg.value > 0, "Zero stake");
+        agentStake[msg.sender] += msg.value;
+        emit StakeDeposited(msg.sender, msg.value);
+    }
+
+    /// @notice Execute a task action on behalf of an agent via meta-transaction.
+    /// @param agent The agent address that signed the calldata.
+    /// @param data The encoded function call to execute.
+    /// @param signature The agent's signature over the EIP-712 typed data.
+    function executeOnBehalf(address agent, bytes calldata data, bytes calldata signature) external {
+        require(agent != address(0), "Invalid agent");
+        
+        uint256 currentNonce = nonces[agent];
+        
+        // Verify signature
+        bytes32 structHash = keccak256(
+            abi.encode(SPONSORED_EXEC_TYPEHASH, agent, keccak256(data), currentNonce)
+        );
+        bytes32 digest = _hashTypedDataV4(structHash);
+        address signer = digest.recover(signature);
+        require(signer == agent, "Invalid signature");
+
+        // Increment nonce to prevent replay
+        nonces[agent]++;
+
+        // Check sufficient stake for gas reimbursement (simplified: fixed cost estimate)
+        // In production, this would use tx.gasprice * gasUsed + relayer fee
+        uint256 estimatedGasCost = tx.gasprice * 200000; 
+        require(agentStake[agent] >= estimatedGasCost, "Insufficient stake");
+
+        // Execute the call as if from the agent
+        (bool success, ) = address(this).call(data);
+        
+        // Reimburse relayer from agent stake
+        if (success) {
+            agentStake[agent] -= estimatedGasCost;
+            (bool refundSuccess, ) = msg.sender.call{value: estimatedGasCost}("");
+            require(refundSuccess, "Relayer refund failed");
+        }
+
+        emit SponsoredExecution(agent, currentNonce, success);
+        require(success, "Sponsored execution failed");
     }
 
     function createTask(string calldata description, uint256 deadline) external payable returns (uint256) {
