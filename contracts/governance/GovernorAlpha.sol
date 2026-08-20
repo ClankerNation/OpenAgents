@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/**
+ * @contributor rafaio1
+ * @date 2026-08-20T10:15:00Z
+ * @runtime os=linux, arch=x64, working_dir=/tmp/OpenAgents, shell=bash
+ * @platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+ */
+
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
@@ -18,6 +25,7 @@ contract GovernorAlpha is ReentrancyGuard {
         bytes[] calldatas;
         uint256 startBlock;
         uint256 endBlock;
+        uint256 snapshotBlock;
         uint256 forVotes;
         uint256 againstVotes;
         bool executed;
@@ -64,6 +72,8 @@ contract GovernorAlpha is ReentrancyGuard {
         p.calldatas = calldatas;
         p.startBlock = block.number + VOTING_DELAY;
         p.endBlock = block.number + VOTING_DELAY + VOTING_PERIOD;
+        // Snapshot voting power at proposal creation to prevent flash-loan manipulation
+        p.snapshotBlock = block.number;
 
         emit ProposalCreated(proposalId, msg.sender, p.startBlock, p.endBlock);
     }
@@ -74,19 +84,28 @@ contract GovernorAlpha is ReentrancyGuard {
     function vote(uint256 proposalId, bool support) external {
         Proposal storage p = proposals[proposalId];
         require(block.number >= p.startBlock && block.number <= p.endBlock, "Governor: voting closed");
-        // BUG: Uses tx.origin instead of msg.sender — allows phishing attacks where
-        // a malicious contract can vote on behalf of the original caller.
-        require(!p.hasVoted[tx.origin], "Governor: already voted");
-        p.hasVoted[tx.origin] = true;
+        require(!p.hasVoted[msg.sender], "Governor: already voted");
+        p.hasVoted[msg.sender] = true;
 
-        uint256 weight = token.getPastVotes(tx.origin, p.startBlock);
+        // Use snapshot block from proposal creation for voting power
+        uint256 weight = token.getPastVotes(msg.sender, p.snapshotBlock);
         if (support) {
             p.forVotes += weight;
         } else {
             p.againstVotes += weight;
         }
 
-        emit VoteCast(tx.origin, proposalId, support, weight);
+        emit VoteCast(msg.sender, proposalId, support, weight);
+    }
+
+    /// @notice Get the voting power of an address for a specific proposal (snapshot-based).
+    /// @param account The address to check.
+    /// @param proposalId The proposal ID.
+    /// @return The voting power at the proposal's snapshot block.
+    function getVotingPower(address account, uint256 proposalId) external view returns (uint256) {
+        Proposal storage p = proposals[proposalId];
+        require(p.snapshotBlock > 0, "Governor: proposal does not exist");
+        return token.getPastVotes(account, p.snapshotBlock);
     }
 
     /// @notice Execute a succeeded proposal.
