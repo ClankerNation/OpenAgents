@@ -41,5 +41,13 @@
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
     }
+  ],
+  "contributions": [
+    {
+      "issue": 31,
+      "author": "rafaio1",
+      "date": "2026-08-20",
+      "description": "Multi-sig approval for large withdrawals in TaskRouter with 2-of-3 signer threshold and auto-execute"
+    }
   ]
 }
