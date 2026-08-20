@@ -1,3 +1,8 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
+
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -20,6 +25,10 @@ contract AgentRegistry is Ownable {
 
     uint256 public registrationFee;
     uint256 public minReputation;
+    uint256 public constant MAX_BATCH_SIZE = 50;
+
+    // Monotonic counter for deterministic, collision-free agent IDs
+    uint256 private _nextAgentId;
 
     event AgentRegistered(bytes32 indexed agentId, address indexed owner, string name);
     event AgentDeactivated(bytes32 indexed agentId);
@@ -34,9 +43,9 @@ contract AgentRegistry is Ownable {
         require(msg.value >= registrationFee, "Insufficient fee");
         require(bytes(name).length > 0 && bytes(name).length <= 64, "Invalid name");
 
-        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp));
-
-        require(agents[agentId].registeredAt == 0, "Agent exists");
+        // FIX: Use monotonic counter instead of timestamp-based hash to prevent
+        // frontrunning/collision attacks where attacker registers same name in same block
+        bytes32 agentId = keccak256(abi.encodePacked(_nextAgentId++));
 
         agents[agentId] = Agent({
             owner: msg.sender,
@@ -53,6 +62,48 @@ contract AgentRegistry is Ownable {
 
         emit AgentRegistered(agentId, msg.sender, name);
         return agentId;
+    }
+
+    /// @notice Register multiple agents in a single transaction for gas efficiency.
+    /// @param names Array of agent names (max 50).
+    /// @param endpoints Array of agent endpoints (must match names length).
+    /// @return agentIds_ Array of generated agent IDs.
+    function batchRegister(
+        string[] calldata names,
+        string[] calldata endpoints
+    ) external payable returns (bytes32[] memory agentIds_) {
+        uint256 count = names.length;
+        require(count > 0, "Empty batch");
+        require(count <= MAX_BATCH_SIZE, "Batch too large");
+        require(count == endpoints.length, "Length mismatch");
+        require(msg.value >= registrationFee * count, "Insufficient batch fee");
+
+        agentIds_ = new bytes32[](count);
+
+        for (uint256 i = 0; i < count; i++) {
+            require(bytes(names[i]).length > 0 && bytes(names[i]).length <= 64, "Invalid name");
+
+            // Counter-based ID ensures uniqueness even within same block/batch
+            bytes32 agentId = keccak256(abi.encodePacked(_nextAgentId++));
+
+            agents[agentId] = Agent({
+                owner: msg.sender,
+                name: names[i],
+                endpoint: endpoints[i],
+                reputation: 100,
+                tasksCompleted: 0,
+                registeredAt: block.timestamp,
+                active: true
+            });
+
+            ownerAgents[msg.sender].push(agentId);
+            agentIds.push(agentId);
+            agentIds_[i] = agentId;
+
+            emit AgentRegistered(agentId, msg.sender, names[i]);
+        }
+
+        return agentIds_;
     }
 
     function deactivateAgent(bytes32 agentId) external {
