@@ -41,5 +41,13 @@
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
     }
+  ],
+  "contributions": [
+    {
+      "issue": 183,
+      "author": "rafaio1",
+      "date": "2026-08-20",
+      "description": "Gas sponsorship relay for agent transactions with nonce tracking and stake reimbursement"
+    }
   ]
 }

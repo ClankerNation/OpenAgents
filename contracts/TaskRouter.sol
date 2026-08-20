@@ -1,3 +1,8 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
+
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -22,14 +27,69 @@ contract TaskRouter {
     uint256 public taskCount;
     uint256 public platformFee; // basis points
 
+    // Gas sponsorship relay state
+    mapping(bytes32 => uint256) public agentNonces;
+    mapping(address => uint256) public agentStakes;
+
     event TaskCreated(uint256 indexed taskId, address indexed creator, uint256 reward);
     event TaskAssigned(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskCompleted(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskDisputed(uint256 indexed taskId);
+    event SponsoredExecution(bytes32 indexed agentId, address indexed relayer, uint256 gasReimbursement);
 
     constructor(address _registry, uint256 _platformFee) {
         registry = AgentRegistry(_registry);
         platformFee = _platformFee;
+    }
+
+    /// @notice Deposit stake for gas sponsorship reimbursement.
+    function depositStake() external payable {
+        require(msg.value > 0, "Zero stake");
+        agentStakes[msg.sender] += msg.value;
+    }
+
+    /// @notice Execute a transaction on behalf of an agent (meta-transaction).
+    /// @param agentId The agent's identifier.
+    /// @param data The calldata to execute.
+    /// @param nonce Replay protection nonce.
+    /// @param signature ECDSA signature from the agent owner over keccak256(agentId, data, nonce).
+    function executeOnBehalf(
+        bytes32 agentId,
+        bytes calldata data,
+        uint256 nonce,
+        bytes calldata signature
+    ) external returns (bool success, bytes memory returnData) {
+        AgentRegistry.Agent memory agent = registry.getAgent(agentId);
+        require(agent.active, "Agent not active");
+
+        // Verify nonce for replay protection
+        require(agentNonces[agentId] == nonce, "Invalid nonce");
+
+        // Reconstruct signed hash and verify agent owner signature
+        bytes32 digest = keccak256(abi.encodePacked(agentId, data, nonce));
+        bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", digest));
+        address signer = ecrecover(ethSignedHash, uint8(signature[64]), bytes32(signature[:32]), bytes32(signature[32:64]));
+        require(signer == agent.owner, "Invalid signature");
+
+        // Check sufficient stake for gas reimbursement estimate
+        uint256 gasBefore = gasleft();
+        
+        // Increment nonce before execution to prevent reentrancy replay
+        agentNonces[agentId]++;
+
+        // Execute the call
+        (success, returnData) = address(this).call(data);
+
+        // Calculate gas used and reimburse relayer from agent stake
+        uint256 gasUsed = gasBefore - gasleft();
+        uint256 reimbursement = gasUsed * tx.gasprice;
+        require(agentStakes[agent.owner] >= reimbursement, "Insufficient stake");
+        agentStakes[agent.owner] -= reimbursement;
+
+        (bool paid, ) = msg.sender.call{value: reimbursement}("");
+        require(paid, "Reimbursement failed");
+
+        emit SponsoredExecution(agentId, msg.sender, reimbursement);
     }
 
     function createTask(string calldata description, uint256 deadline) external payable returns (uint256) {
@@ -104,4 +164,6 @@ contract TaskRouter {
         task.status = TaskStatus.Disputed;
         emit TaskDisputed(taskId);
     }
+
+    receive() external payable {}
 }
