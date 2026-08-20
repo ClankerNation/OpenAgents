@@ -1,3 +1,7 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 import { ethers } from "ethers";
 
 export interface AgentConfig {
@@ -7,6 +11,52 @@ export interface AgentConfig {
   rpcUrl: string;
   registryAddress: string;
   routerAddress: string;
+}
+
+
+export interface GasEstimate {
+  gasLimit: bigint;
+  maxFeePerGas?: bigint;
+  maxPriorityFeePerGas?: bigint;
+  gasPrice?: bigint;
+}
+
+const GAS_MARGIN_MULTIPLIER = 1.2; // 20% safety margin
+
+async function estimateGasWithMargin(
+  provider: ethers.JsonRpcProvider,
+  tx: ethers.TransactionRequest,
+  manualGasLimit?: bigint
+): Promise<GasEstimate> {
+  if (manualGasLimit) {
+    return { gasLimit: manualGasLimit };
+  }
+
+  const estimated = await provider.estimateGas(tx);
+  const withMargin = BigInt(Math.ceil(Number(estimated) * GAS_MARGIN_MULTIPLIER));
+
+  // Cap at block gas limit
+  const block = await provider.getBlock("latest");
+  const capped = block?.gasLimit ? (withMargin < block.gasLimit ? withMargin : block.gasLimit) : withMargin;
+
+  // EIP-1559 support
+  try {
+    const feeData = await provider.getFeeData();
+    if (feeData.maxFeePerGas && feeData.maxPriorityFeePerGas) {
+      return {
+        gasLimit: capped,
+        maxFeePerGas: feeData.maxFeePerGas,
+        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas,
+      };
+    }
+  } catch {}
+
+  // Legacy fallback
+  const feeData = await provider.getFeeData();
+  return {
+    gasLimit: capped,
+    gasPrice: feeData.gasPrice ?? undefined,
+  };
 }
 
 export class OpenAgentsSDK {
@@ -28,10 +78,16 @@ export class OpenAgentsSDK {
     );
 
     const fee = await registry.registrationFee();
-    const tx = await registry.registerAgent(
+    const txData = await registry.registerAgent.populateTransaction(
       this.config.name,
       this.config.endpoint,
       { value: fee }
+    );
+    const gas = await estimateGasWithMargin(this.provider, { ...txData, value: fee });
+    const tx = await registry.registerAgent(
+      this.config.name,
+      this.config.endpoint,
+      { value: fee, ...gas }
     );
     const receipt = await tx.wait();
     return receipt.logs[0].topics[1];
@@ -43,7 +99,9 @@ export class OpenAgentsSDK {
       ["function assignTask(uint256,bytes32)"],
       this.signer
     );
-    const tx = await router.assignTask(taskId, agentId);
+    const txData = await router.assignTask.populateTransaction(taskId, agentId);
+    const gas = await estimateGasWithMargin(this.provider, txData);
+    const tx = await router.assignTask(taskId, agentId, gas);
     await tx.wait();
   }
 
@@ -53,9 +111,15 @@ export class OpenAgentsSDK {
       ["function completeTask(uint256,bytes)"],
       this.signer
     );
-    const tx = await router.completeTask(
+    const txData = await router.completeTask.populateTransaction(
       taskId,
       ethers.toUtf8Bytes(result)
+    );
+    const gas = await estimateGasWithMargin(this.provider, txData);
+    const tx = await router.completeTask(
+      taskId,
+      ethers.toUtf8Bytes(result),
+      gas
     );
     await tx.wait();
   }
