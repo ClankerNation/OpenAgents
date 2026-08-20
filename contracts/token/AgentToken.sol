@@ -1,3 +1,7 @@
+// @contributor rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -9,6 +13,7 @@ import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 /// @dev Used as the native token for the OpenAgents platform.
 contract AgentToken is ERC20, ERC20Burnable {
     address public owner;
+    uint256 public constant MAX_SUPPLY = 1_000_000_000e18; // 1 billion tokens
     // BUG: No max supply cap — tokens can be minted infinitely, leading to
     // unbounded inflation and devaluation of existing holders' tokens.
 
@@ -42,6 +47,8 @@ contract AgentToken is ERC20, ERC20Burnable {
     // BUG: No access control — anyone can call mint and create tokens for themselves.
     // Should be restricted to owner or a minter role.
     function mint(address to, uint256 amount) external {
+        require(msg.sender == owner, "AgentToken: not owner");
+        require(totalSupply() + amount <= MAX_SUPPLY, "AgentToken: exceeds max supply");
         _mint(to, amount);
     }
 
@@ -71,8 +78,7 @@ contract AgentToken is ERC20, ERC20Burnable {
         bytes32 r,
         bytes32 s
     ) external {
-        // BUG: Deadline is not checked — expired permits are still accepted, allowing
-        // old signatures to be used indefinitely. Should require(block.timestamp <= deadline).
+        require(block.timestamp <= deadline, "AgentToken: permit expired");
         bytes32 structHash = keccak256(abi.encode(
             PERMIT_TYPEHASH,
             _owner,
