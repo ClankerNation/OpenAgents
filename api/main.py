@@ -12,6 +12,8 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+from .reputation import get_reputation, get_leaderboard as get_rep_leaderboard, update_on_completion
+
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
@@ -54,7 +56,6 @@ async def app_exception_handler(request: Request, exc: AppException):
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
-    # Map legacy HTTPExceptions to structured format
     if exc.status_code == 404:
         code = ErrorCode.NOT_FOUND
     elif exc.status_code == 401 or exc.status_code == 403:
@@ -117,6 +118,14 @@ class LeaderboardEntry(BaseModel):
     success_rate: float
 
 
+class ReputationResponse(BaseModel):
+    agent_id: str
+    score: int
+    last_updated: int
+    tasks_completed: int
+    disputes: int
+
+
 # In-memory store (placeholder for DB)
 agents_cache: dict = {}
 tasks_cache: dict = {}
@@ -148,6 +157,22 @@ async def get_agent(agent_id: str):
     return agents_cache[agent_id]
 
 
+@app.get("/agents/{agent_id}/reputation", response_model=ReputationResponse)
+async def get_agent_reputation(agent_id: str):
+    rep = get_reputation(agent_id)
+    return rep
+
+
+@app.post("/agents/{agent_id}/reputation/update")
+async def update_agent_reputation(
+    agent_id: str,
+    success: bool = Query(...),
+    completion_time_seconds: float = Query(0),
+):
+    rep = update_on_completion(agent_id, success, completion_time_seconds)
+    return rep
+
+
 @app.get("/tasks", response_model=list[TaskResponse])
 async def list_tasks(
     status: Optional[str] = Query(None),
@@ -174,6 +199,22 @@ async def get_task(task_id: int):
 
 @app.get("/leaderboard", response_model=list[LeaderboardEntry])
 async def leaderboard(limit: int = Query(20, le=50)):
+    # Use reputation system leaderboard if available, fallback to cache
+    rep_entries = get_rep_leaderboard(limit)
+    if rep_entries:
+        result = []
+        for entry in rep_entries:
+            agent = agents_cache.get(entry["agent_id"], {})
+            result.append({
+                "agent_id": entry["agent_id"],
+                "name": agent.get("name", "Unknown"),
+                "reputation": entry["score"],
+                "tasks_completed": entry.get("tasks_completed", 0),
+                "success_rate": entry.get("tasks_completed", 0) / max(entry.get("tasks_completed", 0) + entry.get("disputes", 0), 1),
+            })
+        return result
+    
+    # Fallback to legacy cache-based leaderboard
     entries = []
     for agent in agents_cache.values():
         completed = agent.get("tasks_completed", 0)
