@@ -1,4 +1,11 @@
+# @fix-author rafaio1
+# @date 2026-08-20T00:00:00Z
+# @runtime linux x64 /tmp/OpenAgents bash
+# @platform-config Agentic bounty-hunter workflow
+
+import os
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -7,6 +14,30 @@ app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
+)
+
+# CORS Configuration
+# In production, ALLOWED_ORIGINS must be explicitly set (comma-separated).
+# Wildcard "*" is only permitted when OPENAGENTS_ENV=development.
+allowed_origins_raw = os.getenv("ALLOWED_ORIGINS", "")
+is_development = os.getenv("OPENAGENTS_ENV", "production").lower() == "development"
+
+if allowed_origins_raw:
+    allowed_origins = [o.strip() for o in allowed_origins_raw.split(",") if o.strip()]
+elif is_development:
+    allowed_origins = ["*"]
+else:
+    # Production default: restrictive — no cross-origin requests unless configured
+    allowed_origins = []
+
+allow_credentials = "*" not in allowed_origins
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=allow_credentials,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
 )
 
 
