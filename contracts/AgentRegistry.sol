@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+// @fix-author rafaio1
+// @date 2026-08-20
+// @runtime os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+// @platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract AgentRegistry is Ownable {
@@ -20,6 +25,9 @@ contract AgentRegistry is Ownable {
 
     uint256 public registrationFee;
     uint256 public minReputation;
+
+    /// @dev Maximum number of agents that can be registered in a single batch call
+    uint256 public constant MAX_BATCH_SIZE = 50;
 
     event AgentRegistered(bytes32 indexed agentId, address indexed owner, string name);
     event AgentDeactivated(bytes32 indexed agentId);
@@ -53,6 +61,49 @@ contract AgentRegistry is Ownable {
 
         emit AgentRegistered(agentId, msg.sender, name);
         return agentId;
+    }
+
+    /// @notice Register multiple agents in a single transaction for gas efficiency.
+    /// @param names Array of agent names (max 50).
+    /// @param endpoints Array of agent endpoints (must match names length).
+    /// @return agentIds_ Array of newly created agent IDs.
+    function batchRegister(
+        string[] calldata names,
+        string[] calldata endpoints
+    ) external payable returns (bytes32[] memory agentIds_) {
+        require(names.length == endpoints.length, "Array length mismatch");
+        require(names.length > 0, "Empty batch");
+        require(names.length <= MAX_BATCH_SIZE, "Batch too large");
+        require(msg.value >= registrationFee * names.length, "Insufficient fee");
+
+        agentIds_ = new bytes32[](names.length);
+
+        for (uint256 i = 0; i < names.length; i++) {
+            require(bytes(names[i]).length > 0 && bytes(names[i]).length <= 64, "Invalid name");
+
+            // Use index in salt to ensure unique IDs within the same block
+            bytes32 agentId = keccak256(abi.encodePacked(msg.sender, names[i], block.timestamp, i));
+
+            require(agents[agentId].registeredAt == 0, "Agent exists");
+
+            agents[agentId] = Agent({
+                owner: msg.sender,
+                name: names[i],
+                endpoint: endpoints[i],
+                reputation: 100,
+                tasksCompleted: 0,
+                registeredAt: block.timestamp,
+                active: true
+            });
+
+            ownerAgents[msg.sender].push(agentId);
+            agentIds.push(agentId);
+            agentIds_[i] = agentId;
+
+            emit AgentRegistered(agentId, msg.sender, names[i]);
+        }
+
+        return agentIds_;
     }
 
     function deactivateAgent(bytes32 agentId) external {
