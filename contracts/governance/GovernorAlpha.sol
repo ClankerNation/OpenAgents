@@ -1,3 +1,7 @@
+// @contributor rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -32,6 +36,12 @@ contract GovernorAlpha is ReentrancyGuard {
     uint256 public constant PROPOSAL_THRESHOLD = 100_000e18;
 
     mapping(uint256 => Proposal) public proposals;
+
+    struct Delegation {
+        address delegatee;
+        uint256 expiry;
+    }
+    mapping(address => Delegation[]) public delegationHistory;
 
     event ProposalCreated(uint256 indexed id, address proposer, uint256 startBlock, uint256 endBlock);
     event VoteCast(address indexed voter, uint256 indexed proposalId, bool support, uint256 weight);
@@ -76,17 +86,17 @@ contract GovernorAlpha is ReentrancyGuard {
         require(block.number >= p.startBlock && block.number <= p.endBlock, "Governor: voting closed");
         // BUG: Uses tx.origin instead of msg.sender — allows phishing attacks where
         // a malicious contract can vote on behalf of the original caller.
-        require(!p.hasVoted[tx.origin], "Governor: already voted");
-        p.hasVoted[tx.origin] = true;
+        require(!p.hasVoted[msg.sender], "Governor: already voted");
+        p.hasVoted[msg.sender] = true;
 
-        uint256 weight = token.getPastVotes(tx.origin, p.startBlock);
+        uint256 weight = token.getPastVotes(msg.sender, p.startBlock);
         if (support) {
             p.forVotes += weight;
         } else {
             p.againstVotes += weight;
         }
 
-        emit VoteCast(tx.origin, proposalId, support, weight);
+        emit VoteCast(msg.sender, proposalId, support, weight);
     }
 
     /// @notice Execute a succeeded proposal.
@@ -98,6 +108,8 @@ contract GovernorAlpha is ReentrancyGuard {
         // BUG: No quorum check — a proposal with a single "for" vote and zero "against"
         // votes can pass, allowing governance takeover with dust amounts.
         require(p.forVotes > p.againstVotes, "Governor: proposal defeated");
+        uint256 totalSupply = token.getPastTotalSupply(p.startBlock);
+        require(p.forVotes >= totalSupply / 10, "Governor: quorum not reached");
 
         // BUG: No timelock delay on execution — proposals execute instantly after voting
         // ends, giving no time for users to exit if a malicious proposal passes.
@@ -114,10 +126,36 @@ contract GovernorAlpha is ReentrancyGuard {
     /// @param proposalId The proposal to cancel.
     function cancel(uint256 proposalId) external {
         Proposal storage p = proposals[proposalId];
-        require(msg.sender == p.proposer, "Governor: not proposer");
         require(!p.executed, "Governor: already executed");
+        require(!p.canceled, "Governor: already canceled");
+        // Proposer can always cancel; others can only cancel if voting hasn't started or quorum not met
+        bool isProposer = msg.sender == p.proposer;
+        bool beforeStart = block.number < p.startBlock;
+        uint256 totalSupply = token.getPastTotalSupply(p.startBlock);
+        bool belowQuorum = p.forVotes < totalSupply / 10;
+        require(isProposer || beforeStart || belowQuorum, "Governor: cannot cancel after quorum");
         p.canceled = true;
         emit ProposalCanceled(proposalId);
+    }
+
+    /// @notice Delegate votes with an expiry timestamp.
+    /// @param delegatee Address to delegate to.
+    /// @param expiry Timestamp when delegation expires.
+    function delegateWithExpiry(address delegatee, uint256 expiry) external {
+        require(expiry > block.timestamp, "Governor: expiry in past");
+        delegationHistory[msg.sender].push(Delegation({delegatee: delegatee, expiry: expiry}));
+        token.delegate(delegatee);
+    }
+
+    /// @notice Revoke expired delegations for a user.
+    /// @param delegator The delegator whose expired delegations should be revoked.
+    function revokeExpiredDelegations(address delegator) external {
+        Delegation[] storage history = delegationHistory[delegator];
+        for (uint256 i = 0; i < history.length; i++) {
+            if (history[i].expiry <= block.timestamp && history[i].delegatee != address(0)) {
+                history[i].delegatee = address(0);
+            }
+        }
     }
 
     receive() external payable {}
