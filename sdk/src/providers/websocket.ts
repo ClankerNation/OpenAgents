@@ -1,3 +1,10 @@
+/**
+ * @generated-by rafaio1
+ * @timestamp 2026-08-20T13:15:00Z
+ * @platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+ * @env os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents
+ */
+
 import { EventEmitter } from "events";
 
 export interface WsProviderConfig {
@@ -11,6 +18,9 @@ interface PendingRequest {
   reject: (reason: Error) => void;
 }
 
+// Maximum allowed listeners per event to detect leaks
+const MAX_LISTENERS_THRESHOLD = 10;
+
 export class WebSocketProvider extends EventEmitter {
   private url: string;
   private ws: WebSocket | null = null;
@@ -21,6 +31,10 @@ export class WebSocketProvider extends EventEmitter {
   private maxReconnectAttempts: number;
   private reconnectCount = 0;
   private isConnected = false;
+  private _messageHandler: ((event: MessageEvent) => void) | null = null;
+  private _openHandler: (() => void) | null = null;
+  private _closeHandler: (() => void) | null = null;
+  private _errorHandler: ((err: Event) => void) | null = null;
 
   constructor(config: WsProviderConfig) {
     super();
@@ -29,20 +43,60 @@ export class WebSocketProvider extends EventEmitter {
     this.maxReconnectAttempts = config.maxReconnectAttempts ?? 10;
   }
 
+  /**
+   * Remove all WebSocket event handlers to prevent duplicate listeners on reconnect.
+   */
+  private _cleanupHandlers(): void {
+    if (this.ws) {
+      if (this._openHandler) {
+        this.ws.removeEventListener("open", this._openHandler);
+        this._openHandler = null;
+      }
+      if (this._messageHandler) {
+        this.ws.removeEventListener("message", this._messageHandler);
+        this._messageHandler = null;
+      }
+      if (this._closeHandler) {
+        this.ws.removeEventListener("close", this._closeHandler);
+        this._closeHandler = null;
+      }
+      if (this._errorHandler) {
+        this.ws.removeEventListener("error", this._errorHandler);
+        this._errorHandler = null;
+      }
+    }
+  }
+
+  /**
+   * Check listener counts and warn if excessive (potential leak).
+   */
+  private _checkListenerLeaks(): void {
+    const events = ["connected", "disconnected", "error", "maxReconnectsReached"];
+    for (const evt of events) {
+      const count = this.listenerCount(evt);
+      if (count > MAX_LISTENERS_THRESHOLD) {
+        console.warn(
+          `[WebSocketProvider] WARNING: ${count} listeners on "${evt}" event (threshold: ${MAX_LISTENERS_THRESHOLD}). Possible memory leak.`
+        );
+      }
+    }
+  }
+
   async connect(): Promise<void> {
+    // Clean up any existing handlers before creating new connection
+    this._cleanupHandlers();
+
     return new Promise((resolve, reject) => {
       this.ws = new WebSocket(this.url);
 
-      this.ws.onopen = () => {
+      this._openHandler = () => {
         this.isConnected = true;
         this.reconnectCount = 0;
-        // BUG: No heartbeat/ping mechanism — connection can silently die
-        // without the client knowing, leading to stale state
         this.emit("connected");
         resolve();
       };
 
-      this.ws.onmessage = (event) => {
+      this._messageHandler = (event: MessageEvent) => {
         const data = JSON.parse(event.data as string);
         if (data.id && this.pendingRequests.has(data.id)) {
           const pending = this.pendingRequests.get(data.id)!;
@@ -54,18 +108,25 @@ export class WebSocketProvider extends EventEmitter {
         }
       };
 
-      this.ws.onclose = () => {
+      this._closeHandler = () => {
         this.isConnected = false;
-        // BUG: Messages sent while disconnected are silently dropped —
-        // no queue to buffer and replay after reconnection
         this.emit("disconnected");
         this.attemptReconnect();
       };
 
-      this.ws.onerror = (err) => {
+      this._errorHandler = (err: Event) => {
         if (!this.isConnected) reject(new Error("WebSocket connection failed"));
         this.emit("error", err);
       };
+
+      // Use addEventListener instead of .on* to allow proper removal
+      this.ws.addEventListener("open", this._openHandler);
+      this.ws.addEventListener("message", this._messageHandler);
+      this.ws.addEventListener("close", this._closeHandler);
+      this.ws.addEventListener("error", this._errorHandler);
+
+      // Check for listener leaks on EventEmitter side
+      this._checkListenerLeaks();
     });
   }
 
@@ -108,9 +169,11 @@ export class WebSocketProvider extends EventEmitter {
   }
 
   disconnect(): void {
+    this._cleanupHandlers();
     this.ws?.close();
     this.ws = null;
     this.isConnected = false;
     this.pendingRequests.clear();
+    this.subscriptions.clear();
   }
 }
