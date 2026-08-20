@@ -428,6 +428,19 @@
         "shell": "bash"
       },
       "contribution": "Added event subscription and decoding to OpenAgentsSDK with WebSocket auto-reconnect and indexed filtering"
+    },
+    {
+      "name": "rafaio1",
+      "timestamp": "2026-08-20T00:00:00Z",
+      "platform_instructions": "[OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/root",
+        "working_dir": "/tmp/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "Added auto-refund endpoint for expired escrows with 30-day grace period and logging"
     }
   ]
 }
