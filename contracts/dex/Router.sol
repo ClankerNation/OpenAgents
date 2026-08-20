@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/**
+ * @fix-author Claude Fable 5 (Autonomous Agent)
+ * @date 2026-08-20
+ * @runtime os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+ * @platform_instructions [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+ */
+
 interface IAMMPool {
     function swap(address tokenIn, uint256 amountIn, uint256 minAmountOut) external returns (uint256);
     function getReserves() external view returns (uint256, uint256);
@@ -38,18 +45,29 @@ contract Router {
         emit PoolRegistered(_tokenA, _tokenB, _pool);
     }
 
-    // BUG: No slippage protection — minAmountOut is passed as 0 to every intermediate hop,
-    // so a sandwich attacker can extract maximum value from multi-hop trades
-    // BUG: Path validation missing — no check that path[0] != path[path.length-1],
-    // allowing circular swaps (A->B->A) that waste gas and may be used in attacks
-    // BUG: Intermediate amounts not validated — if a pool returns 0 from swap,
-    // subsequent hops proceed with 0 input, silently producing a 0-output trade
+    /// @notice Execute a multi-hop swap with slippage protection and deadline.
+    /// @param path Array of token addresses to route through.
+    /// @param amountIn Amount of the first token to swap.
+    /// @param minAmountsOut Array of minimum amounts out for each hop (length must be path.length - 1).
+    /// @param deadline Unix timestamp after which the transaction reverts.
     function swapMultiHop(
         address[] calldata path,
         uint256 amountIn,
-        uint256 /* minAmountOut */
+        uint256[] calldata minAmountsOut,
+        uint256 deadline
     ) external returns (uint256 amountOut) {
-        require(path.length >= 2, "Path too short");
+        require(block.timestamp <= deadline, "Router: transaction expired");
+        require(path.length >= 2, "Router: path too short");
+        require(minAmountsOut.length == path.length - 1, "Router: invalid minAmountsOut length");
+        require(amountIn > 0, "Router: zero amount in");
+        
+        // Reject circular paths and duplicate tokens
+        for (uint256 i = 0; i < path.length; i++) {
+            require(path[i] != address(0), "Router: zero address in path");
+            for (uint256 j = i + 1; j < path.length; j++) {
+                require(path[i] != path[j], "Router: circular or duplicate path");
+            }
+        }
 
         IERC20(path[0]).transferFrom(msg.sender, address(this), amountIn);
 
@@ -60,12 +78,15 @@ contract Router {
             address tokenOut = path[i + 1];
 
             address pool = pools[tokenIn][tokenOut];
-            require(pool != address(0), "No pool for pair");
+            require(pool != address(0), "Router: no pool for pair");
 
             IERC20(tokenIn).approve(pool, currentAmount);
 
-            // Passes 0 as minAmountOut — no slippage protection on intermediate hops
-            currentAmount = IAMMPool(pool).swap(tokenIn, currentAmount, 0);
+            uint256 minOut = minAmountsOut[i];
+            currentAmount = IAMMPool(pool).swap(tokenIn, currentAmount, minOut);
+            
+            // Ensure non-zero intermediate and final amounts
+            require(currentAmount > 0, "Router: zero output amount");
         }
 
         amountOut = currentAmount;
@@ -80,16 +101,19 @@ contract Router {
         address[] calldata path,
         uint256 amountIn
     ) external view returns (uint256 estimatedOut) {
+        require(path.length >= 2, "Router: path too short");
         uint256 currentAmount = amountIn;
 
         for (uint256 i = 0; i < path.length - 1; i++) {
             address pool = pools[path[i]][path[i + 1]];
-            require(pool != address(0), "No pool");
+            require(pool != address(0), "Router: no pool");
 
             (uint256 resA, uint256 resB) = IAMMPool(pool).getReserves();
             address tA = IAMMPool(pool).tokenA();
 
             (uint256 resIn, uint256 resOut) = (path[i] == tA) ? (resA, resB) : (resB, resA);
+            require(resIn > 0 && resOut > 0, "Router: pool empty");
+            
             uint256 amountInWithFee = currentAmount * 9970;
             currentAmount = (amountInWithFee * resOut) / (resIn * 10000 + amountInWithFee);
         }
