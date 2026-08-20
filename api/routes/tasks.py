@@ -1,9 +1,14 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 """Task management endpoints for bounty assignments."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+import json
 
 from ..models.database import get_db, Task
 from ..middleware.auth import get_current_user
@@ -11,6 +16,31 @@ from ..middleware.auth import get_current_user
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 VALID_STATUSES = {"open", "assigned", "in_progress", "review", "completed", "cancelled"}
+
+# In-memory connection manager for task updates
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        dead = []
+        for connection in self.active_connections:
+            try:
+                await connection.send_text(json.dumps(message))
+            except Exception:
+                dead.append(connection)
+        for c in dead:
+            self.disconnect(c)
+
+manager = ConnectionManager()
 
 
 class TaskCreate(BaseModel):
@@ -88,6 +118,7 @@ async def update_task_status(
     task.status = update.status
     task.updated_at = datetime.utcnow()
     db.commit()
+    await manager.broadcast({"event": "task_updated", "task_id": str(task.id), "status": task.status})
     return {"id": task.id, "status": task.status}
 
 
@@ -102,4 +133,19 @@ async def cancel_task(task_id: int, user=Depends(get_current_user), db=Depends(g
         raise HTTPException(status_code=400, detail="Cannot cancel an active task")
     task.status = "cancelled"
     db.commit()
+    await manager.broadcast({"event": "task_cancelled", "task_id": str(task.id)})
     return {"id": task.id, "status": "cancelled"}
+
+
+@router.websocket("/ws")
+async def task_updates(websocket: WebSocket):
+    """Real-time websocket endpoint for task status updates."""
+    await manager.connect(websocket)
+    try:
+        while True:
+            # Keep connection alive and handle client pings
+            data = await websocket.receive_text()
+            if data == "ping":
+                await websocket.send_text("pong")
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
