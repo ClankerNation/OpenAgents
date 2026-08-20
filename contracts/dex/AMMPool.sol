@@ -2,10 +2,10 @@
 pragma solidity ^0.8.20;
 
 /**
- * @fix-author rafaio1
- * @date 2026-08-20T00:00:00Z
- * @runtime os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
- * @platform-instructions [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+ * @contributor rafaio1
+ * @timestamp 2026-08-20T00:00:00Z
+ * @env os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+ * @platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
  */
 
 interface IERC20 {
@@ -29,10 +29,17 @@ contract AMMPool {
 
     mapping(address => uint256) public liquidity;
 
-    event LiquidityAdded(address indexed provider, uint256 amountA, uint256 amountB, uint256 lpTokens);
-    event LiquidityRemoved(address indexed provider, uint256 amountA, uint256 amountB);
-    event Swap(address indexed user, address tokenIn, uint256 amountIn, uint256 amountOut);
-    event Sync(uint256 reserveA, uint256 reserveB);
+    event Mint(address indexed sender, uint256 amount0, uint256 amount1);
+    event Burn(address indexed sender, uint256 amount0, uint256 amount1, address indexed to);
+    event Swap(
+        address indexed sender,
+        uint256 amount0In,
+        uint256 amount1In,
+        uint256 amount0Out,
+        uint256 amount1Out,
+        address indexed to
+    );
+    event Sync(uint112 reserve0, uint112 reserve1);
 
     constructor(address _tokenA, address _tokenB) {
         tokenA = IERC20(_tokenA);
@@ -67,7 +74,8 @@ contract AMMPool {
         liquidity[msg.sender] += lpTokens;
         totalLiquidity += lpTokens;
 
-        emit LiquidityAdded(msg.sender, amountA, amountB, lpTokens);
+        emit Mint(msg.sender, amountA, amountB);
+        emit Sync(uint112(reserveA), uint112(reserveB));
     }
 
     function removeLiquidity(uint256 lpTokens) external {
@@ -86,7 +94,8 @@ contract AMMPool {
         require(tokenA.transfer(msg.sender, amountA), "Transfer A failed");
         require(tokenB.transfer(msg.sender, amountB), "Transfer B failed");
 
-        emit LiquidityRemoved(msg.sender, amountA, amountB);
+        emit Burn(msg.sender, amountA, amountB, msg.sender);
+        emit Sync(uint112(reserveA), uint112(reserveB));
     }
 
     function swap(address tokenIn, uint256 amountIn, uint256 minAmountOut, uint256 deadline) external returns (uint256 amountOut) {
@@ -117,14 +126,20 @@ contract AMMPool {
             reserveA -= amountOut;
         }
 
-        emit Swap(msg.sender, tokenIn, amountIn, amountOut);
+        // Uniswap V2 compatible Swap event signature
+        if (isA) {
+            emit Swap(msg.sender, amountIn, 0, 0, amountOut, msg.sender);
+        } else {
+            emit Swap(msg.sender, 0, amountIn, amountOut, 0, msg.sender);
+        }
+        emit Sync(uint112(reserveA), uint112(reserveB));
     }
 
     /// @notice Sync internal reserves with actual token balances
     function sync() external {
         reserveA = tokenA.balanceOf(address(this));
         reserveB = tokenB.balanceOf(address(this));
-        emit Sync(reserveA, reserveB);
+        emit Sync(uint112(reserveA), uint112(reserveB));
     }
 
     function _sqrt(uint256 y) internal pure returns (uint256 z) {
