@@ -1,3 +1,8 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
+
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -20,6 +25,9 @@ contract AgentRegistry is Ownable {
 
     uint256 public registrationFee;
     uint256 public minReputation;
+    
+    // Incrementing counter for unique agent IDs — prevents frontrunning collisions
+    uint256 public nextAgentId;
 
     event AgentRegistered(bytes32 indexed agentId, address indexed owner, string name);
     event AgentDeactivated(bytes32 indexed agentId);
@@ -28,13 +36,17 @@ contract AgentRegistry is Ownable {
     constructor(uint256 _registrationFee) Ownable(msg.sender) {
         registrationFee = _registrationFee;
         minReputation = 0;
+        nextAgentId = 1;
     }
 
     function registerAgent(string calldata name, string calldata endpoint) external payable returns (bytes32) {
         require(msg.value >= registrationFee, "Insufficient fee");
         require(bytes(name).length > 0 && bytes(name).length <= 64, "Invalid name");
 
-        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp));
+        // Use incrementing counter instead of timestamp-based hash to prevent
+        // frontrunning collisions where attacker registers same name in same block
+        uint256 id = nextAgentId++;
+        bytes32 agentId = keccak256(abi.encodePacked(id));
 
         require(agents[agentId].registeredAt == 0, "Agent exists");
 
