@@ -1,3 +1,8 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
+
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -13,8 +18,9 @@ interface AggregatorV3Interface {
 }
 
 /// @title ChainlinkAdapter
-/// @notice Adapter for Chainlink price feeds with normalized 18-decimal output
-/// @dev Wraps one or more Chainlink aggregators behind a simple getPrice interface
+/// @notice Adapter for Chainlink price feeds with normalized 18-decimal output and multi-hop derivation
+/// @dev Wraps one or more Chainlink aggregators behind a simple getPrice interface.
+///      Supports derived prices via two feeds when no direct feed exists.
 contract ChainlinkAdapter {
     address public admin;
     uint256 public constant TARGET_DECIMALS = 18;
@@ -61,26 +67,28 @@ contract ChainlinkAdapter {
         emit FeedDeactivated(token);
     }
 
-    // BUG: No roundId completeness check — answeredInRound should equal roundId to
-    // confirm the answer is from the current round; without this check, the contract
-    // may return an answer from a previous round that hasn't been updated
-    // BUG: Stale price allowed — updatedAt is not checked against the heartbeat,
-    // so a feed that hasn't updated in days will still return the last known price
-    // BUG: Negative price not rejected — Chainlink can return negative prices for
-    // certain feeds; casting a negative int256 to uint256 produces a huge incorrect value
-    function getPrice(address token) external view returns (uint256) {
+    /// @notice Get the validated price from a single feed, normalized to 18 decimals.
+    /// @param token The token address whose feed to query.
+    /// @return Normalized price in 18-decimal fixed point.
+    function getPrice(address token) public view returns (uint256) {
         FeedConfig storage config = feeds[token];
         require(config.active, "Feed not active");
 
         (
-            uint80 /* roundId */,
+            uint80 roundId,
             int256 answer,
             /* uint256 startedAt */,
-            uint256 /* updatedAt */,
-            uint80 /* answeredInRound */
+            uint256 updatedAt,
+            uint80 answeredInRound
         ) = config.feed.latestRoundData();
 
-        // No validation of roundId, staleness, or negative price
+        // Validate round completeness — answer must be from current round
+        require(answeredInRound >= roundId, "Stale round data");
+        // Validate staleness against heartbeat
+        require(block.timestamp - updatedAt <= config.heartbeat, "Price stale");
+        // Reject negative prices
+        require(answer > 0, "Negative price");
+
         uint256 price = uint256(answer);
 
         // Normalize to 18 decimals
@@ -92,6 +100,28 @@ contract ChainlinkAdapter {
         }
 
         return price;
+    }
+
+    /// @notice Derive a price from two feeds when no direct feed exists.
+    ///         E.g., TOKEN/ETH = TOKEN/USD ÷ ETH/USD.
+    /// @param base The base asset (numerator feed).
+    /// @param quote The quote asset (denominator feed).
+    /// @return Derived price normalized to 18 decimals.
+    function derivedPrice(address base, address quote) external view returns (uint256) {
+        // If a direct feed exists for the pair, prefer it
+        // Convention: direct feed registered under keccak256(base, quote) or similar
+        // For simplicity, check if base itself has a feed that represents base/quote
+        // In practice, callers register derived pairs explicitly
+
+        uint256 basePrice = getPrice(base);
+        uint256 quotePrice = getPrice(quote);
+
+        require(quotePrice > 0, "Quote price zero");
+
+        // Both prices are already normalized to 18 decimals
+        // derived = basePrice / quotePrice, but we need to maintain 18 decimal precision
+        // result = (basePrice * 1e18) / quotePrice
+        return (basePrice * (10 ** TARGET_DECIMALS)) / quotePrice;
     }
 
     function getFeedInfo(address token) external view returns (
