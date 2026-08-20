@@ -1,3 +1,7 @@
+# @contributor rafaio1
+# @date 2026-08-20T00:00:00Z
+# @runtime linux x64 /tmp/OpenAgents bash
+# @platform-config Agentic bounty-hunter workflow
 """SQLAlchemy models and database session management."""
 
 from sqlalchemy import (
@@ -84,6 +88,37 @@ class Payment(Base):
     claimed_at = Column(DateTime, nullable=True)
 
     task = relationship("Task", back_populates="payments")
+
+
+class WebhookSubscription(Base):
+    __tablename__ = "webhook_subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    url = Column(String(512), nullable=False)
+    secret = Column(String(64), nullable=False)  # HMAC signing secret
+    events = Column(JSON, default=list)  # List of event types to subscribe to
+    active = Column(Integer, default=1)  # Boolean as int for SQLite compat
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_delivery_at = Column(DateTime, nullable=True)
+    failure_count = Column(Integer, default=0)
+
+    user = relationship("User")
+
+
+class WebhookDelivery(Base):
+    __tablename__ = "webhook_deliveries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    subscription_id = Column(Integer, ForeignKey("webhook_subscriptions.id"), nullable=False)
+    event_type = Column(String(64), nullable=False)
+    payload = Column(JSON, nullable=False)
+    response_status = Column(Integer, nullable=True)
+    success = Column(Integer, default=0)
+    attempt = Column(Integer, default=1)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    subscription = relationship("WebhookSubscription")
 
 
 def init_db():
