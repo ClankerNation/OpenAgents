@@ -1,3 +1,7 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 """Rate limiting middleware for the OpenAgents API."""
 
 import time
@@ -11,13 +15,15 @@ from typing import Dict, Tuple
 class RateLimitConfig:
     def __init__(
         self,
-        requests_per_window: int = 100,
+        requests_per_window: int = 60,
         window_seconds: int = 60,
         burst_limit: int = 20,
+        authenticated_requests_per_window: int = 300,
     ):
         self.requests_per_window = requests_per_window
         self.window_seconds = window_seconds
         self.burst_limit = burst_limit
+        self.authenticated_requests_per_window = authenticated_requests_per_window
 
 
 # BUG: In-memory store — all counters reset when the server restarts,
@@ -62,7 +68,26 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         client_ip = self._get_client_ip(request)
+        # Differentiate limits based on authentication status
+        is_authenticated = hasattr(request.state, "user") and request.state.user is not None
+        limit = self.config.authenticated_requests_per_window if is_authenticated else self.config.requests_per_window
+
         is_limited, value = self._is_rate_limited(client_ip)
+        # Override check with correct limit tier
+        count, window_start = _request_counts[client_ip]
+        now = time.time()
+        if now - window_start >= self.config.window_seconds:
+            _request_counts[client_ip] = (1, now)
+            is_limited = False
+            value = limit - 1
+        elif count >= limit:
+            retry_after = int(self.config.window_seconds - (now - window_start))
+            is_limited = True
+            value = retry_after
+        else:
+            _request_counts[client_ip] = (count + 1, window_start)
+            is_limited = False
+            value = limit - count - 1
 
         if is_limited:
             return JSONResponse(
@@ -76,7 +101,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         response = await call_next(request)
         response.headers["X-RateLimit-Remaining"] = str(value)
-        response.headers["X-RateLimit-Limit"] = str(self.config.requests_per_window)
+        response.headers["X-RateLimit-Limit"] = str(limit)
         return response
 
 
