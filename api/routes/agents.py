@@ -1,6 +1,12 @@
+# @fix-author rafaio1
+# @date 2026-08-20T00:00:00Z
+# @runtime linux x64 /tmp/OpenAgents bash
+# @platform-config Agentic bounty-hunter workflow
 """Agent CRUD endpoints for the OpenAgents platform."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import field_validator, HttpUrl
+import httpx
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -12,10 +18,39 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 
 
 class AgentCreate(BaseModel):
-    name: str  # BUG: No validation — name can contain SQL injection, XSS, or be empty
+    name: str
+    endpoint: str
     description: Optional[str] = None
     model_type: str = "gpt-4"
     config: Optional[dict] = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Agent name cannot be empty")
+        if len(v) > 128:
+            raise ValueError("Agent name too long (max 128 chars)")
+        # Basic sanitization to prevent XSS/SQL injection vectors
+        forbidden = ["<", ">", "'", '"', ";", "--", "/*", "*/"]
+        for char in forbidden:
+            if char in v:
+                raise ValueError(f"Agent name contains forbidden character: {char}")
+        return v.strip()
+
+    @field_validator("endpoint")
+    @classmethod
+    def validate_endpoint(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Endpoint URL cannot be empty")
+        # Validate URL format using Pydantic's HttpUrl
+        try:
+            parsed = HttpUrl(v)
+            if parsed.scheme not in ("http", "https"):
+                raise ValueError("Endpoint must use http or https scheme")
+        except Exception:
+            raise ValueError("Invalid endpoint URL format")
+        return v.strip()
 
 
 class AgentUpdate(BaseModel):
@@ -26,6 +61,15 @@ class AgentUpdate(BaseModel):
 
 @router.post("/")
 async def create_agent(agent: AgentCreate, user=Depends(get_current_user), db=Depends(get_db)):
+    # Verify endpoint is reachable with a HEAD request (timeout 5s)
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.head(agent.endpoint)
+            if response.status_code >= 500:
+                raise HTTPException(status_code=400, detail=f"Endpoint returned server error: {response.status_code}")
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=400, detail=f"Endpoint unreachable: {str(e)}")
+
     new_agent = Agent(
         name=agent.name,
         description=agent.description,
