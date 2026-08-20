@@ -1,10 +1,16 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract PaymentEscrow is Ownable {
+    using SafeERC20 for IERC20;
     struct Escrow {
         address payer;
         address payee;
@@ -33,20 +39,24 @@ contract PaymentEscrow is Ownable {
         require(payee != address(0), "Invalid payee");
         require(amount > 0, "Amount must be > 0");
 
-        IERC20(token).transferFrom(msg.sender, address(this), amount);
+        // Balance-before/after pattern to handle fee-on-transfer tokens
+        uint256 balanceBefore = IERC20(token).balanceOf(address(this));
+        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+        uint256 actualReceived = IERC20(token).balanceOf(address(this)) - balanceBefore;
+        require(actualReceived > 0, "Actual received amount must be > 0");
 
         uint256 escrowId = escrowCount++;
         escrows[escrowId] = Escrow({
             payer: msg.sender,
             payee: payee,
             token: token,
-            amount: amount,
+            amount: actualReceived,
             releaseTime: block.timestamp + lockDuration,
             released: false,
             refunded: false
         });
 
-        emit EscrowCreated(escrowId, msg.sender, amount);
+        emit EscrowCreated(escrowId, msg.sender, actualReceived);
         return escrowId;
     }
 
@@ -56,7 +66,7 @@ contract PaymentEscrow is Ownable {
         require(msg.sender == escrow.payer || msg.sender == owner(), "Not authorized");
 
         escrow.released = true;
-        IERC20(escrow.token).transfer(escrow.payee, escrow.amount);
+        IERC20(escrow.token).safeTransfer(escrow.payee, escrow.amount);
 
         emit EscrowReleased(escrowId, escrow.payee, escrow.amount);
     }
@@ -68,7 +78,7 @@ contract PaymentEscrow is Ownable {
         require(msg.sender == escrow.payer, "Not payer");
 
         escrow.refunded = true;
-        IERC20(escrow.token).transfer(escrow.payer, escrow.amount);
+        IERC20(escrow.token).safeTransfer(escrow.payer, escrow.amount);
 
         emit EscrowRefunded(escrowId, escrow.payer, escrow.amount);
     }
