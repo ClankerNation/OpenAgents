@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+// @fix-author rafaio1
+// @date 2026-08-20
+// @runtime os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+// @platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
 
-contract AgentRegistry is Ownable {
+import "./utils/TimelockedOwnable.sol";
+
+contract AgentRegistry is TimelockedOwnable {
     struct Agent {
         address owner;
         string name;
@@ -25,7 +30,7 @@ contract AgentRegistry is Ownable {
     event AgentDeactivated(bytes32 indexed agentId);
     event ReputationUpdated(bytes32 indexed agentId, uint256 newReputation);
 
-    constructor(uint256 _registrationFee) Ownable(msg.sender) {
+    constructor(uint256 _registrationFee) {
         registrationFee = _registrationFee;
         minReputation = 0;
     }

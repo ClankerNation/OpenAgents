@@ -1,16 +1,21 @@
+// @fix-author rafaio1
+// @date 2026-08-20
+// @runtime ghostcli/codex
+// @platform-config Agentic bounty-hunter workflow
+
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "../utils/TimelockedOwnable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /// @title CompoundVault
 /// @notice Auto-compounding vault that periodically harvests yield and reinvests.
 /// @dev Deposits into an underlying strategy, harvests rewards, sells for the base
 ///      asset, and re-deposits to compound returns. Charges a performance fee.
-contract CompoundVault is Ownable, ReentrancyGuard {
+contract CompoundVault is TimelockedOwnable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     IERC20 public immutable baseToken;
@@ -37,7 +42,7 @@ contract CompoundVault is Ownable, ReentrancyGuard {
         address _strategy,
         address _feeRecipient,
         uint256 _feeBps
-    ) Ownable(msg.sender) {
+    ) TimelockedOwnable(msg.sender) {
         require(_feeBps <= 3000, "Vault: fee too high");
         baseToken = IERC20(_baseToken);
         rewardToken = IERC20(_rewardToken);

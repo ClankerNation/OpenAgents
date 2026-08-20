@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+// @fix-author rafaio1
+// @date 2026-08-20
+// @runtime os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+// @platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
 
-contract PaymentEscrow is Ownable {
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "./utils/TimelockedOwnable.sol";
+
+contract PaymentEscrow is TimelockedOwnable {
     struct Escrow {
         address payer;
         address payee;
@@ -22,8 +27,6 @@ contract PaymentEscrow is Ownable {
     event EscrowReleased(uint256 indexed escrowId, address indexed payee, uint256 amount);
     event EscrowRefunded(uint256 indexed escrowId, address indexed payer, uint256 amount);
 
-    constructor() Ownable(msg.sender) {}
-
     function createEscrow(
         address payee,
         address token,
@@ -33,20 +36,24 @@ contract PaymentEscrow is Ownable {
         require(payee != address(0), "Invalid payee");
         require(amount > 0, "Amount must be > 0");
 
+        uint256 balanceBefore = IERC20(token).balanceOf(address(this));
         IERC20(token).transferFrom(msg.sender, address(this), amount);
+        uint256 balanceAfter = IERC20(token).balanceOf(address(this));
+        uint256 actualAmount = balanceAfter - balanceBefore;
+        require(actualAmount > 0, "Actual amount must be > 0");
 
         uint256 escrowId = escrowCount++;
         escrows[escrowId] = Escrow({
             payer: msg.sender,
             payee: payee,
             token: token,
-            amount: amount,
+            amount: actualAmount,
             releaseTime: block.timestamp + lockDuration,
             released: false,
             refunded: false
         });
 
-        emit EscrowCreated(escrowId, msg.sender, amount);
+        emit EscrowCreated(escrowId, msg.sender, actualAmount);
         return escrowId;
     }
 
@@ -54,10 +61,8 @@ contract PaymentEscrow is Ownable {
         Escrow storage escrow = escrows[escrowId];
         require(!escrow.released && !escrow.refunded, "Already settled");
         require(msg.sender == escrow.payer || msg.sender == owner(), "Not authorized");
-
         escrow.released = true;
         IERC20(escrow.token).transfer(escrow.payee, escrow.amount);
-
         emit EscrowReleased(escrowId, escrow.payee, escrow.amount);
     }
 
@@ -66,10 +71,8 @@ contract PaymentEscrow is Ownable {
         require(!escrow.released && !escrow.refunded, "Already settled");
         require(block.timestamp > escrow.releaseTime, "Lock not expired");
         require(msg.sender == escrow.payer, "Not payer");
-
         escrow.refunded = true;
         IERC20(escrow.token).transfer(escrow.payer, escrow.amount);
-
         emit EscrowRefunded(escrowId, escrow.payer, escrow.amount);
     }
 }
