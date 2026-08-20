@@ -1,3 +1,7 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 import { withRetry, RetryOptions } from "../utils/retry";
 
 export interface JsonRpcRequest {
@@ -85,6 +89,16 @@ export class RpcProvider {
     return responses
       .sort((a, b) => a.id - b.id)
       .map((r) => r.result);
+  }
+
+  async estimateGas(tx: { to: string; from?: string; data?: string; value?: bigint }): Promise<bigint> {
+    const params: Record<string, string> = { to: tx.to };
+    if (tx.from) params.from = tx.from;
+    if (tx.data) params.data = tx.data;
+    if (tx.value !== undefined) params.value = "0x" + tx.value.toString(16);
+    
+    const hex = (await this.call("eth_estimateGas", [params])) as string;
+    return BigInt(hex);
   }
 
   async getBlockNumber(): Promise<number> {
