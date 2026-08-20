@@ -1,8 +1,8 @@
 /**
- * @fix-author rafaio1
- * @date 2026-08-20
- * @runtime os=linux, arch=x64, working_dir=/tmp/OpenAgents, shell=bash
- * @platform-instructions [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+ * @contributor-info rafaio1
+ * @timestamp 2026-08-20T00:00:00Z
+ * @env os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+ * @platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
  */
 
 import { ethers } from "ethers";
@@ -14,6 +14,14 @@ export interface AgentConfig {
   rpcUrl: string;
   registryAddress: string;
   routerAddress: string;
+}
+
+export interface DeploymentReceipt {
+  address: string;
+  txHash: string;
+  gasUsed: bigint;
+  blockNumber: number;
+  confirmations: number;
 }
 
 export class OpenAgentsSDK {
@@ -66,6 +74,39 @@ export class OpenAgentsSDK {
       ethers.toUtf8Bytes(result)
     );
     await tx.wait();
+  }
+
+  /**
+   * Deploy a contract and wait for confirmation.
+   * @param abi Contract ABI (JSON array or human-readable)
+   * @param bytecode Contract bytecode (hex string with 0x prefix)
+   * @param args Constructor arguments
+   * @param confirmations Number of block confirmations to wait (default: 1)
+   * @returns DeploymentReceipt with address, tx hash, gas used, etc.
+   */
+  async deployContract(
+    abi: any[],
+    bytecode: string,
+    args: unknown[] = [],
+    confirmations: number = 1
+  ): Promise<DeploymentReceipt> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const contract = await factory.deploy(...args);
+    
+    // Wait for deployment transaction to be mined
+    const receipt = await contract.deploymentTransaction()?.wait(confirmations);
+    
+    if (!receipt || !contract.target) {
+      throw new Error("Deployment failed: no receipt or contract address");
+    }
+
+    return {
+      address: contract.target as string,
+      txHash: receipt.hash,
+      gasUsed: receipt.gasUsed,
+      blockNumber: receipt.blockNumber,
+      confirmations: receipt.confirmations,
+    };
   }
 
   async getOpenTasks(options?: {
