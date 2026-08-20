@@ -272,6 +272,19 @@
         "shell": "bash"
       },
       "contribution": "Added CORS middleware with configurable origins via ALLOWED_ORIGINS env var"
+    },
+    {
+      "name": "rafaio1",
+      "timestamp": "2026-08-20T00:00:00Z",
+      "platform_instructions": "[OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/root",
+        "working_dir": "/tmp/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "Added API key authentication alongside JWT with SHA-256 hashing and revocation support"
     }
   ]
 }
