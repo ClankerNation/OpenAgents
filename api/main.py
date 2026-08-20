@@ -1,4 +1,11 @@
+# @fix-author rafaio1
+# @date 2026-08-20T00:00:00Z
+# @runtime linux x64 /tmp/OpenAgents bash
+# @platform-config Agentic bounty-hunter workflow
+
+import os
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -7,6 +14,33 @@ app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
+)
+
+# CORS Configuration
+# In production, ALLOWED_ORIGINS should be a comma-separated list of specific domains.
+# In development, defaults to wildcard "*" if not set.
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
+if allowed_origins_env:
+    allow_origins = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()]
+else:
+    # Default restrictive behavior: only allow localhost for dev if env not set
+    # Per issue requirements: "Default to restrictive origins in production"
+    # and "Wildcard * only in development mode"
+    # We assume if ALLOWED_ORIGINS is not set, we are in a default/dev state or 
+    # strict prod state. To be safe per "restrictive in production", we default to empty
+    # unless explicitly configured. However, for DX, let's allow localhost.
+    allow_origins = ["http://localhost:3000", "http://localhost:8080"]
+
+allow_credentials = True
+allow_methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+allow_headers = ["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allow_origins,
+    allow_credentials=allow_credentials,
+    allow_methods=allow_methods,
+    allow_headers=allow_headers,
 )
 
 
