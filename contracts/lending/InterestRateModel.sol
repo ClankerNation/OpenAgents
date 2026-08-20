@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/**
+ * @contributor rafaio1
+ * @date 2026-08-20T10:45:00Z
+ * @runtime os=linux, arch=x64, working_dir=/tmp/OpenAgents, shell=bash
+ * @platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+ */
+
 /// @title InterestRateModel
 /// @notice Variable interest rate model based on pool utilization
 /// @dev Rate increases with utilization, with a kink at the optimal point
@@ -18,7 +25,16 @@ contract InterestRateModel {
 
     address public admin;
 
-    event RateParamsUpdated(uint256 baseRate, uint256 multiplier, uint256 jumpMultiplier, uint256 kink);
+    event RateParametersUpdated(
+        uint256 oldBaseRate,
+        uint256 newBaseRate,
+        uint256 oldMultiplier,
+        uint256 newMultiplier,
+        uint256 oldJumpMultiplier,
+        uint256 newJumpMultiplier,
+        uint256 oldKink,
+        uint256 newKink
+    );
 
     modifier onlyAdmin() {
         require(msg.sender == admin, "Not admin");
@@ -44,11 +60,40 @@ contract InterestRateModel {
         uint256 _jumpMultiplier,
         uint256 _kink
     ) external onlyAdmin {
+        uint256 oldBaseRate = baseRate;
+        uint256 oldMultiplier = multiplier;
+        uint256 oldJumpMultiplier = jumpMultiplier;
+        uint256 oldKink = kink;
+
         baseRate = _baseRate;
         multiplier = _multiplier;
         jumpMultiplier = _jumpMultiplier;
         kink = _kink;
-        emit RateParamsUpdated(_baseRate, _multiplier, _jumpMultiplier, _kink);
+
+        emit RateParametersUpdated(
+            oldBaseRate, _baseRate,
+            oldMultiplier, _multiplier,
+            oldJumpMultiplier, _jumpMultiplier,
+            oldKink, _kink
+        );
+    }
+
+    struct RateParameters {
+        uint256 baseRate;
+        uint256 multiplier;
+        uint256 jumpMultiplier;
+        uint256 kink;
+    }
+
+    /// @notice Returns all current rate parameters in a single call
+    /// @return params Struct containing baseRate, multiplier, jumpMultiplier, and kink
+    function getParameters() external view returns (RateParameters memory params) {
+        return RateParameters({
+            baseRate: baseRate,
+            multiplier: multiplier,
+            jumpMultiplier: jumpMultiplier,
+            kink: kink
+        });
     }
 
     function getUtilization(uint256 totalBorrowed, uint256 totalDeposits) public pure returns (uint256) {
