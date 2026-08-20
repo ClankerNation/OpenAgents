@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/**
+ * @contributor rafaio1
+ * @timestamp 2026-08-20T02:30:00Z
+ * @env os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+ * @platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+ */
+
+
 interface AggregatorV3Interface {
     function latestRoundData() external view returns (
         uint80 roundId,
@@ -61,26 +69,59 @@ contract ChainlinkAdapter {
         emit FeedDeactivated(token);
     }
 
-    // BUG: No roundId completeness check — answeredInRound should equal roundId to
-    // confirm the answer is from the current round; without this check, the contract
-    // may return an answer from a previous round that hasn't been updated
-    // BUG: Stale price allowed — updatedAt is not checked against the heartbeat,
-    // so a feed that hasn't updated in days will still return the last known price
-    // BUG: Negative price not rejected — Chainlink can return negative prices for
-    // certain feeds; casting a negative int256 to uint256 produces a huge incorrect value
+    /// @notice Get validated price for a token with direct feed.
+    /// @param token Address of the token.
+    /// @return Normalized price in 18 decimals.
     function getPrice(address token) external view returns (uint256) {
+        return _getValidatedPrice(token);
+    }
+
+    /// @notice Get derived price for a pair without direct feed.
+    /// @dev Calculates base/quote using two feeds: price = baseFeed / quoteFeed.
+    ///      Handles decimal normalization between feeds. Checks staleness on both.
+    /// @param base Base token address (e.g., TOKEN).
+    /// @param quote Quote token address (e.g., ETH).
+    /// @return Derived price normalized to 18 decimals.
+    function derivedPrice(address base, address quote) external view returns (uint256) {
+        // Try direct feed first
+        if (feeds[base].active && !feeds[quote].active) {
+            return _getValidatedPrice(base);
+        }
+
+        // Both must have active feeds for derivation
+        require(feeds[base].active, "Base feed not active");
+        require(feeds[quote].active, "Quote feed not active");
+
+        uint256 basePrice = _getValidatedPrice(base);
+        uint256 quotePrice = _getValidatedPrice(quote);
+
+        require(quotePrice > 0, "Quote price zero");
+
+        // basePrice and quotePrice are both 18 decimals
+        // derived = basePrice / quotePrice * 1e18
+        return (basePrice * 1e18) / quotePrice;
+    }
+
+    /// @internal Validate and normalize a single feed price.
+    function _getValidatedPrice(address token) internal view returns (uint256) {
         FeedConfig storage config = feeds[token];
         require(config.active, "Feed not active");
 
         (
-            uint80 /* roundId */,
+            uint80 roundId,
             int256 answer,
             /* uint256 startedAt */,
-            uint256 /* updatedAt */,
-            uint80 /* answeredInRound */
+            uint256 updatedAt,
+            uint80 answeredInRound
         ) = config.feed.latestRoundData();
 
-        // No validation of roundId, staleness, or negative price
+        // Round completeness check
+        require(answeredInRound >= roundId, "Stale round");
+        // Staleness check
+        require(block.timestamp - updatedAt <= config.heartbeat, "Price stale");
+        // Negative price check
+        require(answer > 0, "Invalid price");
+
         uint256 price = uint256(answer);
 
         // Normalize to 18 decimals
