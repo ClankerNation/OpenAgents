@@ -1,3 +1,10 @@
+/**
+ * @fix-author rafaio1
+ * @date 2026-08-20T13:25:00Z
+ * @runtime os=linux, arch=x64, working_dir=/tmp/OpenAgents, shell=bash
+ * @platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+ */
+
 import { ethers } from "ethers";
 
 export interface AgentConfig {
@@ -60,7 +67,27 @@ export class OpenAgentsSDK {
     await tx.wait();
   }
 
-  async getOpenTasks(): Promise<any[]> {
+  // Cache for task count per block to avoid redundant RPC calls
+  private _taskCountCache: { block: number; count: number } | null = null;
+
+  /**
+   * Get open tasks with pagination, concurrency, and status filtering.
+   * @param options.offset Start index (default 0)
+   * @param options.limit Max tasks to fetch (default 50)
+   * @param options.statusFilter Optional status code filter (0=Open, 1=Assigned, etc.)
+   * @param options.batchSize Concurrent requests per batch (default 10)
+   */
+  async getOpenTasks(options: {
+    offset?: number;
+    limit?: number;
+    statusFilter?: number;
+    batchSize?: number;
+  } = {}): Promise<any[]> {
+    const offset = options.offset ?? 0;
+    const limit = options.limit ?? 50;
+    const statusFilter = options.statusFilter ?? 0; // Default to Open tasks
+    const batchSize = options.batchSize ?? 10;
+
     const router = new ethers.Contract(
       this.config.routerAddress,
       [
@@ -70,22 +97,57 @@ export class OpenAgentsSDK {
       this.provider
     );
 
-    const count = await router.taskCount();
-    const openTasks = [];
+    // Get task count with per-block caching
+    const currentBlock = await this.provider.getBlockNumber();
+    let totalCount: number;
+    if (this._taskCountCache && this._taskCountCache.block === currentBlock) {
+      totalCount = this._taskCountCache.count;
+    } else {
+      totalCount = Number(await router.taskCount());
+      this._taskCountCache = { block: currentBlock, count: totalCount };
+    }
 
-    for (let i = 0; i < count; i++) {
-      const task = await router.tasks(i);
-      if (task[5] === 0) {
-        openTasks.push({
-          id: i,
-          creator: task[0],
-          description: task[2],
-          reward: task[3],
-          deadline: task[4],
-        });
+    // Calculate actual range
+    const startIdx = Math.min(offset, totalCount);
+    const endIdx = Math.min(offset + limit, totalCount);
+    const indices: number[] = [];
+    for (let i = startIdx; i < endIdx; i++) {
+      indices.push(i);
+    }
+
+    if (indices.length === 0) return [];
+
+    // Fetch tasks in concurrent batches
+    const results: any[] = [];
+    for (let b = 0; b < indices.length; b += batchSize) {
+      const batch = indices.slice(b, b + batchSize);
+      const batchResults = await Promise.all(
+        batch.map(async (idx) => {
+          try {
+            const task = await router.tasks(idx);
+            return { idx, task };
+          } catch {
+            return { idx, task: null };
+          }
+        })
+      );
+
+      for (const { idx, task } of batchResults) {
+        if (!task) continue;
+        // Apply status filter
+        if (task[5] === statusFilter) {
+          results.push({
+            id: idx,
+            creator: task[0],
+            description: task[2],
+            reward: task[3],
+            deadline: task[4],
+            status: task[5],
+          });
+        }
       }
     }
 
-    return openTasks;
+    return results;
   }
 }
