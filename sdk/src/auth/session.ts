@@ -1,3 +1,8 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
+
 import { Wallet } from "./wallet";
 import { keccak256 } from "../utils/crypto";
 
@@ -20,29 +25,34 @@ export class SessionManager {
   private autoRefresh: boolean;
   private currentToken: SessionToken | null = null;
   private refreshPromise: Promise<SessionToken> | null = null;
+  private rotationIntervalMs: number = 30 * 60 * 1000; // rotate every 30 min
+  private rotationTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(config: SessionConfig) {
     this.wallet = config.wallet;
     this.apiBaseUrl = config.apiBaseUrl;
     this.autoRefresh = config.autoRefresh ?? true;
-    this.loadStoredSession();
-  }
-
-  private loadStoredSession(): void {
-    // BUG: Storing tokens in localStorage is vulnerable to XSS attacks —
-    // any injected script can steal the session token
-    if (typeof window !== "undefined" && window.localStorage) {
-      const stored = localStorage.getItem(`session_${this.wallet.address}`);
-      if (stored) {
-        this.currentToken = JSON.parse(stored);
-      }
+    // No localStorage load — tokens stay in memory only (XSS-safe)
+    if (this.autoRefresh) {
+      this.startRotation();
     }
   }
 
-  private persistSession(token: SessionToken): void {
-    this.currentToken = token;
-    if (typeof window !== "undefined" && window.localStorage) {
-      localStorage.setItem(`session_${this.wallet.address}`, JSON.stringify(token));
+  private startRotation(): void {
+    if (this.rotationTimer) clearInterval(this.rotationTimer);
+    this.rotationTimer = setInterval(async () => {
+      try {
+        await this.refresh();
+      } catch {
+        // Rotation failure is non-fatal; next call will re-authenticate
+      }
+    }, this.rotationIntervalMs);
+  }
+
+  private stopRotation(): void {
+    if (this.rotationTimer) {
+      clearInterval(this.rotationTimer);
+      this.rotationTimer = null;
     }
   }
 
@@ -69,51 +79,62 @@ export class SessionManager {
 
     if (!res.ok) throw new Error(`Auth failed: ${res.status}`);
     const token: SessionToken = await res.json();
-    this.persistSession(token);
+    this.currentToken = token;
     return token;
   }
 
   async getToken(): Promise<string> {
-    // BUG: No expiry check — returns the cached token even if it has expired,
-    // causing 401 errors on subsequent API calls
-    if (this.currentToken) {
+    const now = Math.floor(Date.now() / 1000);
+    if (this.currentToken && this.currentToken.expiresAt > now + 60) {
       return this.currentToken.token;
     }
-    const session = await this.authenticate();
+    // Expired or missing — coalesce concurrent refreshes
+    const session = await this.refresh();
     return session.token;
   }
 
   async refresh(): Promise<SessionToken> {
-    // BUG: Race condition — multiple concurrent callers can trigger parallel
-    // refresh requests, and only the last one's token survives
-    if (!this.currentToken?.refreshToken) {
-      return this.authenticate();
+    // Coalesce concurrent refresh requests into a single promise
+    if (this.refreshPromise) {
+      return this.refreshPromise;
     }
 
-    const res = await fetch(`${this.apiBaseUrl}/auth/refresh`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refreshToken: this.currentToken.refreshToken }),
-    });
+    this.refreshPromise = (async (): Promise<SessionToken> => {
+      try {
+        if (!this.currentToken?.refreshToken) {
+          return await this.authenticate();
+        }
 
-    if (!res.ok) {
-      this.currentToken = null;
-      return this.authenticate();
-    }
+        const res = await fetch(`${this.apiBaseUrl}/auth/refresh`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refreshToken: this.currentToken.refreshToken }),
+        });
 
-    const token: SessionToken = await res.json();
-    this.persistSession(token);
-    return token;
+        if (!res.ok) {
+          this.currentToken = null;
+          return await this.authenticate();
+        }
+
+        const token: SessionToken = await res.json();
+        this.currentToken = token;
+        return token;
+      } finally {
+        this.refreshPromise = null;
+      }
+    })();
+
+    return this.refreshPromise;
   }
 
   logout(): void {
+    this.stopRotation();
     this.currentToken = null;
-    if (typeof window !== "undefined" && window.localStorage) {
-      localStorage.removeItem(`session_${this.wallet.address}`);
-    }
+    this.refreshPromise = null;
   }
 
   isAuthenticated(): boolean {
-    return this.currentToken !== null;
+    const now = Math.floor(Date.now() / 1000);
+    return this.currentToken !== null && this.currentToken.expiresAt > now;
   }
 }
