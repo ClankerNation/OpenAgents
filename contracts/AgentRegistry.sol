@@ -28,6 +28,9 @@ contract AgentRegistry is Ownable {
     uint256 public registrationFee;
     uint256 public minReputation;
     uint256 public constant MAX_BATCH_SIZE = 50;
+    
+    // Monotonic counter for unique agent IDs to prevent frontrunning/collision
+    uint256 private _nextAgentId;
 
     event AgentRegistered(bytes32 indexed agentId, address indexed owner, string name);
     event AgentDeactivated(bytes32 indexed agentId);
@@ -42,7 +45,8 @@ contract AgentRegistry is Ownable {
         require(msg.value >= registrationFee, "Insufficient fee");
         require(bytes(name).length > 0 && bytes(name).length <= 64, "Invalid name");
 
-        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp));
+        // Use incrementing counter + sender + name for guaranteed uniqueness
+        bytes32 agentId = keccak256(abi.encodePacked(_nextAgentId++, msg.sender, name));
 
         require(agents[agentId].registeredAt == 0, "Agent exists");
 
@@ -80,8 +84,8 @@ contract AgentRegistry is Ownable {
         for (uint256 i = 0; i < count; i++) {
             require(bytes(names[i]).length > 0 && bytes(names[i]).length <= 64, "Invalid name");
 
-            // Use unique salt per index to avoid collision within same block
-            bytes32 agentId = keccak256(abi.encodePacked(msg.sender, names[i], block.timestamp, i));
+            // Counter guarantees uniqueness even within same tx/block
+            bytes32 agentId = keccak256(abi.encodePacked(_nextAgentId++, msg.sender, names[i]));
             require(agents[agentId].registeredAt == 0, "Agent exists");
 
             agents[agentId] = Agent({
