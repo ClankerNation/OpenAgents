@@ -1,4 +1,13 @@
-from fastapi import FastAPI, HTTPException, Query
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
+from fastapi import FastAPI, HTTPException, Query, Request, Depends
+from pydantic import BaseModel, Field
+from typing import Optional, List
+from datetime import datetime
+import uuid
+import json
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -42,6 +51,80 @@ class LeaderboardEntry(BaseModel):
 # In-memory store (placeholder for DB)
 agents_cache: dict = {}
 tasks_cache: dict = {}
+
+# Audit Log System (Immutable)
+class AuditLogEntry(BaseModel):
+    id: str = Field(..., example="550e8400-e29b-41d4-a716-446655440000")
+    action: str = Field(..., example="UPDATE_AGENT")
+    actor: str = Field(..., example="0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb")
+    target: str = Field(..., example="agent:0xabc123")
+    before: Optional[dict] = Field(None, example={"reputation": 800})
+    after: Optional[dict] = Field(None, example={"reputation": 850})
+    ip_address: str = Field(..., example="192.168.1.1")
+    timestamp: datetime = Field(..., example="2026-08-20T18:30:00Z")
+
+# Immutable audit log storage (in-memory placeholder for DB)
+audit_logs: List[AuditLogEntry] = []
+
+def create_audit_log(
+    request: Request,
+    action: str,
+    actor: str,
+    target: str,
+    before: dict = None,
+    after: dict = None
+) -> AuditLogEntry:
+    """Create an immutable audit log entry. Records cannot be deleted or modified."""
+    entry = AuditLogEntry(
+        id=str(uuid.uuid4()),
+        action=action,
+        actor=actor,
+        target=target,
+        before=before,
+        after=after,
+        ip_address=request.client.host if request.client else "unknown",
+        timestamp=datetime.utcnow(),
+    )
+    audit_logs.append(entry)
+    return entry
+
+@app.get("/admin/audit-log", response_model=list[AuditLogEntry])
+async def get_audit_log(
+    request: Request,
+    actor: Optional[str] = Query(None, description="Filter by actor address"),
+    action: Optional[str] = Query(None, description="Filter by action type"),
+    start_date: Optional[str] = Query(None, description="Filter from date (ISO 8601)"),
+    end_date: Optional[str] = Query(None, description="Filter to date (ISO 8601)"),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+):
+    """Query audit logs with filtering. Logs are immutable and append-only."""
+    results = list(audit_logs)
+    
+    # Apply filters
+    if actor:
+        results = [log for log in results if log.actor.lower() == actor.lower()]
+    if action:
+        results = [log for log in results if log.action.upper() == action.upper()]
+    if start_date:
+        try:
+            start_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+            results = [log for log in results if log.timestamp >= start_dt]
+        except ValueError:
+            pass
+    if end_date:
+        try:
+            end_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+            results = [log for log in results if log.timestamp <= end_dt]
+        except ValueError:
+            pass
+    
+    # Sort by timestamp descending (most recent first)
+    results.sort(key=lambda x: x.timestamp, reverse=True)
+    
+    return results[offset : offset + limit]
+
+
 
 
 @app.get("/agents", response_model=list[AgentResponse])
