@@ -1,7 +1,11 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 """Agent CRUD endpoints for the OpenAgents platform."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 from datetime import datetime
 
@@ -12,10 +16,18 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 
 
 class AgentCreate(BaseModel):
-    name: str  # BUG: No validation — name can contain SQL injection, XSS, or be empty
-    description: Optional[str] = None
-    model_type: str = "gpt-4"
+    name: str = Field(..., min_length=1, max_length=255, pattern=r'^[a-zA-Z0-9_\- ]+$')
+    description: Optional[str] = Field(None, max_length=1000)
+    model_type: str = Field("gpt-4", pattern=r'^[a-zA-Z0-9_\-\.]+$')
     config: Optional[dict] = None
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError('Agent name cannot be empty or whitespace-only')
+        return v
 
 
 class AgentUpdate(BaseModel):
@@ -77,12 +89,13 @@ async def update_agent(
     return agent
 
 
-# BUG: No authentication — anyone can delete any agent
 @router.delete("/{agent_id}")
-async def delete_agent(agent_id: int, db=Depends(get_db)):
+async def delete_agent(agent_id: int, user=Depends(get_current_user), db=Depends(get_db)):
     agent = db.query(Agent).filter(Agent.id == agent_id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+    if agent.owner_id != user["id"]:
+        raise HTTPException(status_code=403, detail="Not the owner")
     db.delete(agent)
     db.commit()
     return {"deleted": True}
