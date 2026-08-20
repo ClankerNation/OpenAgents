@@ -1,3 +1,7 @@
+// @contributor rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -25,6 +29,7 @@ contract TokenBridge is ReentrancyGuard {
     mapping(address => bool) public isValidator;
     mapping(bytes32 => Transfer) public transfers;
     mapping(bytes32 => bool) public processedHashes;
+    mapping(address => uint256) public nonces;
 
     event TokensLocked(bytes32 indexed transferId, address token, address sender, address recipient, uint256 amount);
     event TokensClaimed(bytes32 indexed transferId, address token, address recipient, uint256 amount);
@@ -48,12 +53,16 @@ contract TokenBridge is ReentrancyGuard {
     function lock(address token, address recipient, uint256 amount) external nonReentrant {
         require(amount > 0, "Bridge: zero amount");
 
-        // BUG: No chainId in the hash — the same transferId can be replayed on other
-        // chains where this bridge is deployed, allowing double-claiming of tokens.
-        // BUG: No nonce or unique identifier — if the same user bridges the same token
-        // and amount to the same recipient twice, the transferId collides, overwriting
-        // the first transfer and potentially losing funds.
-        bytes32 transferId = keccak256(abi.encodePacked(token, msg.sender, recipient, amount));
+        uint256 nonce = nonces[msg.sender]++;
+        bytes32 transferId = keccak256(abi.encodePacked(
+            block.chainid,
+            address(this),
+            token,
+            msg.sender,
+            recipient,
+            amount,
+            nonce
+        ));
 
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
 
@@ -79,7 +88,13 @@ contract TokenBridge is ReentrancyGuard {
         uint256 amount,
         bytes[] calldata signatures
     ) external nonReentrant {
-        bytes32 messageHash = keccak256(abi.encodePacked(token, recipient, amount));
+        bytes32 messageHash = keccak256(abi.encodePacked(
+            block.chainid,
+            address(this),
+            token,
+            recipient,
+            amount
+        ));
         bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
 
         require(!processedHashes[messageHash], "Bridge: already processed");
@@ -89,9 +104,7 @@ contract TokenBridge is ReentrancyGuard {
         address lastSigner = address(0);
         for (uint256 i = 0; i < signatures.length; i++) {
             address signer = _recover(ethSignedHash, signatures[i]);
-            // BUG: ecrecover returns address(0) on invalid signatures, but this is not
-            // checked. A zero-address signer that happens to be in the validator set
-            // (or collides with the default mapping value) would count as valid.
+            require(signer != address(0), "Bridge: invalid signature");
             require(signer > lastSigner, "Bridge: duplicate or unordered sig");
             lastSigner = signer;
             if (isValidator[signer]) {
