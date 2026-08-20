@@ -5,10 +5,12 @@
 @platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
 """
 
+import os
 import uuid
 from fastapi import FastAPI, HTTPException, Query, Request, Security, Depends
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, APIKeyHeader
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
@@ -23,6 +25,20 @@ app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
+)
+
+# --- CORS Configuration ---
+# Configurable via ALLOWED_ORIGINS env var (comma-separated).
+# Defaults to restrictive origin in production; wildcard only if explicitly set for dev.
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "https://app.openagents.dev").split(",")
+allow_credentials = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() == "true"
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in allowed_origins if o.strip()],
+    allow_credentials=allow_credentials,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=["*"],
 )
 
 
