@@ -1,3 +1,7 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 /**
  * ABI encoding/decoding utilities for EVM-compatible contract interactions.
  */
@@ -9,9 +13,13 @@ export interface AbiParam {
   value: string | number | bigint | boolean;
 }
 
+const MAX_UINT256 = (1n << 256n) - 1n;
+
 export function encodeUint256(value: bigint | number): string {
   const n = BigInt(value);
-  // BUG: No overflow check — values > 2^256-1 silently wrap/truncate
+  if (n < 0n || n > MAX_UINT256) {
+    throw new RangeError(`encodeUint256: value out of range [0, 2^256-1]: ${n}`);
+  }
   return n.toString(16).padStart(64, "0");
 }
 
@@ -45,26 +53,40 @@ export function encodeParams(params: AbiParam[]): string {
       case "bool":
         encoded += encodeBool(param.value as boolean);
         break;
-      case "string":
-        const hexStr = Buffer.from(param.value as string).toString("hex");
-        encoded += hexStr.padEnd(64, "0");
+      case "string": {
+        // Dynamic types use offset-based encoding per ABI spec
+        const strBytes = Buffer.from(param.value as string, "utf-8");
+        const hexStr = strBytes.toString("hex");
+        const lenHex = BigInt(strBytes.length).toString(16).padStart(64, "0");
+        // For simplicity in this utility, we inline the data with length prefix
+        // Full offset encoding requires multi-pass; this fixes silent truncation
+        encoded += lenHex + hexStr.padEnd(Math.ceil(hexStr.length / 64) * 64, "0");
         break;
+      }
     }
   }
   return encoded;
 }
 
 export function decodeHex(hex: string): bigint {
-  // BUG: Doesn't validate "0x" prefix — a bare decimal string like "255"
-  // would be parsed as hex 0x255 = 597, silently returning wrong value
-  const cleaned = hex.startsWith("0x") ? hex.slice(2) : hex;
-  return BigInt("0x" + cleaned);
+  if (!hex.startsWith("0x")) {
+    throw new Error(`decodeHex: expected 0x-prefixed hex string, got "${hex}"`);
+  }
+  const cleaned = hex.slice(2);
+  if (!/^[0-9a-fA-F]*$/.test(cleaned)) {
+    throw new Error(`decodeHex: invalid hex characters in "${hex}"`);
+  }
+  return BigInt("0x" + (cleaned || "0"));
 }
 
 export function decodeUint256(slot: string): bigint {
-  // BUG: Doesn't handle short values — if slot is less than 64 chars,
-  // no left-padding is applied before parsing, giving wrong results
-  return BigInt("0x" + slot);
+  const cleaned = slot.startsWith("0x") ? slot.slice(2) : slot;
+  const padded = cleaned.padStart(64, "0");
+  const value = BigInt("0x" + padded);
+  if (value > MAX_UINT256) {
+    throw new RangeError(`decodeUint256: decoded value exceeds uint256 max`);
+  }
+  return value;
 }
 
 export function decodeAddress(slot: string): string {
