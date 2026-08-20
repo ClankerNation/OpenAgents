@@ -1,3 +1,7 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -68,12 +72,15 @@ contract PrizeSplit {
         require(!round.claimed[msg.sender], "Already claimed");
 
         uint256 amount = round.shares[msg.sender];
-
-        (bool sent, ) = msg.sender.call{value: amount}("");
-        require(sent, "Transfer failed");
-
-        // State updated after external call — reentrancy window
         round.claimed[msg.sender] = true;
+
+        // Use call with try/catch pattern to handle contracts without receive/fallback
+        (bool sent, ) = msg.sender.call{value: amount}("");
+        if (!sent) {
+            // If direct transfer fails (e.g., contract without receive), 
+            // revert to prevent locked funds but maintain security
+            revert("Transfer failed - recipient cannot receive ETH");
+        }
 
         emit PrizeClaimed(msg.sender, amount, _roundId);
     }
