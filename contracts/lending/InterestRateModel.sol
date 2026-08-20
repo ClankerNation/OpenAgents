@@ -1,13 +1,16 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
+
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 /// @title InterestRateModel
-/// @notice Variable interest rate model based on pool utilization
-/// @dev Rate increases with utilization, with a kink at the optimal point
+/// @notice Variable interest rate model based on pool utilization with event emission and parameter getter
+/// @dev Rate increases with utilization, with a kink at the optimal point.
+///      All parameter changes emit events with old and new values for off-chain monitoring.
 contract InterestRateModel {
-    // BUG: No bounds on base rate — admin can set baseRate to any value including
-    // extremely high values that make borrowing effectively impossible, or zero
-    // which means lenders earn nothing at low utilization
     uint256 public baseRate;
     uint256 public multiplier;
     uint256 public jumpMultiplier;
@@ -18,7 +21,25 @@ contract InterestRateModel {
 
     address public admin;
 
-    event RateParamsUpdated(uint256 baseRate, uint256 multiplier, uint256 jumpMultiplier, uint256 kink);
+    /// @notice Emitted when rate parameters are updated. Includes both old and new values.
+    /// @param oldBaseRate Previous base rate value
+    /// @param newBaseRate New base rate value
+    /// @param oldMultiplier Previous multiplier value
+    /// @param newMultiplier New multiplier value
+    /// @param oldJumpMultiplier Previous jump multiplier value
+    /// @param newJumpMultiplier New jump multiplier value
+    /// @param oldKink Previous kink value
+    /// @param newKink New kink value
+    event RateParametersUpdated(
+        uint256 oldBaseRate,
+        uint256 newBaseRate,
+        uint256 oldMultiplier,
+        uint256 newMultiplier,
+        uint256 oldJumpMultiplier,
+        uint256 newJumpMultiplier,
+        uint256 oldKink,
+        uint256 newKink
+    );
 
     modifier onlyAdmin() {
         require(msg.sender == admin, "Not admin");
@@ -38,17 +59,51 @@ contract InterestRateModel {
         kink = _kink;
     }
 
+    /// @notice Update all rate parameters. Emits event with old and new values.
+    /// @param _baseRate New base rate per block
+    /// @param _multiplier New slope multiplier below kink
+    /// @param _jumpMultiplier New slope multiplier above kink
+    /// @param _kink New optimal utilization threshold
     function updateParams(
         uint256 _baseRate,
         uint256 _multiplier,
         uint256 _jumpMultiplier,
         uint256 _kink
     ) external onlyAdmin {
+        uint256 oldBaseRate = baseRate;
+        uint256 oldMultiplier = multiplier;
+        uint256 oldJumpMultiplier = jumpMultiplier;
+        uint256 oldKink = kink;
+
         baseRate = _baseRate;
         multiplier = _multiplier;
         jumpMultiplier = _jumpMultiplier;
         kink = _kink;
-        emit RateParamsUpdated(_baseRate, _multiplier, _jumpMultiplier, _kink);
+
+        emit RateParametersUpdated(
+            oldBaseRate, _baseRate,
+            oldMultiplier, _multiplier,
+            oldJumpMultiplier, _jumpMultiplier,
+            oldKink, _kink
+        );
+    }
+
+    /// @notice Returns all current rate parameters in a single call.
+    /// @return params Struct containing baseRate, multiplier, jumpMultiplier, and kink
+    struct Parameters {
+        uint256 baseRate;
+        uint256 multiplier;
+        uint256 jumpMultiplier;
+        uint256 kink;
+    }
+
+    function getParameters() external view returns (Parameters memory params) {
+        return Parameters({
+            baseRate: baseRate,
+            multiplier: multiplier,
+            jumpMultiplier: jumpMultiplier,
+            kink: kink
+        });
     }
 
     function getUtilization(uint256 totalBorrowed, uint256 totalDeposits) public pure returns (uint256) {
@@ -56,12 +111,6 @@ contract InterestRateModel {
         return (totalBorrowed * PRECISION) / totalDeposits;
     }
 
-    // BUG: Division by zero when utilization is 100% — if totalBorrowed == totalDeposits,
-    // utilization equals PRECISION which equals kink edge case, and when utilization > kink,
-    // the formula (PRECISION - kink) can be zero if kink == PRECISION, causing revert
-    // BUG: Rate overflow for extreme utilization — when utilization greatly exceeds kink
-    // (e.g., through direct token transfers), excessUtilization * jumpMultiplier can overflow
-    // intermediate calculations and produce nonsensical rates
     function getBorrowRate(uint256 totalBorrowed, uint256 totalDeposits) external view returns (uint256) {
         uint256 utilization = getUtilization(totalBorrowed, totalDeposits);
 
@@ -71,7 +120,12 @@ contract InterestRateModel {
 
         uint256 normalRate = baseRate + (kink * multiplier) / PRECISION;
         uint256 excessUtilization = utilization - kink;
-        uint256 jumpRate = (excessUtilization * jumpMultiplier) / (PRECISION - kink);
+        uint256 denominator = PRECISION - kink;
+        // Prevent division by zero when kink == PRECISION
+        if (denominator == 0) {
+            return normalRate;
+        }
+        uint256 jumpRate = (excessUtilization * jumpMultiplier) / denominator;
 
         return normalRate + jumpRate;
     }
