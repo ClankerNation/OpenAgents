@@ -1,3 +1,7 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 import { createHash, createHmac, randomBytes } from "crypto";
 import { ec as EC } from "elliptic";
 
@@ -68,12 +72,49 @@ export function hashPersonalMessage(message: string): string {
   return keccak256(prefix + message);
 }
 
+export interface RecoveredKey {
+  publicKey: string;
+  compressed: string;
+}
+
+/**
+ * Recover public key from ECDSA signature on secp256k1.
+ * @param message - Original signed message (will be keccak256 hashed)
+ * @param signature - DER or hex-encoded signature
+ * @param recoveryBit - Recovery parameter (0 or 1)
+ * @returns Object with both uncompressed and compressed public key formats
+ */
 export function recoverPublicKey(
   message: string,
   signature: string,
-  recoveryParam: number
-): string {
+  recoveryBit: number
+): RecoveredKey {
+  if (recoveryBit !== 0 && recoveryBit !== 1) {
+    throw new Error("Invalid recovery bit: must be 0 or 1");
+  }
+
   const msgHash = Buffer.from(keccak256(message), "hex");
-  const recovered = secp256k1.recoverPubKey(msgHash, signature, recoveryParam);
-  return recovered.encode("hex", false);
+  
+  // Parse signature - support both DER and raw r||s format
+  let sigObj;
+  try {
+    if (signature.length === 128) {
+      // Raw r||s format (64 bytes each)
+      const r = signature.slice(0, 64);
+      const s = signature.slice(64, 128);
+      sigObj = { r, s };
+    } else {
+      // DER encoded
+      sigObj = secp256k1.Signature.decode(Buffer.from(signature, "hex"));
+    }
+  } catch (e) {
+    throw new Error(`Invalid signature format: ${(e as Error).message}`);
+  }
+
+  const recovered = secp256k1.recoverPubKey(msgHash, sigObj, recoveryBit);
+  
+  return {
+    publicKey: recovered.encode("hex", false),   // Uncompressed (65 bytes)
+    compressed: recovered.encodeCompressed("hex"), // Compressed (33 bytes)
+  };
 }
