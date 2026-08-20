@@ -1,12 +1,17 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 """SQLAlchemy models and database session management."""
 
 from sqlalchemy import (
-    create_engine, Column, Integer, String, Float, Text, JSON,
+    create_engine, Column, String, Float, Text, JSON,
     ForeignKey, DateTime, Enum as SAEnum,
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
+import uuid
 import os
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./openagents.db")
@@ -27,7 +32,7 @@ def get_db():
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     address = Column(String(42), unique=True, nullable=False)
     username = Column(String(64), unique=True, nullable=True)
     # BUG: No index on address — wallet lookups on every auth request do full table scans
@@ -39,12 +44,12 @@ class User(Base):
 class Agent(Base):
     __tablename__ = "agents"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name = Column(String(128), nullable=False)
     description = Column(Text, nullable=True)
     model_type = Column(String(32), default="gpt-4")
     config = Column(JSON, default=dict)
-    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    owner_id = Column(String(36), ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # BUG: No cascade delete — deleting a user leaves orphaned agents
@@ -55,13 +60,13 @@ class Agent(Base):
 class Task(Base):
     __tablename__ = "tasks"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     title = Column(String(256), nullable=False)
     description = Column(Text, nullable=True)
     reward_amount = Column(Float, nullable=False)
     status = Column(String(32), default="open")
-    creator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    agent_id = Column(Integer, ForeignKey("agents.id"), nullable=True)
+    creator_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    agent_id = Column(String(36), ForeignKey("agents.id"), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=True)
     deadline = Column(DateTime, nullable=True)
@@ -73,8 +78,8 @@ class Task(Base):
 class Payment(Base):
     __tablename__ = "payments"
 
-    id = Column(Integer, primary_key=True, index=True)
-    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    task_id = Column(String(36), ForeignKey("tasks.id"), nullable=False)
     from_address = Column(String(42), nullable=False)
     to_address = Column(String(42), nullable=True)
     amount = Column(Float, nullable=False)
