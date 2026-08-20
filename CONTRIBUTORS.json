@@ -40,6 +40,12 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "issue": 23,
+      "author": "rafaio1",
+      "date": "2026-08-20",
+      "description": "Fix crypto utils Math.random nonce with CSPRNG, add signature length validation, random salt generation, and configurable KDF"
     }
   ]
 }

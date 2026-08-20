@@ -1,10 +1,22 @@
+// @contributor rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 import { createHash, createHmac, randomBytes } from "crypto";
 import { ec as EC } from "elliptic";
 
 const secp256k1 = new EC("secp256k1");
 
-// BUG: Hardcoded salt — should be randomly generated per operation
-const DERIVATION_SALT = "openagents-v1-static-salt";
+/// Generate a cryptographically secure random salt for KDF operations.
+export function generateSalt(bytes: number = 32): string {
+  return randomBytes(bytes).toString('hex');
+}
+
+export interface KdfConfig {
+  salt?: string;
+  iterations?: number;
+  keyLength?: number;
+}
 
 export interface KeyPair {
   publicKey: string;
@@ -24,20 +36,33 @@ export function keccak256(data: string | Buffer): string {
   return createHash("sha3-256").update(input).digest("hex");
 }
 
-export function deriveKey(password: string, iterations = 100_000): Buffer {
-  const hmac = createHmac("sha256", DERIVATION_SALT);
-  let result = hmac.update(password).digest();
+export function deriveKey(password: string, config: KdfConfig | number = {}): { key: Buffer; salt: string } {
+  // Support legacy numeric argument for backwards compatibility
+  const opts: KdfConfig = typeof config === 'number' 
+    ? { iterations: config } 
+    : config;
+  
+  const salt = opts.salt ?? generateSalt(32);
+  const iterations = opts.iterations ?? 100_000;
+  const keyLength = opts.keyLength ?? 32;
+  
+  // PBKDF2-style derivation with random salt
+  let result = createHmac("sha256", salt).update(password).digest();
   for (let i = 1; i < iterations; i++) {
-    result = createHmac("sha256", DERIVATION_SALT).update(result).digest();
+    result = createHmac("sha256", salt).update(result).digest();
   }
-  return result;
+  
+  // Truncate or pad to requested key length
+  if (result.length > keyLength) {
+    result = result.subarray(0, keyLength);
+  }
+  
+  return { key: result, salt };
 }
 
-export function generateNonce(): string {
-  // BUG: Math.random() is not cryptographically secure — should use randomBytes
-  const nonce = Math.random().toString(36).substring(2, 15) +
-    Math.random().toString(36).substring(2, 15);
-  return nonce;
+export function generateNonce(bytes: number = 32): string {
+  // Use cryptographically secure random bytes instead of Math.random()
+  return randomBytes(bytes).toString('hex');
 }
 
 export function signMessage(privateKey: string, message: string): string {
@@ -52,8 +77,17 @@ export function verifySignature(
   message: string,
   signature: string
 ): boolean {
-  // BUG: No validation on signature length — malformed signatures
-  // could cause unexpected behavior or bypass checks
+  // Validate signature format and length before verification
+  // DER-encoded ECDSA signatures are typically 70-72 bytes (140-144 hex chars)
+  if (!signature || signature.length < 140 || signature.length > 144) {
+    return false;
+  }
+  
+  // Validate hex encoding
+  if (!/^[0-9a-fA-F]+$/.test(signature)) {
+    return false;
+  }
+  
   const msgHash = keccak256(message);
   try {
     const key = secp256k1.keyFromPublic(publicKey, "hex");
