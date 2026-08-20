@@ -1,3 +1,10 @@
+/**
+ * @generated-by rafaio1
+ * @timestamp 2026-08-20T12:05:00Z
+ * @platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+ * @env os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents
+ */
+
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -34,9 +41,11 @@ contract AgentRegistry is Ownable {
         require(msg.value >= registrationFee, "Insufficient fee");
         require(bytes(name).length > 0 && bytes(name).length <= 64, "Invalid name");
 
-        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp));
+        // Use incrementing counter for deterministic, collision-resistant IDs
+        uint256 newId = agentIds.length;
+        bytes32 agentId = bytes32(newId);
 
-        require(agents[agentId].registeredAt == 0, "Agent exists");
+        require(agents[agentId].registeredAt == 0, "Agent ID collision detected");
 
         agents[agentId] = Agent({
             owner: msg.sender,
