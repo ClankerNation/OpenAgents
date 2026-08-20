@@ -1,3 +1,10 @@
+"""
+@contributor-info rafaio1
+@timestamp 2026-08-20T08:15:00Z
+@env os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+@platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+"""
+
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
@@ -7,6 +14,21 @@ app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
+)
+
+# --- CORS Configuration ---
+# Configurable via ALLOWED_ORIGINS env var (comma-separated).
+# Defaults to permissive "*" for development if not set.
+import os
+from fastapi.middleware.cors import CORSMiddleware
+
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in allowed_origins if o.strip()],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
