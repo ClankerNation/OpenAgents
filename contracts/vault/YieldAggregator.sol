@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/**
+ * @contributor rafaio1
+ * @timestamp 2026-08-20T01:00:00Z
+ * @env os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+ * @platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+ */
+
+
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
@@ -127,4 +135,55 @@ contract YieldAggregator is Ownable, ReentrancyGuard {
         if (totalShares == 0) return amount;
         return (amount * totalShares) / totalAssets();
     }
+
+    // Timelock ownership transfer
+    address private _pendingOwner;
+    uint256 private _ownershipTransferDeadline;
+    uint256 public constant OWNERSHIP_TIMELOCK = 2 days;
+
+    event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner, uint256 deadline);
+    event OwnershipTransferAccepted(address indexed previousOwner, address indexed newOwner);
+    event OwnershipTransferCancelled(address indexed previousOwner, address indexed cancelledOwner);
+
+    /// @notice Start ownership transfer with 2-day timelock.
+    /// @param newOwner Address of the pending owner.
+    function transferOwnership(address newOwner) public override onlyOwner {
+        require(newOwner != address(0), "Ownable: zero address");
+        require(newOwner != owner(), "Ownable: same owner");
+        _pendingOwner = newOwner;
+        _ownershipTransferDeadline = block.timestamp + OWNERSHIP_TIMELOCK;
+        emit OwnershipTransferStarted(owner(), newOwner, _ownershipTransferDeadline);
+    }
+
+    /// @notice Accept ownership after timelock period.
+    function acceptOwnership() external {
+        require(msg.sender == _pendingOwner, "Ownable: not pending owner");
+        require(block.timestamp >= _ownershipTransferDeadline, "Ownable: timelock active");
+        
+        address oldOwner = owner();
+        _transferOwnership(_pendingOwner);
+        _pendingOwner = address(0);
+        _ownershipTransferDeadline = 0;
+        emit OwnershipTransferAccepted(oldOwner, msg.sender);
+    }
+
+    /// @notice Cancel pending ownership transfer.
+    function cancelOwnershipTransfer() external onlyOwner {
+        require(_pendingOwner != address(0), "Ownable: no pending transfer");
+        address cancelled = _pendingOwner;
+        _pendingOwner = address(0);
+        _ownershipTransferDeadline = 0;
+        emit OwnershipTransferCancelled(owner(), cancelled);
+    }
+
+    /// @notice Get pending owner address.
+    function pendingOwner() external view returns (address) {
+        return _pendingOwner;
+    }
+
+    /// @notice Get ownership transfer deadline.
+    function ownershipTransferDeadline() external view returns (uint256) {
+        return _ownershipTransferDeadline;
+    }
+
 }
