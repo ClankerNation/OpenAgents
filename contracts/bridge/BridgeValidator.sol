@@ -1,3 +1,7 @@
+// @contributor rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -44,7 +48,7 @@ contract BridgeValidator {
     // BUG: Validators can add themselves — the onlyValidator modifier allows any
     // existing validator to add new validators (including themselves again with
     // more weight), bypassing owner governance over the validator set.
-    function addValidator(address validator, uint128 weight) external onlyValidator {
+    function addValidator(address validator, uint128 weight) external onlyOwner {
         require(!validators[validator].isActive, "BridgeValidator: already active");
         require(weight > 0, "BridgeValidator: zero weight");
 
@@ -70,6 +74,7 @@ contract BridgeValidator {
     // set is empty, bricking the bridge since no one can sign transactions.
     function removeValidator(address validator) external onlyOwner {
         require(validators[validator].isActive, "BridgeValidator: not active");
+        require(validatorList.length > 3, "BridgeValidator: min validators");
 
         totalWeight -= validators[validator].weight;
         validators[validator].isActive = false;
