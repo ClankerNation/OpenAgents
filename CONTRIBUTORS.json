@@ -40,6 +40,12 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "issue": 22,
+      "author": "rafaio1",
+      "date": "2026-08-20",
+      "description": "Fix CompoundVault harvest access control with onlyKeeper, fresh price per share, minimum fee enforcement, and harvest threshold"
     }
   ]
 }

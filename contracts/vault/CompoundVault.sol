@@ -1,3 +1,7 @@
+// @contributor rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -17,6 +21,8 @@ contract CompoundVault is Ownable, ReentrancyGuard {
     IERC20 public immutable rewardToken;
     address public strategy;
     address public feeRecipient;
+    address public keeper;
+    uint256 public harvestThreshold; // Minimum profit required to harvest (in reward token units)
 
     uint256 public totalShares;
     uint256 public totalDeposited;
@@ -45,6 +51,8 @@ contract CompoundVault is Ownable, ReentrancyGuard {
         feeRecipient = _feeRecipient;
         performanceFeeBps = _feeBps;
         lastPricePerShare = 1e18;
+        keeper = msg.sender;
+        harvestThreshold = 1; // Default minimum 1 token
     }
 
     /// @notice Deposit base tokens and receive vault shares.
@@ -82,26 +90,30 @@ contract CompoundVault is Ownable, ReentrancyGuard {
         emit Withdrawn(msg.sender, assets, shareAmount);
     }
 
+    modifier onlyKeeper() {
+        require(msg.sender == owner() || msg.sender == keeper, "Vault: not authorized");
+        _;
+    }
+
     /// @notice Harvest rewards from the strategy and calculate profit.
     /// @return profit The net profit after fees.
-    // BUG: No caller restriction — anyone can call harvest at any time, potentially
-    // front-running the actual compound step or harvesting at a suboptimal time,
-    // causing MEV extraction or locking in losses before a price recovery.
-    function harvest() external returns (uint256 profit) {
+    function harvest() external onlyKeeper returns (uint256 profit) {
         uint256 rewardBalance = rewardToken.balanceOf(address(this));
         require(rewardBalance > 0, "Vault: nothing to harvest");
 
-        // BUG: Uses lastPricePerShare which is only updated during compound(), not
-        // during harvest. If compound() hasn't been called recently, the price is
-        // stale and the profit calculation is inaccurate — potentially overcharging
-        // or undercharging the performance fee.
-        uint256 estimatedValue = (rewardBalance * lastPricePerShare) / 1e18;
+        // Use fresh price per share instead of cached lastPricePerShare
+        uint256 currentPricePerShare = totalShares > 0 ? (totalDeposited * 1e18) / totalShares : 1e18;
+        uint256 estimatedValue = (rewardBalance * currentPricePerShare) / 1e18;
 
-        // BUG: Fee calculation truncates to zero for small profit amounts.
-        // E.g., if estimatedValue is 9 and performanceFeeBps is 1000 (10%),
-        // fee = 9 * 1000 / 10000 = 0. Accumulated over many small harvests,
-        // the protocol collects zero fees while still processing transactions.
+        // Enforce harvest threshold to prevent dust harvesting
+        require(estimatedValue >= harvestThreshold, "Vault: below harvest threshold");
+
+        // Calculate fee with minimum of 1 token to prevent zero-fee accumulation
         uint256 fee = (estimatedValue * performanceFeeBps) / 10000;
+        if (fee == 0 && estimatedValue > 0) {
+            fee = 1;
+        }
+        
         profit = estimatedValue - fee;
 
         if (fee > 0) {
@@ -140,6 +152,20 @@ contract CompoundVault is Ownable, ReentrancyGuard {
     function setFeeRecipient(address _feeRecipient) external onlyOwner {
         require(_feeRecipient != address(0), "Vault: zero address");
         feeRecipient = _feeRecipient;
+    }
+
+    /// @notice Update the authorized keeper address.
+    /// @param _keeper New keeper address.
+    function setKeeper(address _keeper) external onlyOwner {
+        require(_keeper != address(0), "Vault: zero address");
+        keeper = _keeper;
+    }
+
+    /// @notice Update the minimum harvest threshold.
+    /// @param _threshold New threshold in reward token base units.
+    function setHarvestThreshold(uint256 _threshold) external onlyOwner {
+        require(_threshold > 0, "Vault: zero threshold");
+        harvestThreshold = _threshold;
     }
 
     /// @notice Get the current price per share.
