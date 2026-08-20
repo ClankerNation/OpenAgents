@@ -1,7 +1,12 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 import "./AgentRegistry.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 contract TaskRouter {
     AgentRegistry public registry;
@@ -21,6 +26,12 @@ contract TaskRouter {
     mapping(uint256 => Task) public tasks;
     uint256 public taskCount;
     uint256 public platformFee; // basis points
+
+    // Gas sponsorship relay state
+    mapping(bytes32 => uint256) public agentNonces;
+
+    event SponsoredExecution(bytes32 indexed agentId, address indexed relayer, uint256 gasReimbursement);
+
 
     event TaskCreated(uint256 indexed taskId, address indexed creator, uint256 reward);
     event TaskAssigned(uint256 indexed taskId, bytes32 indexed agentId);
@@ -104,4 +115,44 @@ contract TaskRouter {
         task.status = TaskStatus.Disputed;
         emit TaskDisputed(taskId);
     }
+
+    /**
+     * @notice Execute a task operation on behalf of an agent via meta-transaction.
+     * @param agentId The agent's bytes32 identifier
+     * @param data The calldata to execute (e.g., encoded completeTask call)
+     * @param signature ECDSA signature from the agent over keccak256(abi.encodePacked(agentId, nonce, data))
+     */
+    function executeOnBehalf(
+        bytes32 agentId,
+        bytes calldata data,
+        bytes calldata signature
+    ) external {
+        AgentRegistry.Agent memory agent = registry.getAgent(agentId);
+        require(agent.active, "Agent not active");
+
+        // Replay protection: verify nonce
+        uint256 currentNonce = agentNonces[agentId];
+        bytes32 digest = keccak256(abi.encodePacked(agentId, currentNonce, data));
+        address signer = ECDSA.recover(digest, signature);
+        require(signer == agent.owner, "Invalid signature");
+
+        // Increment nonce before execution to prevent reentrancy-based replay
+        agentNonces[agentId] = currentNonce + 1;
+
+        // Execute the delegated call
+        (bool success, bytes memory returnData) = address(this).call(data);
+        require(success, string(returnData));
+
+        // Reimburse relayer from agent's staked balance
+        uint256 gasUsed = tx.gasprice * (gasleft() + 50000); // approximate with buffer
+        uint256 stakeBalance = registry.getStake(agentId);
+        require(stakeBalance >= gasUsed, "Insufficient stake for gas");
+        registry.deductStake(agentId, gasUsed);
+
+        (bool reimbursed, ) = msg.sender.call{value: gasUsed}("");
+        require(reimbursed, "Relayer reimbursement failed");
+
+        emit SponsoredExecution(agentId, msg.sender, gasUsed);
+    }
+
 }
