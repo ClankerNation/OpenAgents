@@ -1,3 +1,7 @@
+// @contributor rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -38,20 +42,22 @@ contract MultiTokenStaking is Ownable, ReentrancyGuard {
     event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
     event Harvest(address indexed user, uint256 indexed pid, uint256 amount);
 
-    // BUG: Missing zero-address validation — rewardToken can be set to address(0),
-    // causing all reward transfers to silently burn tokens or revert unpredictably.
     constructor(address _rewardToken, uint256 _rewardPerSecond) Ownable(msg.sender) {
+        require(_rewardToken != address(0), "MultiStaking: zero reward token");
         rewardToken = IERC20(_rewardToken);
         rewardPerSecond = _rewardPerSecond;
     }
 
+    mapping(address => bool) public poolExists;
+
     /// @notice Add a new staking pool.
     /// @param _allocPoint Allocation weight for reward distribution.
     /// @param _stakeToken The ERC20 token to be staked in this pool.
-    // BUG: No duplicate token check — the same token can be added multiple times,
-    // causing reward accounting to break as totalAllocPoint inflates and existing
-    // stakers in the original pool get diluted unexpectedly.
     function addPool(uint256 _allocPoint, address _stakeToken) external onlyOwner {
+        require(_stakeToken != address(0), "MultiStaking: zero stake token");
+        require(!poolExists[_stakeToken], "MultiStaking: duplicate pool");
+        poolExists[_stakeToken] = true;
+
         totalAllocPoint += _allocPoint;
         poolInfo.push(PoolInfo({
             stakeToken: IERC20(_stakeToken),
@@ -75,10 +81,8 @@ contract MultiTokenStaking is Ownable, ReentrancyGuard {
         }
 
         uint256 elapsed = block.timestamp - pool.lastRewardTime;
-        // BUG: Reward calculation can overflow for large elapsed * rewardPerSecond * allocPoint
-        // values. With high rewardPerSecond (e.g., 1e18) and long time gaps, the intermediate
-        // multiplication exceeds uint256 before the division by totalAllocPoint.
-        uint256 reward = elapsed * rewardPerSecond * pool.allocPoint / totalAllocPoint;
+        // Safe multiplication order: divide early to prevent overflow
+        uint256 reward = (elapsed * rewardPerSecond / totalAllocPoint) * pool.allocPoint;
         pool.accRewardPerShare += reward * 1e12 / pool.totalStaked;
         pool.lastRewardTime = block.timestamp;
     }
