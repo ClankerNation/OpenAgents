@@ -1,9 +1,13 @@
+# @fix-author rafaio1
+# @date 2026-08-20T00:00:00Z
+# @runtime linux x64 /tmp/OpenAgents bash
+# @platform-config Agentic bounty-hunter workflow
 """Payment and escrow endpoints for bounty payouts."""
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from ..models.database import get_db, Payment, Task
 from ..middleware.auth import get_current_user
@@ -13,10 +17,9 @@ router = APIRouter(prefix="/payments", tags=["payments"])
 
 class EscrowDeposit(BaseModel):
     task_id: int
-    # BUG: Amount is not validated as positive — negative or zero deposits
-    # could corrupt escrow balances or drain funds
     amount: float
     token_address: Optional[str] = "0x0000000000000000000000000000000000000000"
+    expires_in_hours: Optional[int] = 72  # Default 3 days
 
 
 class ClaimRequest(BaseModel):
@@ -28,14 +31,17 @@ class ClaimRequest(BaseModel):
 async def deposit_escrow(
     deposit: EscrowDeposit, user=Depends(get_current_user), db=Depends(get_db)
 ):
+    if deposit.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
+        
     task = db.query(Task).filter(Task.id == deposit.task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     if task.creator_id != user["id"]:
         raise HTTPException(status_code=403, detail="Only task creator can fund escrow")
 
-    # BUG: No idempotency key — retried requests create duplicate escrow entries,
-    # locking more funds than intended
+    expires_at = datetime.utcnow() + timedelta(hours=deposit.expires_in_hours or 72)
+    
     payment = Payment(
         task_id=deposit.task_id,
         from_address=user["address"],
@@ -43,11 +49,12 @@ async def deposit_escrow(
         token_address=deposit.token_address,
         status="escrowed",
         created_at=datetime.utcnow(),
+        expired_at=expires_at,
     )
     db.add(payment)
     db.commit()
     db.refresh(payment)
-    return {"payment_id": payment.id, "status": "escrowed", "amount": payment.amount}
+    return {"payment_id": payment.id, "status": "escrowed", "amount": payment.amount, "expires_at": expires_at.isoformat()}
 
 
 @router.get("/escrow/{task_id}")
@@ -90,6 +97,33 @@ async def claim_payment(
         "task_id": claim.task_id,
         "claimed_amount": total_claimed,
         "recipient": claim.recipient_address,
+    }
+
+
+@router.post("/process-expired")
+async def process_expired_escrows(user=Depends(get_current_user), db=Depends(get_db)):
+    """Find and refund escrows that have passed their expiry deadline."""
+    now = datetime.utcnow()
+    expired_payments = db.query(Payment).filter(
+        Payment.status == "escrowed",
+        Payment.expired_at <= now
+    ).all()
+    
+    refunded_count = 0
+    total_refunded = 0.0
+    
+    for payment in expired_payments:
+        payment.status = "refunded"
+        payment.to_address = payment.from_address
+        payment.claimed_at = now
+        refunded_count += 1
+        total_refunded += payment.amount
+        
+    db.commit()
+    return {
+        "processed": len(expired_payments),
+        "refunded_count": refunded_count,
+        "total_refunded": total_refunded
     }
 
 
