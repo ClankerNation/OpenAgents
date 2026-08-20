@@ -1,3 +1,7 @@
+// @contributor rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 import { generateKeyPair, signMessage, keccak256 } from "../utils/crypto";
 import { encodeParams, AbiParam } from "../utils/encoding";
 import { RpcProvider } from "../providers/rpc";
@@ -23,21 +27,46 @@ export interface SignedTransaction {
 }
 
 export class Wallet {
-  // BUG: Private key stored as plaintext string in memory — should use
-  // a secure enclave, encrypted storage, or at minimum a Buffer that can be zeroed
   public readonly address: string;
-  private privateKey: string;
   private provider: RpcProvider;
   private cachedNonce: number | null = null;
+  
+  // Closure-based secure key storage — key is never exposed as a property
+  private readonly _signWithKey: (hash: Buffer) => string;
+  private readonly _zeroKey: () => void;
 
   constructor(config: WalletConfig) {
+    let keyBuffer: Buffer | null = null;
+    
     if (config.privateKey) {
-      this.privateKey = config.privateKey;
+      keyBuffer = Buffer.from(config.privateKey, 'hex');
     } else {
       const keyPair = generateKeyPair();
-      this.privateKey = keyPair.privateKey;
+      keyBuffer = Buffer.from(keyPair.privateKey, 'hex');
     }
-    this.address = this.deriveAddress(this.privateKey);
+    
+    // Derive address before wrapping key in closure
+    const { ec: EC } = require("elliptic");
+    const curve = new EC("secp256k1");
+    const keyObj = curve.keyFromPrivate(keyBuffer);
+    const pubKey = keyObj.getPublic(false, "hex").slice(2);
+    const hash = keccak256(Buffer.from(pubKey, "hex"));
+    this.address = "0x" + hash.slice(-40);
+    
+    // Capture key in closure — not accessible as object property
+    this._signWithKey = (msgHash: Buffer): string => {
+      if (!keyBuffer) throw new Error("Wallet: key has been zeroed");
+      return signMessage(keyBuffer.toString('hex'), msgHash);
+    };
+    
+    // Zeroing function to securely erase key from memory
+    this._zeroKey = () => {
+      if (keyBuffer) {
+        keyBuffer.fill(0);
+        keyBuffer = null;
+      }
+    };
+    
     this.provider = config.provider;
   }
 
@@ -51,9 +80,17 @@ export class Wallet {
   }
 
   async signTransaction(tx: Transaction): Promise<SignedTransaction> {
-    // BUG: No chain ID validation — transaction could be replayed on a different
-    // chain if chainId is missing or mismatched with the provider
-    const nonce = tx.nonce ?? await this.getNonce();
+    // Validate chain ID to prevent cross-chain replay
+    if (tx.chainId !== undefined) {
+      const networkChainId = await this.provider.getChainId?.() ?? 
+        parseInt((await this.provider.call("eth_chainId")) as string, 16);
+      if (tx.chainId !== networkChainId) {
+        throw new Error(`Wallet: chain ID mismatch (tx: ${tx.chainId}, network: ${networkChainId})`);
+      }
+    }
+    
+    // Always fetch fresh nonce to prevent stale nonce errors
+    const nonce = tx.nonce ?? await this.getFreshNonce();
     const gasPrice = tx.gasPrice ?? BigInt(await this.provider.call("eth_gasPrice") as string);
 
     const txData = encodeParams([
@@ -65,7 +102,8 @@ export class Wallet {
     ]);
 
     const txHash = keccak256(txData);
-    const signature = signMessage(this.privateKey, txHash);
+    // Sign using closure-captured key — never exposes private key
+    const signature = this._signWithKey(txHash);
 
     return {
       raw: "0x" + txData.slice(2) + signature,
@@ -73,18 +111,17 @@ export class Wallet {
     };
   }
 
-  async getNonce(): Promise<number> {
-    // BUG: Uses cached nonce instead of fetching fresh from chain —
-    // stale nonce causes "nonce too low" errors after external transactions
-    if (this.cachedNonce !== null) {
-      return this.cachedNonce++;
-    }
+  async getFreshNonce(): Promise<number> {
+    // Always fetch fresh nonce from chain to prevent stale nonce issues
     const hex = (await this.provider.call("eth_getTransactionCount", [
       this.address,
-      "latest",
+      "pending",
     ])) as string;
-    this.cachedNonce = parseInt(hex, 16);
-    return this.cachedNonce++;
+    return parseInt(hex, 16);
+  }
+  
+  async getNonce(): Promise<number> {
+    return this.getFreshNonce();
   }
 
   async getBalance(): Promise<bigint> {
@@ -96,7 +133,12 @@ export class Wallet {
     return (await this.provider.call("eth_sendRawTransaction", [signed.raw])) as string;
   }
 
-  exportPrivateKey(): string {
-    return this.privateKey;
+  /**
+   * Securely destroy the wallet by zeroing the private key from memory.
+   * After calling this, the wallet cannot sign any more transactions.
+   */
+  destroy(): void {
+    this._zeroKey();
+    this.cachedNonce = null;
   }
 }
