@@ -1,3 +1,7 @@
+// @contributor rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -9,6 +13,7 @@ contract TWAPOracle {
         uint256 timestamp;
         uint256 priceCumulative;
         uint256 spotPrice;
+        uint256 blockNumber;
     }
 
     address public pair;
@@ -17,10 +22,9 @@ contract TWAPOracle {
     Observation[] public observations;
     uint256 public constant PRECISION = 1e18;
 
-    // BUG: Observation window too short (1 block / 12 seconds) — TWAP computed over
-    // a single block provides no meaningful time-weighting and is trivially manipulable
-    // via flash loans within the same block
-    uint256 public windowSize = 12; // seconds — effectively 1 block
+    // Minimum 30-minute window to prevent flash loan manipulation
+    uint256 public windowSize = 1800; // 30 minutes
+    uint256 public constant MAX_STALENESS = 3600; // 1 hour max staleness
 
     event ObservationRecorded(uint256 timestamp, uint256 spotPrice, uint256 priceCumulative);
     event WindowUpdated(uint256 newWindow);
@@ -38,34 +42,44 @@ contract TWAPOracle {
     function recordObservation(uint256 spotPrice) external {
         require(spotPrice > 0, "Zero price");
 
+        // Prevent same-block manipulation: only one observation per block
+        if (observations.length > 0) {
+            require(
+                observations[observations.length - 1].blockNumber < block.number,
+                "TWAPOracle: only one observation per block"
+            );
+        }
+
         uint256 lastCumulative = 0;
-        uint256 lastTimestamp = block.timestamp;
 
         if (observations.length > 0) {
             Observation storage last = observations[observations.length - 1];
             uint256 elapsed = block.timestamp - last.timestamp;
             lastCumulative = last.priceCumulative + (last.spotPrice * elapsed);
-            lastTimestamp = block.timestamp;
         }
 
-        // BUG: Price can be manipulated in same block — no check that block.timestamp
-        // has advanced since last observation, so multiple observations per block are
-        // allowed, letting an attacker overwrite the price within a single transaction
         observations.push(Observation({
-            timestamp: lastTimestamp,
+            timestamp: block.timestamp,
             priceCumulative: lastCumulative,
-            spotPrice: spotPrice
+            spotPrice: spotPrice,
+            blockNumber: block.number
         }));
 
-        emit ObservationRecorded(lastTimestamp, spotPrice, lastCumulative);
+        emit ObservationRecorded(block.timestamp, spotPrice, lastCumulative);
     }
 
-    // BUG: No staleness check — if no observation has been recorded for hours/days,
-    // the TWAP still returns an outdated price without warning, misleading consumers
+    /// @notice Get TWAP with staleness protection
+    /// @dev Reverts if latest observation is older than MAX_STALENESS
     function getTWAP() external view returns (uint256) {
         require(observations.length >= 2, "Not enough observations");
 
         Observation storage latest = observations[observations.length - 1];
+
+        // Staleness check: reject outdated prices
+        require(
+            block.timestamp - latest.timestamp <= MAX_STALENESS,
+            "TWAPOracle: price data stale"
+        );
 
         // Find the oldest observation within the window
         uint256 targetTime = latest.timestamp - windowSize;
@@ -81,9 +95,8 @@ contract TWAPOracle {
         Observation storage old = observations[oldIndex];
         uint256 timeElapsed = latest.timestamp - old.timestamp;
 
-        if (timeElapsed == 0) {
-            return latest.spotPrice;
-        }
+        // Enforce minimum window to prevent manipulation
+        require(timeElapsed >= windowSize, "TWAPOracle: insufficient window");
 
         return (latest.priceCumulative - old.priceCumulative) / timeElapsed;
     }
@@ -94,6 +107,7 @@ contract TWAPOracle {
     }
 
     function setWindowSize(uint256 _windowSize) external onlyAdmin {
+        require(_windowSize >= 1800, "TWAPOracle: min window 30 min");
         windowSize = _windowSize;
         emit WindowUpdated(_windowSize);
     }
