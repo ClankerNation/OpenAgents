@@ -40,6 +40,12 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "issue": 42,
+      "author": "rafaio1",
+      "date": "2026-08-20",
+      "description": "Add staking reward boost tiers (1x/1.5x/2x), track stake timestamps with partial unstake preservation, fix rewardPerToken phantom accrual, and add onlyOwner to notifyRewardAmount"
     }
   ]
 }

@@ -1,3 +1,7 @@
+// @contributor rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -26,6 +30,7 @@ contract StakingRewards is ReentrancyGuard {
 
     uint256 private _totalSupply;
     mapping(address => uint256) private _balances;
+    mapping(address => uint256) public stakeTimestamp;
 
     event Staked(address indexed user, uint256 amount);
     event Withdrawn(address indexed user, uint256 amount);
@@ -40,6 +45,20 @@ contract StakingRewards is ReentrancyGuard {
             userRewardPerTokenPaid[account] = rewardPerTokenStored;
         }
         _;
+    }
+
+    /// @notice Get the reward boost multiplier for a staker based on stake duration.
+    /// @param account The staker address.
+    /// @return multiplier The boost multiplier (1e18 = 1x, 1.5e18 = 1.5x, 2e18 = 2x).
+    function getBoostMultiplier(address account) public view returns (uint256 multiplier) {
+        uint256 duration = block.timestamp - stakeTimestamp[account];
+        if (duration >= 90 days) {
+            return 2e18; // 2x
+        } else if (duration >= 30 days) {
+            return 1.5e18; // 1.5x
+        } else {
+            return 1e18; // 1x
+        }
     }
 
     constructor(address _stakingToken, address _rewardsToken) {
@@ -70,7 +89,7 @@ contract StakingRewards is ReentrancyGuard {
         // After periodFinish, this keeps accruing phantom rewards indefinitely,
         // allowing stakers to drain more rewards than were actually deposited.
         return rewardPerTokenStored + (
-            (block.timestamp - lastUpdateTime) * rewardRate * 1e18 / _totalSupply
+            (lastTimeRewardApplicable() - lastUpdateTime) * rewardRate * 1e18 / _totalSupply
         );
     }
 
@@ -86,6 +105,10 @@ contract StakingRewards is ReentrancyGuard {
         require(amount > 0, "Cannot stake 0");
         _totalSupply += amount;
         _balances[msg.sender] += amount;
+        // Set timestamp only on first stake; partial stakes preserve existing timer
+        if (_balances[msg.sender] == amount) {
+            stakeTimestamp[msg.sender] = block.timestamp;
+        }
         stakingToken.safeTransferFrom(msg.sender, address(this), amount);
         emit Staked(msg.sender, amount);
     }
@@ -96,6 +119,10 @@ contract StakingRewards is ReentrancyGuard {
         require(amount > 0, "Cannot withdraw 0");
         _totalSupply -= amount;
         _balances[msg.sender] -= amount;
+        // Reset timestamp on full unstake; partial unstake preserves timer
+        if (_balances[msg.sender] == 0) {
+            stakeTimestamp[msg.sender] = 0;
+        }
         stakingToken.safeTransfer(msg.sender, amount);
         emit Withdrawn(msg.sender, amount);
     }
@@ -114,7 +141,7 @@ contract StakingRewards is ReentrancyGuard {
     /// @param reward Total reward tokens to distribute over the duration.
     // BUG: No access control — anyone can call notifyRewardAmount. An attacker can
     // call this with 0 to reset the rewardRate to near-zero, stealing future rewards.
-    function notifyRewardAmount(uint256 reward) external updateReward(address(0)) {
+    function notifyRewardAmount(uint256 reward) external onlyOwner updateReward(address(0)) {
         if (block.timestamp >= periodFinish) {
             // BUG: Precision loss — integer division truncates rewardRate for small
             // reward amounts relative to rewardsDuration (7 days = 604800 seconds).
