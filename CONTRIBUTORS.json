@@ -40,6 +40,12 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "issue": 44,
+      "author": "rafaio1",
+      "date": "2026-08-20",
+      "description": "Add MAX_SUPPLY cap, zero-address mint check, tokenURI existence validation, and batchMint to AgentNFT"
     }
   ]
 }

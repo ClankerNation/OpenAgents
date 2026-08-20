@@ -1,3 +1,7 @@
+// @contributor rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -9,6 +13,7 @@ contract AgentNFT {
     string public symbol;
     string public baseURI;
     address public owner;
+    uint256 public constant MAX_SUPPLY = 10_000;
     uint256 private _nextTokenId;
 
     mapping(uint256 => address) private _owners;
@@ -40,11 +45,14 @@ contract AgentNFT {
         return _balances[account];
     }
 
-    // BUG: No max supply check — tokens can be minted infinitely, potentially
-    // devaluing the collection and causing unbounded gas costs for enumeration
+    /// @notice Mint a new AgentNFT to the specified address.
+    /// @param to Recipient address.
+    /// @param uri Metadata URI for the token.
+    /// @return tokenId The newly minted token ID.
     function mint(address to, string calldata uri) external onlyOwner returns (uint256) {
-        // BUG: Mint allows zero address — tokens sent to address(0) are burned
-        // on creation, incrementing supply counter but making tokens unretrievable
+        require(to != address(0), "AgentNFT: mint to zero");
+        require(_nextTokenId < MAX_SUPPLY, "AgentNFT: max supply reached");
+
         uint256 tokenId = _nextTokenId++;
         _owners[tokenId] = to;
         _balances[to]++;
@@ -54,9 +62,31 @@ contract AgentNFT {
         return tokenId;
     }
 
-    // BUG: tokenURI returns empty string for non-existent tokens instead of reverting,
-    // allowing off-chain systems to silently display broken/empty metadata
+    /// @notice Batch mint multiple NFTs to a single recipient.
+    /// @param to Recipient address.
+    /// @param uris Array of metadata URIs.
+    /// @return tokenIds Array of newly minted token IDs.
+    function batchMint(address to, string[] calldata uris) external onlyOwner returns (uint256[] memory tokenIds) {
+        require(to != address(0), "AgentNFT: mint to zero");
+        require(uris.length > 0, "AgentNFT: empty batch");
+        require(_nextTokenId + uris.length <= MAX_SUPPLY, "AgentNFT: exceeds max supply");
+
+        tokenIds = new uint256[](uris.length);
+        for (uint256 i = 0; i < uris.length; i++) {
+            uint256 tokenId = _nextTokenId++;
+            _owners[tokenId] = to;
+            _balances[to]++;
+            _tokenURIs[tokenId] = uris[i];
+            tokenIds[i] = tokenId;
+            emit Transfer(address(0), to, tokenId);
+        }
+    }
+
+    /// @notice Returns the metadata URI for a given token.
+    /// @param tokenId The token to query.
+    /// @return The metadata URI string.
     function tokenURI(uint256 tokenId) external view returns (string memory) {
+        require(_owners[tokenId] != address(0), "AgentNFT: nonexistent token");
         string memory _uri = _tokenURIs[tokenId];
         if (bytes(_uri).length > 0) {
             return _uri;
