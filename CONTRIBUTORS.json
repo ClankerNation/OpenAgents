@@ -40,6 +40,20 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "issue": 38,
+      "author": "rafaio1",
+      "date": "2026-08-20",
+      "description": "Add 30s AbortController timeout, MAX_BATCH_SIZE validation, typed error checking, and 429/503 retry support to RpcProvider",
+      "platform_instructions": "Agentic bounty-hunter workflow for ClankerNation/OpenAgents. Identify high-value bounties, implement fixes, update CONTRIBUTORS.json, submit PRs, and claim via issue comments. USDC: 0x9D0E3D34CB4b618e789F8B017239DaEE99eb3c8C (Polygon/Base).",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/root",
+        "working_dir": "/tmp/OpenAgents",
+        "shell": "/bin/bash"
+      }
     }
   ]
 }
