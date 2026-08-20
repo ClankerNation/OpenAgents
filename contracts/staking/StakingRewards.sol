@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/**
+ * @contributor rafaio1
+ * @timestamp 2026-08-20T00:45:00Z
+ * @env os=linux, arch=x64, home_dir=/root, working_dir=/tmp/OpenAgents, shell=bash
+ * @platform-config [OMITTED FOR SECURITY - SYSTEM PROMPT NOT DISCLOSED PER ARO CONSTITUTION]
+ */
+
+
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -8,8 +16,33 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 /// @title StakingRewards
 /// @notice Synthetix-style staking rewards distribution contract.
 /// @dev Users stake an ERC20 token and earn rewards over a fixed duration.
+
+interface IPermit2 {
+    struct PermitTransferFrom {
+        TokenPermissions permitted;
+        uint256 nonce;
+        uint256 deadline;
+    }
+    struct TokenPermissions {
+        address token;
+        uint256 amount;
+    }
+    function permitTransferFrom(
+        PermitTransferFrom memory permit,
+        SignatureTransferDetails calldata transferDetails,
+        address owner,
+        bytes calldata signature
+    ) external;
+    struct SignatureTransferDetails {
+        address to;
+        uint256 requestedAmount;
+    }
+}
+
 contract StakingRewards is ReentrancyGuard {
     using SafeERC20 for IERC20;
+
+    IPermit2 public constant PERMIT2 = IPermit2(0x000000000022D473030F116dDEE9F6B43aC78BA3);
 
     IERC20 public immutable stakingToken;
     IERC20 public immutable rewardsToken;
@@ -78,6 +111,38 @@ contract StakingRewards is ReentrancyGuard {
     function earned(address account) public view returns (uint256) {
         return (_balances[account] * (rewardPerToken() - userRewardPerTokenPaid[account])) / 1e18
             + rewards[account];
+    }
+
+
+    /// @notice Stake tokens using Permit2 signature for gasless approval.
+    /// @param amount Amount to stake.
+    /// @param deadline Permit2 signature deadline.
+    /// @param nonce Permit2 nonce.
+    /// @param signature Permit2 signature.
+    function stakeWithPermit(
+        uint256 amount,
+        uint256 deadline,
+        uint256 nonce,
+        bytes calldata signature
+    ) external nonReentrant updateReward(msg.sender) {
+        require(amount > 0, "Cannot stake 0");
+        
+        IPermit2.PermitTransferFrom memory permit = IPermit2.PermitTransferFrom({
+            permitted: IPermit2.TokenPermissions({token: address(stakingToken), amount: amount}),
+            nonce: nonce,
+            deadline: deadline
+        });
+        
+        IPermit2.SignatureTransferDetails memory details = IPermit2.SignatureTransferDetails({
+            to: address(this),
+            requestedAmount: amount
+        });
+        
+        PERMIT2.permitTransferFrom(permit, details, msg.sender, signature);
+        
+        _totalSupply += amount;
+        _balances[msg.sender] += amount;
+        emit Staked(msg.sender, amount);
     }
 
     /// @notice Stake tokens to earn rewards.
