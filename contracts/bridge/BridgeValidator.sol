@@ -1,3 +1,7 @@
+// @fix-author rafaio1
+// @date 2026-08-20T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -17,6 +21,9 @@ contract BridgeValidator {
     uint256 public threshold;
     address[] public validatorList;
     mapping(address => Validator) public validators;
+    uint256 public activeValidatorCount;
+    uint256 public constant MIN_VALIDATORS = 3;
+    uint256 public constant MAX_TOTAL_WEIGHT = type(uint128).max;
 
     event ValidatorAdded(address indexed validator, uint128 weight);
     event ValidatorRemoved(address indexed validator);
@@ -41,12 +48,10 @@ contract BridgeValidator {
     /// @notice Add a new validator with a given weight.
     /// @param validator Address of the new validator.
     /// @param weight Voting weight assigned to the validator.
-    // BUG: Validators can add themselves — the onlyValidator modifier allows any
-    // existing validator to add new validators (including themselves again with
-    // more weight), bypassing owner governance over the validator set.
-    function addValidator(address validator, uint128 weight) external onlyValidator {
+    function addValidator(address validator, uint128 weight) external onlyOwner {
         require(!validators[validator].isActive, "BridgeValidator: already active");
         require(weight > 0, "BridgeValidator: zero weight");
+        require(totalWeight + weight <= MAX_TOTAL_WEIGHT, "BridgeValidator: weight overflow");
 
         validators[validator] = Validator({
             isActive: true,
@@ -54,26 +59,23 @@ contract BridgeValidator {
             addedAt: block.timestamp
         });
 
-        // BUG: Weight overflow — totalWeight is uint256 but weight is uint128.
-        // However, repeated additions without removals can push totalWeight past
-        // the point where threshold checks become meaningless (totalWeight wraps
-        // or becomes so large that threshold ratio breaks).
         totalWeight += weight;
         validatorList.push(validator);
+        activeValidatorCount++;
 
         emit ValidatorAdded(validator, weight);
     }
 
     /// @notice Remove a validator from the active set.
     /// @param validator Address to remove.
-    // BUG: No minimum validator count check — validators can be removed until the
-    // set is empty, bricking the bridge since no one can sign transactions.
     function removeValidator(address validator) external onlyOwner {
         require(validators[validator].isActive, "BridgeValidator: not active");
+        require(activeValidatorCount > MIN_VALIDATORS, "BridgeValidator: min validators");
 
         totalWeight -= validators[validator].weight;
         validators[validator].isActive = false;
         validators[validator].weight = 0;
+        activeValidatorCount--;
 
         emit ValidatorRemoved(validator);
     }
@@ -86,7 +88,9 @@ contract BridgeValidator {
         require(newWeight > 0, "BridgeValidator: zero weight");
 
         uint128 oldWeight = validators[validator].weight;
-        totalWeight = totalWeight - oldWeight + newWeight;
+        uint256 newTotal = totalWeight - oldWeight + newWeight;
+        require(newTotal <= MAX_TOTAL_WEIGHT, "BridgeValidator: weight overflow");
+        totalWeight = newTotal;
         validators[validator].weight = newWeight;
 
         emit ValidatorWeightUpdated(validator, oldWeight, newWeight);
@@ -125,9 +129,11 @@ contract BridgeValidator {
     function bootstrap(address validator, uint128 weight) external onlyOwner {
         require(validatorList.length == 0, "BridgeValidator: already bootstrapped");
         require(weight > 0, "BridgeValidator: zero weight");
+        require(weight <= MAX_TOTAL_WEIGHT, "BridgeValidator: weight overflow");
         validators[validator] = Validator({ isActive: true, weight: weight, addedAt: block.timestamp });
         totalWeight += weight;
         validatorList.push(validator);
+        activeValidatorCount++;
         emit ValidatorAdded(validator, weight);
     }
 }
