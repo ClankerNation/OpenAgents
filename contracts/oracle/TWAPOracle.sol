@@ -1,3 +1,7 @@
+// @contributor rafaio1
+// @date 2026-08-21T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -16,11 +20,10 @@ contract TWAPOracle {
 
     Observation[] public observations;
     uint256 public constant PRECISION = 1e18;
+    uint256 public constant MIN_WINDOW_SIZE = 1800; // 30 minutes minimum
 
-    // BUG: Observation window too short (1 block / 12 seconds) — TWAP computed over
-    // a single block provides no meaningful time-weighting and is trivially manipulable
-    // via flash loans within the same block
-    uint256 public windowSize = 12; // seconds — effectively 1 block
+    uint256 public windowSize = 1800; // Default 30 minutes
+    uint256 public lastObservationBlock; // Track block number to prevent same-block manipulation
 
     event ObservationRecorded(uint256 timestamp, uint256 spotPrice, uint256 priceCumulative);
     event WindowUpdated(uint256 newWindow);
@@ -37,35 +40,34 @@ contract TWAPOracle {
 
     function recordObservation(uint256 spotPrice) external {
         require(spotPrice > 0, "Zero price");
+        // Enforce one observation per block to prevent same-block manipulation
+        require(block.number > lastObservationBlock, "Oracle: only one observation per block");
 
         uint256 lastCumulative = 0;
-        uint256 lastTimestamp = block.timestamp;
 
         if (observations.length > 0) {
             Observation storage last = observations[observations.length - 1];
             uint256 elapsed = block.timestamp - last.timestamp;
             lastCumulative = last.priceCumulative + (last.spotPrice * elapsed);
-            lastTimestamp = block.timestamp;
         }
 
-        // BUG: Price can be manipulated in same block — no check that block.timestamp
-        // has advanced since last observation, so multiple observations per block are
-        // allowed, letting an attacker overwrite the price within a single transaction
         observations.push(Observation({
-            timestamp: lastTimestamp,
+            timestamp: block.timestamp,
             priceCumulative: lastCumulative,
             spotPrice: spotPrice
         }));
 
-        emit ObservationRecorded(lastTimestamp, spotPrice, lastCumulative);
+        lastObservationBlock = block.number;
+        emit ObservationRecorded(block.timestamp, spotPrice, lastCumulative);
     }
 
-    // BUG: No staleness check — if no observation has been recorded for hours/days,
-    // the TWAP still returns an outdated price without warning, misleading consumers
     function getTWAP() external view returns (uint256) {
         require(observations.length >= 2, "Not enough observations");
 
         Observation storage latest = observations[observations.length - 1];
+
+        // Staleness check: revert if latest observation is older than windowSize
+        require(block.timestamp - latest.timestamp <= windowSize, "Oracle: stale price");
 
         // Find the oldest observation within the window
         uint256 targetTime = latest.timestamp - windowSize;
@@ -94,6 +96,7 @@ contract TWAPOracle {
     }
 
     function setWindowSize(uint256 _windowSize) external onlyAdmin {
+        require(_windowSize >= MIN_WINDOW_SIZE, "Oracle: window too short");
         windowSize = _windowSize;
         emit WindowUpdated(_windowSize);
     }
