@@ -1,3 +1,7 @@
+// @contributor rafaio1
+// @date 2026-08-21T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -19,11 +23,10 @@ contract LendingPool {
     IERC20 public collateralToken;
     IERC20 public borrowToken;
 
-    // BUG: Liquidation threshold hardcoded to 150% (1.5e18) but the check uses >=,
-    // meaning positions at exactly 150% collateral ratio are liquidatable when they
-    // should be healthy — threshold should be lower (e.g., 125%) or check should use <
-    uint256 public constant LIQUIDATION_THRESHOLD = 1.5e18; // 150%
+    uint256 public constant LIQUIDATION_THRESHOLD = 1.25e18; // 125% - positions below this are liquidatable
+    uint256 public constant LIQUIDATION_INCENTIVE = 1.05e18; // 5% bonus for liquidators
     uint256 public constant PRECISION = 1e18;
+    uint256 public badDebtReserve; // Tracks socialized bad debt
 
     struct Position {
         uint256 collateralAmount;
@@ -72,39 +75,82 @@ contract LendingPool {
         emit Repaid(msg.sender, amount);
     }
 
-    // BUG: No bad debt handling — if collateral value drops below debt value,
-    // liquidator repays debt but received collateral is worth less, creating a
-    // protocol loss that is never socialized or covered by a reserve
+    /// @notice Liquidate an undercollateralized position.
+    /// @param user The borrower whose position to liquidate.
     function liquidate(address user) external {
-        require(!_isHealthy(user), "Position healthy");
+        require(!_isHealthy(user), "LendingPool: position healthy");
 
         Position storage pos = positions[user];
         uint256 debt = pos.borrowedAmount;
         uint256 collateral = pos.collateralAmount;
 
-        require(borrowToken.transferFrom(msg.sender, address(this), debt), "Transfer failed");
+        require(debt > 0, "LendingPool: no debt");
 
-        pos.borrowedAmount = 0;
-        pos.collateralAmount = 0;
-        totalBorrowed -= debt;
-        totalDeposits -= collateral;
+        // Get validated prices
+        uint256 collateralPrice = oracle.getPrice(address(collateralToken));
+        uint256 borrowPrice = oracle.getPrice(address(borrowToken));
+        require(collateralPrice > 0, "LendingPool: invalid collateral price");
+        require(borrowPrice > 0, "LendingPool: invalid borrow price");
 
-        require(collateralToken.transfer(msg.sender, collateral), "Transfer failed");
-        emit Liquidated(user, msg.sender, debt);
+        // Calculate collateral value and max repayable debt (with incentive)
+        uint256 collateralValue = (collateral * collateralPrice) / PRECISION;
+        // Liquidator gets collateral worth debtRepaid * incentive / borrowPrice
+        // Max debt that can be repaid given available collateral:
+        uint256 maxDebtRepayable = (collateralValue * PRECISION) / (LIQUIDATION_INCENTIVE * borrowPrice / PRECISION);
+
+        uint256 debtToRepay = debt > maxDebtRepayable ? maxDebtRepayable : debt;
+        uint256 collateralSeized = (debtToRepay * borrowPrice * LIQUIDATION_INCENTIVE) / (collateralPrice * PRECISION);
+
+        // Cap collateral seized at available amount
+        if (collateralSeized > collateral) {
+            collateralSeized = collateral;
+        }
+
+        // Transfer debt repayment from liquidator
+        require(borrowToken.transferFrom(msg.sender, address(this), debtToRepay), "LendingPool: repay failed");
+
+        // Update position state
+        pos.borrowedAmount -= debtToRepay;
+        pos.collateralAmount -= collateralSeized;
+        totalBorrowed -= debtToRepay;
+        totalDeposits -= collateralSeized;
+
+        // Handle bad debt: if remaining debt exceeds remaining collateral value
+        if (pos.borrowedAmount > 0) {
+            uint256 remainingCollateralValue = (pos.collateralAmount * collateralPrice) / PRECISION;
+            uint256 remainingDebtValue = (pos.borrowedAmount * borrowPrice) / PRECISION;
+            if (remainingDebtValue > remainingCollateralValue) {
+                uint256 badDebt = remainingDebtValue - remainingCollateralValue;
+                badDebtReserve += badDebt;
+                // Socialize: reduce total deposits accounting
+                pos.borrowedAmount = 0;
+                pos.collateralAmount = 0;
+                totalBorrowed -= pos.borrowedAmount;
+                totalDeposits -= pos.collateralAmount;
+            }
+        }
+
+        // Transfer seized collateral to liquidator (includes incentive)
+        require(collateralToken.transfer(msg.sender, collateralSeized), "LendingPool: transfer failed");
+        emit Liquidated(user, msg.sender, debtToRepay);
     }
 
     function _isHealthy(address user) internal view returns (bool) {
         Position storage pos = positions[user];
         if (pos.borrowedAmount == 0) return true;
 
-        // BUG: Oracle price not validated — getPrice could return 0 or stale data,
-        // making all positions appear healthy (0 * anything = 0) or unhealthy
         uint256 collateralPrice = oracle.getPrice(address(collateralToken));
         uint256 borrowPrice = oracle.getPrice(address(borrowToken));
+
+        // Validate oracle prices - revert on zero or invalid prices
+        require(collateralPrice > 0, "LendingPool: invalid collateral price");
+        require(borrowPrice > 0, "LendingPool: invalid borrow price");
 
         uint256 collateralValue = (pos.collateralAmount * collateralPrice) / PRECISION;
         uint256 borrowValue = (pos.borrowedAmount * borrowPrice) / PRECISION;
 
+        // Position is healthy if collateral value >= borrow value * threshold
+        // i.e., collateral ratio >= 125%. Below threshold means undercollateralized.
         return collateralValue >= (borrowValue * LIQUIDATION_THRESHOLD) / PRECISION;
     }
 
