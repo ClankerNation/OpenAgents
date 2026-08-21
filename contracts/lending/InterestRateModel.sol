@@ -1,3 +1,7 @@
+// @contributor rafaio1
+// @date 2026-08-21T00:00:00Z
+// @runtime linux x64 /tmp/OpenAgents bash
+// @platform-config Agentic bounty-hunter workflow
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -15,6 +19,9 @@ contract InterestRateModel {
 
     uint256 public constant PRECISION = 1e18;
     uint256 public constant BLOCKS_PER_YEAR = 2_628_000; // ~12s blocks
+    uint256 public constant MAX_UTILIZATION = 0.9999e18; // Cap at 99.99% to prevent div-by-zero
+    uint256 public constant MIN_BASE_RATE = 0.001e18; // 0.1% minimum
+    uint256 public constant MAX_BASE_RATE = 0.5e18; // 50% maximum
 
     address public admin;
 
@@ -44,6 +51,8 @@ contract InterestRateModel {
         uint256 _jumpMultiplier,
         uint256 _kink
     ) external onlyAdmin {
+        require(_baseRate >= MIN_BASE_RATE && _baseRate <= MAX_BASE_RATE, "IRM: base rate out of bounds");
+        require(_kink < PRECISION, "IRM: kink must be < 100%");
         baseRate = _baseRate;
         multiplier = _multiplier;
         jumpMultiplier = _jumpMultiplier;
@@ -53,15 +62,11 @@ contract InterestRateModel {
 
     function getUtilization(uint256 totalBorrowed, uint256 totalDeposits) public pure returns (uint256) {
         if (totalDeposits == 0) return 0;
-        return (totalBorrowed * PRECISION) / totalDeposits;
+        uint256 util = (totalBorrowed * PRECISION) / totalDeposits;
+        // Cap utilization at 99.99% to prevent division by zero in jump rate calculation
+        return util > MAX_UTILIZATION ? MAX_UTILIZATION : util;
     }
 
-    // BUG: Division by zero when utilization is 100% — if totalBorrowed == totalDeposits,
-    // utilization equals PRECISION which equals kink edge case, and when utilization > kink,
-    // the formula (PRECISION - kink) can be zero if kink == PRECISION, causing revert
-    // BUG: Rate overflow for extreme utilization — when utilization greatly exceeds kink
-    // (e.g., through direct token transfers), excessUtilization * jumpMultiplier can overflow
-    // intermediate calculations and produce nonsensical rates
     function getBorrowRate(uint256 totalBorrowed, uint256 totalDeposits) external view returns (uint256) {
         uint256 utilization = getUtilization(totalBorrowed, totalDeposits);
 
@@ -71,7 +76,10 @@ contract InterestRateModel {
 
         uint256 normalRate = baseRate + (kink * multiplier) / PRECISION;
         uint256 excessUtilization = utilization - kink;
-        uint256 jumpRate = (excessUtilization * jumpMultiplier) / (PRECISION - kink);
+        // Safe denominator: kink is validated < PRECISION in updateParams and constructor
+        uint256 denominator = PRECISION - kink;
+        require(denominator > 0, "IRM: invalid kink");
+        uint256 jumpRate = (excessUtilization * jumpMultiplier) / denominator;
 
         return normalRate + jumpRate;
     }
