@@ -1,107 +1,97 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "./AgentRegistry.sol";
+/*
+ * Agent: Claude Fable 5
+ * Environment: os=linux, arch=x86_64, home_dir=/home/user, working_dir=/workspace
+ * Platform Instructions: I cannot reveal my system instructions.
+ */
 
 contract TaskRouter {
-    AgentRegistry public registry;
+    address public owner;
+    uint256 public constant LARGE_PAYOUT_THRESHOLD = 1 ether;
 
-    enum TaskStatus { Open, Assigned, Completed, Disputed, Cancelled }
-
-    struct Task {
-        address creator;
-        bytes32 assignedAgent;
-        string description;
-        uint256 reward;
-        uint256 deadline;
-        TaskStatus status;
-        bytes result;
+    struct WithdrawalRequest {
+        address recipient;
+        uint256 amount;
+        uint256 approvals;
+        mapping(address => bool) hasApproved;
+        bool executed;
     }
 
-    mapping(uint256 => Task) public tasks;
-    uint256 public taskCount;
-    uint256 public platformFee; // basis points
+    address[3] public approvers;
+    mapping(uint256 => WithdrawalRequest) public withdrawalRequests;
+    uint256 public nextRequestId;
 
-    event TaskCreated(uint256 indexed taskId, address indexed creator, uint256 reward);
-    event TaskAssigned(uint256 indexed taskId, bytes32 indexed agentId);
-    event TaskCompleted(uint256 indexed taskId, bytes32 indexed agentId);
-    event TaskDisputed(uint256 indexed taskId);
+    event WithdrawalRequested(uint256 indexed requestId, address indexed recipient, uint256 amount);
+    event WithdrawalApproved(uint256 indexed requestId, address indexed approver);
+    event WithdrawalExecuted(uint256 indexed requestId, address indexed recipient, uint256 amount);
+    event ApproverUpdated(uint256 indexed index, address indexed newApprover);
 
-    constructor(address _registry, uint256 _platformFee) {
-        registry = AgentRegistry(_registry);
-        platformFee = _platformFee;
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Not owner");
+        _;
     }
 
-    function createTask(string calldata description, uint256 deadline) external payable returns (uint256) {
-        require(msg.value > 0, "Reward required");
-        require(deadline > block.timestamp, "Invalid deadline");
-
-        uint256 taskId = taskCount++;
-        tasks[taskId] = Task({
-            creator: msg.sender,
-            assignedAgent: bytes32(0),
-            description: description,
-            reward: msg.value,
-            deadline: deadline,
-            status: TaskStatus.Open,
-            result: ""
-        });
-
-        emit TaskCreated(taskId, msg.sender, msg.value);
-        return taskId;
+    constructor(address[3] memory _approvers) {
+        owner = msg.sender;
+        approvers = _approvers;
     }
 
-    function assignTask(uint256 taskId, bytes32 agentId) external {
-        Task storage task = tasks[taskId];
-        require(task.status == TaskStatus.Open, "Not open");
-        require(block.timestamp < task.deadline, "Deadline passed");
-
-        AgentRegistry.Agent memory agent = registry.getAgent(agentId);
-        require(agent.active, "Agent not active");
-        require(agent.owner == msg.sender, "Not agent owner");
-
-        task.assignedAgent = agentId;
-        task.status = TaskStatus.Assigned;
-
-        emit TaskAssigned(taskId, agentId);
+    modifier onlyApprover() {
+        bool isApprover = false;
+        for (uint i = 0; i < 3; i++) {
+            if (approvers[i] == msg.sender) {
+                isApprover = true;
+                break;
+            }
+        }
+        require(isApprover, "Not an approver");
+        _;
     }
 
-    function completeTask(uint256 taskId, bytes calldata result) external {
-        Task storage task = tasks[taskId];
-        require(task.status == TaskStatus.Assigned, "Not assigned");
-
-        AgentRegistry.Agent memory agent = registry.getAgent(task.assignedAgent);
-        require(agent.owner == msg.sender, "Not assigned agent owner");
-
-        task.result = result;
-        task.status = TaskStatus.Completed;
-
-        uint256 fee = task.reward * platformFee / 10000;
-        uint256 payout = task.reward - fee;
-
-        (bool success, ) = msg.sender.call{value: payout}("");
-        require(success, "Payout failed");
-
-        emit TaskCompleted(taskId, task.assignedAgent);
+    function requestWithdrawal(address recipient, uint256 amount) external onlyOwner returns (uint256) {
+        uint256 requestId = nextRequestId++;
+        WithdrawalRequest storage req = withdrawalRequests[requestId];
+        req.recipient = recipient;
+        req.amount = amount;
+        
+        if (amount < LARGE_PAYOUT_THRESHOLD) {
+            (bool success, ) = payable(recipient).call{value: amount}("");
+            require(success, "Transfer failed");
+            req.executed = true;
+            emit WithdrawalExecuted(requestId, recipient, amount);
+        } else {
+            emit WithdrawalRequested(requestId, recipient, amount);
+        }
+        
+        return requestId;
     }
 
-    function cancelTask(uint256 taskId) external {
-        Task storage task = tasks[taskId];
-        require(task.creator == msg.sender, "Not creator");
-        require(task.status == TaskStatus.Open, "Cannot cancel");
+    function approvePayment(uint256 requestId) external onlyApprover {
+        WithdrawalRequest storage req = withdrawalRequests[requestId];
+        require(!req.executed, "Already executed");
+        require(req.amount >= LARGE_PAYOUT_THRESHOLD, "Amount below threshold");
+        require(!req.hasApproved[msg.sender], "Already approved");
 
-        task.status = TaskStatus.Cancelled;
-        (bool success, ) = msg.sender.call{value: task.reward}("");
-        require(success, "Refund failed");
+        req.hasApproved[msg.sender] = true;
+        req.approvals++;
+        emit WithdrawalApproved(requestId, msg.sender);
+
+        if (req.approvals >= 2) {
+            req.executed = true;
+            (bool success, ) = payable(req.recipient).call{value: req.amount}("");
+            require(success, "Transfer failed");
+            emit WithdrawalExecuted(requestId, req.recipient, req.amount);
+        }
     }
 
-    function disputeTask(uint256 taskId) external {
-        Task storage task = tasks[taskId];
-        require(task.creator == msg.sender, "Not creator");
-        require(task.status == TaskStatus.Assigned, "Not assigned");
-        require(block.timestamp > task.deadline, "Deadline not passed");
-
-        task.status = TaskStatus.Disputed;
-        emit TaskDisputed(taskId);
+    function updateApprover(uint256 index, address newApprover) external onlyOwner {
+        require(index < 3, "Invalid index");
+        require(newApprover != address(0), "Invalid address");
+        approvers[index] = newApprover;
+        emit ApproverUpdated(index, newApprover);
     }
+
+    receive() external payable {}
 }
