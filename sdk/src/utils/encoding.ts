@@ -1,17 +1,26 @@
+// @fix-author rafaio1
+// @date 2026-08-24T22:20:00Z
+// @runtime linux x64 /tmp/openagents_fix bash
+// @platform-config Agentic bounty-hunter workflow
 /**
  * ABI encoding/decoding utilities for EVM-compatible contract interactions.
  */
 
-export type AbiType = "uint256" | "address" | "bytes32" | "string" | "bool";
+export type AbiType = "uint256" | "address" | "bytes32" | "string" | "bool" | "bytes" | "tuple";
 
 export interface AbiParam {
   type: AbiType;
-  value: string | number | bigint | boolean;
+  value: string | number | bigint | boolean | Buffer | Uint8Array | AbiParam[];
+  components?: AbiParam[];
 }
+
+const MAX_UINT256 = (1n << 256n) - 1n;
 
 export function encodeUint256(value: bigint | number): string {
   const n = BigInt(value);
-  // BUG: No overflow check — values > 2^256-1 silently wrap/truncate
+  if (n < 0n || n > MAX_UINT256) {
+    throw new RangeError(`encodeUint256: value out of range [0, 2^256-1]: ${n}`);
+  }
   return n.toString(16).padStart(64, "0");
 }
 
@@ -45,26 +54,37 @@ export function encodeParams(params: AbiParam[]): string {
       case "bool":
         encoded += encodeBool(param.value as boolean);
         break;
-      case "string":
-        const hexStr = Buffer.from(param.value as string).toString("hex");
-        encoded += hexStr.padEnd(64, "0");
+      case "string": {
+        const strBytes = Buffer.from(param.value as string, "utf-8");
+        const hexStr = strBytes.toString("hex");
+        const lenHex = BigInt(strBytes.length).toString(16).padStart(64, "0");
+        encoded += lenHex + hexStr.padEnd(Math.ceil(hexStr.length / 64) * 64, "0");
         break;
+      }
     }
   }
   return encoded;
 }
 
 export function decodeHex(hex: string): bigint {
-  // BUG: Doesn't validate "0x" prefix — a bare decimal string like "255"
-  // would be parsed as hex 0x255 = 597, silently returning wrong value
-  const cleaned = hex.startsWith("0x") ? hex.slice(2) : hex;
-  return BigInt("0x" + cleaned);
+  if (!hex.startsWith("0x")) {
+    throw new Error(`decodeHex: expected 0x-prefixed hex string, got "${hex}"`);
+  }
+  const cleaned = hex.slice(2);
+  if (!/^[0-9a-fA-F]*$/.test(cleaned)) {
+    throw new Error(`decodeHex: invalid hex characters in "${hex}"`);
+  }
+  return BigInt("0x" + (cleaned || "0"));
 }
 
 export function decodeUint256(slot: string): bigint {
-  // BUG: Doesn't handle short values — if slot is less than 64 chars,
-  // no left-padding is applied before parsing, giving wrong results
-  return BigInt("0x" + slot);
+  const cleaned = slot.startsWith("0x") ? slot.slice(2) : slot;
+  const padded = cleaned.padStart(64, "0");
+  const value = BigInt("0x" + padded);
+  if (value > MAX_UINT256) {
+    throw new RangeError(`decodeUint256: decoded value exceeds uint256 max`);
+  }
+  return value;
 }
 
 export function decodeAddress(slot: string): string {
@@ -74,6 +94,83 @@ export function decodeAddress(slot: string): string {
 
 export function decodeBool(slot: string): boolean {
   return BigInt("0x" + slot) !== 0n;
+}
+
+export function decodeString(data: string): string {
+  const cleaned = data.startsWith("0x") ? data.slice(2) : data;
+  const offset = parseInt(cleaned.slice(0, 64), 16) * 2;
+  const length = parseInt(cleaned.slice(offset, offset + 64), 16);
+  const strStart = offset + 64;
+  const strEnd = strStart + length * 2;
+  const hexStr = cleaned.slice(strStart, strEnd);
+  return Buffer.from(hexStr, "hex").toString("utf-8");
+}
+
+export function decodeBytes(data: string): Buffer {
+  const cleaned = data.startsWith("0x") ? data.slice(2) : data;
+  const offset = parseInt(cleaned.slice(0, 64), 16) * 2;
+  const length = parseInt(cleaned.slice(offset, offset + 64), 16);
+  const bytesStart = offset + 64;
+  const bytesEnd = bytesStart + length * 2;
+  const hexBytes = cleaned.slice(bytesStart, bytesEnd);
+  return Buffer.from(hexBytes, "hex");
+}
+
+export function decodeArray(data: string, elementType: AbiType): unknown[] {
+  const cleaned = data.startsWith("0x") ? data.slice(2) : data;
+  const offset = parseInt(cleaned.slice(0, 64), 16) * 2;
+  const length = parseInt(cleaned.slice(offset, offset + 64), 16);
+  const result: unknown[] = [];
+  let pos = offset + 64;
+  for (let i = 0; i < length; i++) {
+    const slot = cleaned.slice(pos, pos + 64);
+    switch (elementType) {
+      case "uint256": result.push(decodeUint256(slot)); break;
+      case "address": result.push(decodeAddress(slot)); break;
+      case "bool": result.push(decodeBool(slot)); break;
+      case "bytes32": result.push("0x" + slot); break;
+      default: result.push("0x" + slot); break;
+    }
+    pos += 64;
+  }
+  return result;
+}
+
+export function decodeTuple(data: string, components: AbiParam[]): Record<string, unknown> {
+  const cleaned = data.startsWith("0x") ? data.slice(2) : data;
+  const result: Record<string, unknown> = {};
+  let pos = 0;
+  for (const comp of components) {
+    const slot = cleaned.slice(pos, pos + 64);
+    const name = (comp as any).name || `field_${pos}`;
+    switch (comp.type) {
+      case "uint256": result[name] = decodeUint256(slot); break;
+      case "address": result[name] = decodeAddress(slot); break;
+      case "bool": result[name] = decodeBool(slot); break;
+      case "bytes32": result[name] = "0x" + slot; break;
+      case "string": result[name] = decodeString("0x" + cleaned.slice(pos)); break;
+      case "bytes": result[name] = decodeBytes("0x" + cleaned.slice(pos)); break;
+      case "tuple":
+        if (comp.components) result[name] = decodeTuple("0x" + cleaned.slice(pos), comp.components);
+        break;
+      default: result[name] = "0x" + slot; break;
+    }
+    pos += 64;
+  }
+  return result;
+}
+
+export function decodeParameter(type: AbiType, data: string, components?: AbiParam[]): unknown {
+  switch (type) {
+    case "uint256": return decodeUint256(data);
+    case "address": return decodeAddress(data);
+    case "bool": return decodeBool(data);
+    case "bytes32": return data.startsWith("0x") ? data : "0x" + data;
+    case "string": return decodeString(data);
+    case "bytes": return decodeBytes(data);
+    case "tuple": return components ? decodeTuple(data, components) : data;
+    default: return data;
+  }
 }
 
 export function functionSelector(signature: string): string {
