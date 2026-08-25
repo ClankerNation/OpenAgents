@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+// @fix-author rafaio1
+// @date 2026-08-25T00:00:00Z
+// @runtime linux x64 /tmp/openagents_issue_201 bash
+// @platform-config Autonomous bounty execution pipeline initialized with SOLID/Object Calisthenics enforcement
+
 /// @title Timelock
 /// @notice Time-delayed execution controller for governance actions.
 /// @dev Queued transactions must wait a minimum delay before execution.
@@ -8,6 +13,7 @@ pragma solidity ^0.8.20;
 contract Timelock {
     uint256 public constant GRACE_PERIOD = 14 days;
     uint256 public constant MAXIMUM_DELAY = 30 days;
+    uint256 public constant MINIMUM_DELAY = 1 days;
 
     address public admin;
     address public pendingAdmin;
@@ -27,19 +33,17 @@ contract Timelock {
     }
 
     constructor(address _admin, uint256 _delay) {
-        require(_delay <= MAXIMUM_DELAY, "Timelock: delay exceeds max");
+        require(_delay >= MINIMUM_DELAY && _delay <= MAXIMUM_DELAY, "Timelock: invalid delay");
         admin = _admin;
         delay = _delay;
     }
 
-    /// @notice Update the execution delay.
+    /// @notice Update the execution delay. Only callable via timelock itself.
     /// @param _delay New delay in seconds.
-    // BUG: No access control — anyone can call setDelay and change the timelock
-    // delay, effectively bypassing governance protection entirely.
     function setDelay(uint256 _delay) external {
-        // BUG: Delay can be set to 0, which defeats the purpose of a timelock
-        // since transactions can be executed immediately after queueing.
-        require(_delay <= MAXIMUM_DELAY, "Timelock: delay exceeds max");
+        // Must be called through the timelock queue mechanism, not directly
+        require(msg.sender == address(this), "Timelock: call must come from self");
+        require(_delay >= MINIMUM_DELAY && _delay <= MAXIMUM_DELAY, "Timelock: invalid delay");
         delay = _delay;
         emit NewDelay(_delay);
     }
@@ -55,6 +59,7 @@ contract Timelock {
     /// @notice Set a new pending admin.
     /// @param _pendingAdmin Address of the new pending admin.
     function setPendingAdmin(address _pendingAdmin) external onlyAdmin {
+        require(_pendingAdmin != address(0), "Timelock: zero address");
         pendingAdmin = _pendingAdmin;
     }
 
@@ -69,10 +74,12 @@ contract Timelock {
         bytes calldata data,
         uint256 eta
     ) external onlyAdmin returns (bytes32 txHash) {
-        // BUG: Missing eta validation — does not check that eta >= block.timestamp + delay.
-        // This allows admin to queue a transaction with an eta in the past and execute
-        // it immediately, completely bypassing the timelock delay.
+        // Enforce that eta respects the configured delay
+        require(eta >= block.timestamp + delay, "Timelock: eta too soon");
+        
         txHash = keccak256(abi.encode(target, value, data, eta));
+        require(!queuedTransactions[txHash], "Timelock: already queued");
+        
         queuedTransactions[txHash] = true;
         emit QueueTransaction(txHash, target, value, data, eta);
     }
@@ -109,6 +116,8 @@ contract Timelock {
         uint256 eta
     ) external onlyAdmin {
         bytes32 txHash = keccak256(abi.encode(target, value, data, eta));
+        require(queuedTransactions[txHash], "Timelock: tx not queued");
+        
         queuedTransactions[txHash] = false;
         emit CancelTransaction(txHash, target, value, data, eta);
     }
