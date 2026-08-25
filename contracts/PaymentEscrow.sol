@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
+// @fix-author rafaio1
+// @date 2026-08-25T03:40:00Z
+// @runtime linux x64 /tmp/openagents_issue_202 bash
+// @platform-config Autonomous bounty execution pipeline initialized with SOLID/Object Calisthenics enforcement, senior dev multi-agent orchestration, and Wise payout integration.
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -30,23 +34,27 @@ contract PaymentEscrow is Ownable {
         uint256 amount,
         uint256 lockDuration
     ) external returns (uint256) {
-        require(payee != address(0), "Invalid payee");
-        require(amount > 0, "Amount must be > 0");
+        require(payee != address(0), "PaymentEscrow: invalid payee");
+        require(amount > 0, "PaymentEscrow: amount must be > 0");
 
+        // Balance-before/after check handles fee-on-transfer tokens correctly
+        uint256 balanceBefore = IERC20(token).balanceOf(address(this));
         IERC20(token).transferFrom(msg.sender, address(this), amount);
+        uint256 actualReceived = IERC20(token).balanceOf(address(this)) - balanceBefore;
+        require(actualReceived > 0, "PaymentEscrow: zero received after fees");
 
         uint256 escrowId = escrowCount++;
         escrows[escrowId] = Escrow({
             payer: msg.sender,
             payee: payee,
             token: token,
-            amount: amount,
+            amount: actualReceived, // Store actual received amount, not input
             releaseTime: block.timestamp + lockDuration,
             released: false,
             refunded: false
         });
 
-        emit EscrowCreated(escrowId, msg.sender, amount);
+        emit EscrowCreated(escrowId, msg.sender, actualReceived);
         return escrowId;
     }
 
