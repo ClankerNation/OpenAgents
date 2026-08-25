@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
+// @fix-author rafaio1
+// @date 2026-08-25T01:25:00Z
+// @runtime linux x64 /tmp/openagents_issue_202 bash
+// @platform-config Agentic bounty-hunter workflow
+// @startup-instructions Autonomous bounty execution pipeline initialized with SOLID/Object Calisthenics enforcement, senior dev multi-agent orchestration, and Wise payout integration.
 
 import "./AgentRegistry.sol";
 
@@ -103,5 +108,61 @@ contract TaskRouter {
 
         task.status = TaskStatus.Disputed;
         emit TaskDisputed(taskId);
+    }
+
+    // --- Gas Sponsorship Relay (Issue #190) ---
+    mapping(bytes32 => uint256) public agentNonces;
+
+    event GasSponsoredExecution(bytes32 indexed agentId, address indexed relayer, uint256 gasReimbursement);
+
+    /// @notice Execute a task operation on behalf of an agent via meta-transaction.
+    /// @param agentId The agent's registry ID.
+    /// @param data Encoded calldata for the task operation (e.g., completeTask).
+    /// @param nonce Agent's current nonce for replay protection.
+    /// @param signature ECDSA signature over keccak256(abi.encodePacked(agentId, data, nonce, address(this))).
+    /// @dev Relayer pays gas; agent is reimbursed from their staked balance in AgentRegistry.
+    function executeOnBehalf(
+        bytes32 agentId,
+        bytes calldata data,
+        uint256 nonce,
+        bytes calldata signature
+    ) external {
+        require(agentNonces[agentId] == nonce, "TaskRouter: invalid nonce");
+        agentNonces[agentId] = nonce + 1;
+
+        bytes32 digest = keccak256(abi.encodePacked(agentId, data, nonce, address(this)));
+        bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", digest));
+
+        (bytes32 r, bytes32 s, uint8 v) = _splitSignature(signature);
+        address signer = ecrecover(ethSignedHash, v, r, s);
+        require(signer != address(0), "TaskRouter: invalid signature");
+
+        AgentRegistry.Agent memory agent = registry.getAgent(agentId);
+        require(agent.owner == signer, "TaskRouter: signer mismatch");
+
+        uint256 gasBefore = gasleft();
+        (bool success, ) = address(this).call(data);
+        require(success, "TaskRouter: sponsored call failed");
+        uint256 gasUsed = gasBefore - gasleft() + 30000; // base overhead
+
+        uint256 reimbursement = gasUsed * tx.gasprice;
+        require(agent.stake >= reimbursement, "TaskRouter: insufficient stake for gas");
+
+        registry.deductStake(agentId, reimbursement);
+        (bool sent, ) = msg.sender.call{value: reimbursement}("");
+        require(sent, "TaskRouter: reimbursement transfer failed");
+
+        emit GasSponsoredExecution(agentId, msg.sender, reimbursement);
+    }
+
+    function _splitSignature(bytes calldata sig) internal pure returns (bytes32 r, bytes32 s, uint8 v) {
+        require(sig.length == 65, "TaskRouter: invalid signature length");
+        assembly {
+            r := calldataload(sig.offset)
+            s := calldataload(add(sig.offset, 32))
+            v := byte(0, calldataload(add(sig.offset, 64)))
+        }
+        if (v < 27) v += 27;
+        require(v == 27 || v == 28, "TaskRouter: invalid v value");
     }
 }
