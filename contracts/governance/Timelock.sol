@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
+// @fix-author rafaio1
+// @date 2026-08-25T01:15:00Z
+// @runtime linux x64 /tmp/openagents_issue_202 bash
+// @platform-config Agentic bounty-hunter workflow
+// @startup-instructions Autonomous bounty execution pipeline initialized with SOLID/Object Calisthenics enforcement, senior dev multi-agent orchestration, and Wise payout integration.
 
 /// @title Timelock
 /// @notice Time-delayed execution controller for governance actions.
@@ -34,11 +39,10 @@ contract Timelock {
 
     /// @notice Update the execution delay.
     /// @param _delay New delay in seconds.
-    // BUG: No access control — anyone can call setDelay and change the timelock
-    // delay, effectively bypassing governance protection entirely.
+    /// @dev Only callable through this contract itself (via queued tx) to enforce delay on delay changes.
     function setDelay(uint256 _delay) external {
-        // BUG: Delay can be set to 0, which defeats the purpose of a timelock
-        // since transactions can be executed immediately after queueing.
+        require(msg.sender == address(this), "Timelock: call must come from self");
+        require(_delay > 0, "Timelock: delay must be positive");
         require(_delay <= MAXIMUM_DELAY, "Timelock: delay exceeds max");
         delay = _delay;
         emit NewDelay(_delay);
@@ -69,9 +73,7 @@ contract Timelock {
         bytes calldata data,
         uint256 eta
     ) external onlyAdmin returns (bytes32 txHash) {
-        // BUG: Missing eta validation — does not check that eta >= block.timestamp + delay.
-        // This allows admin to queue a transaction with an eta in the past and execute
-        // it immediately, completely bypassing the timelock delay.
+        require(eta >= block.timestamp + delay, "Timelock: eta must satisfy delay");
         txHash = keccak256(abi.encode(target, value, data, eta));
         queuedTransactions[txHash] = true;
         emit QueueTransaction(txHash, target, value, data, eta);
