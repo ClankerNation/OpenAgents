@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+// @fix-author rafaio1
+// @date 2026-08-25T00:00:00Z
+// @runtime linux x64 /tmp/openagents_issue_193 bash
+// @platform-config Autonomous bounty execution pipeline initialized with SOLID/Object Calisthenics enforcement
+
 /// @title InterestRateModel
 /// @notice Variable interest rate model based on pool utilization
 /// @dev Rate increases with utilization, with a kink at the optimal point
 contract InterestRateModel {
-    // BUG: No bounds on base rate — admin can set baseRate to any value including
-    // extremely high values that make borrowing effectively impossible, or zero
-    // which means lenders earn nothing at low utilization
     uint256 public baseRate;
     uint256 public multiplier;
     uint256 public jumpMultiplier;
@@ -15,6 +17,8 @@ contract InterestRateModel {
 
     uint256 public constant PRECISION = 1e18;
     uint256 public constant BLOCKS_PER_YEAR = 2_628_000; // ~12s blocks
+    uint256 public constant MAX_BASE_RATE = 0.2e18; // 20% max base rate per block-year equivalent
+    uint256 public constant MIN_KINK = 0.1e18; // 10% minimum kink to prevent division by zero
 
     address public admin;
 
@@ -31,11 +35,16 @@ contract InterestRateModel {
         uint256 _jumpMultiplier,
         uint256 _kink
     ) {
+        require(_baseRate <= MAX_BASE_RATE, "IRM: base rate too high");
+        require(_kink >= MIN_KINK && _kink < PRECISION, "IRM: invalid kink");
+        
         admin = msg.sender;
         baseRate = _baseRate;
         multiplier = _multiplier;
         jumpMultiplier = _jumpMultiplier;
         kink = _kink;
+        
+        emit RateParamsUpdated(_baseRate, _multiplier, _jumpMultiplier, _kink);
     }
 
     function updateParams(
@@ -44,24 +53,26 @@ contract InterestRateModel {
         uint256 _jumpMultiplier,
         uint256 _kink
     ) external onlyAdmin {
+        require(_baseRate <= MAX_BASE_RATE, "IRM: base rate too high");
+        require(_kink >= MIN_KINK && _kink < PRECISION, "IRM: invalid kink");
+        
         baseRate = _baseRate;
         multiplier = _multiplier;
         jumpMultiplier = _jumpMultiplier;
         kink = _kink;
+        
         emit RateParamsUpdated(_baseRate, _multiplier, _jumpMultiplier, _kink);
     }
 
     function getUtilization(uint256 totalBorrowed, uint256 totalDeposits) public pure returns (uint256) {
         if (totalDeposits == 0) return 0;
-        return (totalBorrowed * PRECISION) / totalDeposits;
+        uint256 util = (totalBorrowed * PRECISION) / totalDeposits;
+        // Cap utilization at 100% to handle direct token transfers
+        return util > PRECISION ? PRECISION : util;
     }
 
-    // BUG: Division by zero when utilization is 100% — if totalBorrowed == totalDeposits,
-    // utilization equals PRECISION which equals kink edge case, and when utilization > kink,
-    // the formula (PRECISION - kink) can be zero if kink == PRECISION, causing revert
-    // BUG: Rate overflow for extreme utilization — when utilization greatly exceeds kink
-    // (e.g., through direct token transfers), excessUtilization * jumpMultiplier can overflow
-    // intermediate calculations and produce nonsensical rates
+    /// @notice Calculate borrow rate based on utilization
+    /// @dev Handles edge cases for kink boundary and prevents overflow
     function getBorrowRate(uint256 totalBorrowed, uint256 totalDeposits) external view returns (uint256) {
         uint256 utilization = getUtilization(totalBorrowed, totalDeposits);
 
@@ -71,7 +82,10 @@ contract InterestRateModel {
 
         uint256 normalRate = baseRate + (kink * multiplier) / PRECISION;
         uint256 excessUtilization = utilization - kink;
-        uint256 jumpRate = (excessUtilization * jumpMultiplier) / (PRECISION - kink);
+        uint256 denominator = PRECISION - kink;
+        
+        // Safety check: denominator should never be zero due to kink < PRECISION constraint
+        uint256 jumpRate = (excessUtilization * jumpMultiplier) / denominator;
 
         return normalRate + jumpRate;
     }
