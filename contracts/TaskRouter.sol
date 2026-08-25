@@ -1,3 +1,7 @@
+// @fix-author rafaio1
+// @date 2026-08-25T06:40:00Z
+// @runtime linux x64 /tmp/openagents_issue_190 bash
+// @platform-config Autonomous bounty execution pipeline initialized with SOLID/Object Calisthenics enforcement for gas sponsorship relay (Issue #190)
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -22,10 +26,14 @@ contract TaskRouter {
     uint256 public taskCount;
     uint256 public platformFee; // basis points
 
+    /// @notice Tracks nonces per agent for replay protection in sponsored transactions.
+    mapping(address => uint256) public agentNonces;
+
     event TaskCreated(uint256 indexed taskId, address indexed creator, uint256 reward);
     event TaskAssigned(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskCompleted(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskDisputed(uint256 indexed taskId);
+    event SponsoredExecution(address indexed agent, address indexed relayer, uint256 nonce, uint256 gasReimbursement);
 
     constructor(address _registry, uint256 _platformFee) {
         registry = AgentRegistry(_registry);
@@ -85,6 +93,61 @@ contract TaskRouter {
         emit TaskCompleted(taskId, task.assignedAgent);
     }
 
+    /// @notice Execute a transaction on behalf of an agent using meta-transaction pattern.
+    /// @param agent The agent address that signed the calldata.
+    /// @param data The encoded function call to execute.
+    /// @param signature ECDSA signature from the agent over keccak256(abi.encodePacked(nonce, data)).
+    /// @dev Relayer pays gas and is reimbursed from the contract balance (representing agent stake).
+    ///      Nonce prevents replay attacks. Signature must recover to agent address.
+    function executeOnBehalf(
+        address agent,
+        bytes calldata data,
+        bytes calldata signature
+    ) external {
+        uint256 currentNonce = agentNonces[agent];
+        
+        // Replay protection: verify nonce matches expected value
+        bytes32 digest = keccak256(abi.encodePacked(currentNonce, data));
+        bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", digest));
+        
+        // Recover signer from signature
+        require(signature.length == 65, "Invalid signature length");
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        assembly {
+            r := calldataload(add(signature.offset, 0))
+            s := calldataload(add(signature.offset, 32))
+            v := byte(0, calldataload(add(signature.offset, 64)))
+        }
+        if (v < 27) v += 27;
+        require(v == 27 || v == 28, "Invalid signature v value");
+        
+        address recovered = ecrecover(ethSignedHash, v, r, s);
+        require(recovered == agent, "Invalid signature");
+        
+        // Increment nonce before execution to prevent reentrancy-based replay
+        agentNonces[agent] = currentNonce + 1;
+        
+        // Measure gas for reimbursement
+        uint256 gasStart = gasleft();
+        
+        // Execute the delegated call
+        (bool success, ) = address(this).call(data);
+        require(success, "Sponsored execution failed");
+        
+        // Calculate gas reimbursement (gas used * tx.gasprice)
+        uint256 gasUsed = gasStart - gasleft();
+        uint256 reimbursement = gasUsed * tx.gasprice;
+        
+        // Reimburse relayer from contract balance (agent's staked funds)
+        require(address(this).balance >= reimbursement, "Insufficient stake for gas reimbursement");
+        (bool paid, ) = msg.sender.call{value: reimbursement}("");
+        require(paid, "Gas reimbursement failed");
+        
+        emit SponsoredExecution(agent, msg.sender, currentNonce, reimbursement);
+    }
+
     function cancelTask(uint256 taskId) external {
         Task storage task = tasks[taskId];
         require(task.creator == msg.sender, "Not creator");
@@ -104,4 +167,7 @@ contract TaskRouter {
         task.status = TaskStatus.Disputed;
         emit TaskDisputed(taskId);
     }
+
+    /// @notice Allow agents or stakeholders to deposit ETH for gas sponsorship.
+    receive() external payable {}
 }
