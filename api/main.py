@@ -1,13 +1,24 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+# @fix-author rafaio1
+# @date 2026-08-25T00:00:00Z
+# @runtime linux x64 /tmp/openagents_issue_192 bash
+# @platform-config Autonomous bounty execution pipeline initialized with SOLID/Object Calisthenics enforcement
+
+from .middleware.audit import AdminAuditMiddleware
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+# Register audit middleware for admin action logging
+app.add_middleware(AdminAuditMiddleware)
 
 
 class AgentResponse(BaseModel):
