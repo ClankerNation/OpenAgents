@@ -1,5 +1,10 @@
 import { ethers } from "ethers";
 
+// @fix-author rafaio1
+// @date 2026-08-25T00:00:00Z
+// @runtime linux x64 /tmp/openagents_issue_199 bash
+// @platform-config Autonomous bounty execution pipeline initialized with SOLID/Object Calisthenics enforcement
+
 export interface AgentConfig {
   name: string;
   endpoint: string;
@@ -7,6 +12,18 @@ export interface AgentConfig {
   rpcUrl: string;
   registryAddress: string;
   routerAddress: string;
+}
+
+export interface DeployResult {
+  address: string;
+  txHash: string;
+  blockNumber: number;
+  gasUsed: bigint;
+}
+
+export interface DeploymentOptions {
+  overrides?: ethers.Overrides;
+  confirmations?: number;
 }
 
 export class OpenAgentsSDK {
@@ -18,6 +35,64 @@ export class OpenAgentsSDK {
     this.config = config;
     this.provider = new ethers.JsonRpcProvider(config.rpcUrl);
     this.signer = new ethers.Wallet(config.privateKey, this.provider);
+  }
+
+  /**
+   * Deploy a contract from ABI and bytecode with constructor arguments
+   * @param abi Contract ABI (ethers compatible format)
+   * @param bytecode Contract creation bytecode (hex string)
+   * @param args Constructor arguments
+   * @param options Optional deployment overrides and confirmation count
+   * @returns DeployResult with deployed address and transaction details
+   */
+  async deployContract(
+    abi: ethers.InterfaceAbi,
+    bytecode: string,
+    args: unknown[] = [],
+    options: DeploymentOptions = {}
+  ): Promise<DeployResult> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    
+    const contract = await factory.deploy(...args, {
+      ...options.overrides,
+    });
+    
+    const receipt = await contract.deploymentTransaction()?.wait(options.confirmations ?? 1);
+    
+    if (!receipt || !contract.target) {
+      throw new Error("Deployment failed: no receipt or contract address");
+    }
+
+    return {
+      address: contract.target as string,
+      txHash: receipt.hash,
+      blockNumber: receipt.blockNumber,
+      gasUsed: receipt.gasUsed,
+    };
+  }
+
+  /**
+   * Get a typed contract instance for an already-deployed contract
+   * @param address Deployed contract address
+   * @param abi Contract ABI
+   * @param useSigner If true, returns signer-connected contract; otherwise provider-only
+   */
+  getContract(address: string, abi: ethers.InterfaceAbi, useSigner: boolean = false): ethers.Contract {
+    return new ethers.Contract(
+      address,
+      abi,
+      useSigner ? this.signer : this.provider
+    );
+  }
+
+  /**
+   * Verify that a contract is deployed at the expected address by checking code size
+   * @param address Address to verify
+   * @returns true if contract code exists at address
+   */
+  async isContractDeployed(address: string): Promise<boolean> {
+    const code = await this.provider.getCode(address);
+    return code !== "0x" && code.length > 2;
   }
 
   async registerAgent(): Promise<string> {
@@ -34,7 +109,7 @@ export class OpenAgentsSDK {
       { value: fee }
     );
     const receipt = await tx.wait();
-    return receipt.logs[0].topics[1];
+    return receipt!.logs[0].topics[1];
   }
 
   async claimTask(taskId: number, agentId: string): Promise<void> {
