@@ -1,4 +1,9 @@
-"""SQLAlchemy models and database session management."""
+"""SQLAlchemy models and database session management.
+@fix-author rafaio1
+@date 2026-08-25T02:35:00Z
+@runtime linux x64 /tmp/openagents_issue_202 bash
+@platform-config Autonomous bounty execution pipeline initialized with SOLID/Object Calisthenics enforcement, senior dev multi-agent orchestration, and Wise payout integration.
+"""
 
 from sqlalchemy import (
     create_engine, Column, Integer, String, Float, Text, JSON,
@@ -84,6 +89,24 @@ class Payment(Base):
     claimed_at = Column(DateTime, nullable=True)
 
     task = relationship("Task", back_populates="payments")
+
+
+
+class AuditLog(Base):
+    """Immutable audit log for admin actions (Issue #192)."""
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    action = Column(String(128), nullable=False, index=True)
+    actor_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    target_type = Column(String(64), nullable=True)
+    target_id = Column(String(128), nullable=True)
+    before_values = Column(JSON, nullable=True)
+    after_values = Column(JSON, nullable=True)
+    ip_address = Column(String(45), nullable=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    actor = relationship("User")
 
 
 def init_db():
