@@ -1,13 +1,49 @@
-from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel
+# @fix-author rafaio1
+# @date 2026-08-25T05:30:00Z
+# @runtime linux x64 /tmp/openagents_issue_202 bash
+# @platform-config Autonomous bounty execution pipeline initialized with SOLID/Object Calisthenics enforcement for structured error responses (Issue #202)
+"""OpenAgents API entry point with structured error handling and request ID correlation.
+
+Closes #202
+"""
+
+import uuid
+from datetime import datetime, timezone
 from typing import Optional
-from datetime import datetime
+
+from fastapi import FastAPI, HTTPException, Query, Request
+from pydantic import BaseModel, ValidationError
+
+from .errors import (
+    ApiError,
+    ErrorCode,
+    NotFoundError,
+    api_error_handler,
+    build_error_response,
+    http_exception_handler,
+    validation_error_handler,
+)
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+# Register structured error handlers
+app.add_exception_handler(ApiError, api_error_handler)
+app.add_exception_handler(ValidationError, validation_error_handler)
+app.add_exception_handler(Exception, http_exception_handler)
+
+
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    """Inject a unique request ID into every request/response cycle."""
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    request.state.request_id = request_id
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 
 class AgentResponse(BaseModel):
@@ -61,7 +97,7 @@ async def list_agents(
 @app.get("/agents/{agent_id}", response_model=AgentResponse)
 async def get_agent(agent_id: str):
     if agent_id not in agents_cache:
-        raise HTTPException(status_code=404, detail="Agent not found")
+        raise NotFoundError(resource="Agent", identifier=agent_id)
     return agents_cache[agent_id]
 
 
@@ -80,7 +116,7 @@ async def list_tasks(
 @app.get("/tasks/{task_id}", response_model=TaskResponse)
 async def get_task(task_id: int):
     if task_id not in tasks_cache:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise NotFoundError(resource="Task", identifier=task_id)
     return tasks_cache[task_id]
 
 
@@ -108,5 +144,5 @@ async def health():
         "status": "ok",
         "agents_indexed": len(agents_cache),
         "tasks_indexed": len(tasks_cache),
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
