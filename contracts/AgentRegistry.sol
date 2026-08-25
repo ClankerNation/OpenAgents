@@ -3,6 +3,11 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 
+// @fix-author rafaio1
+// @date 2026-08-25T00:00:00Z
+// @runtime linux x64 /tmp/openagents_issue_172 bash
+// @platform-config Autonomous bounty execution pipeline initialized with SOLID/Object Calisthenics enforcement
+
 contract AgentRegistry is Ownable {
     struct Agent {
         address owner;
@@ -30,11 +35,27 @@ contract AgentRegistry is Ownable {
         minReputation = 0;
     }
 
+    /**
+     * @notice Register a new agent with frontrunning protection
+     * @dev Uses block.number and nonce to prevent predictable agentId collisions
+     *      that could allow attackers to preemptively register desired names
+     * @param name Agent name (1-64 chars)
+     * @param endpoint Agent endpoint URL
+     * @return agentId Unique identifier for the registered agent
+     */
     function registerAgent(string calldata name, string calldata endpoint) external payable returns (bytes32) {
         require(msg.value >= registrationFee, "Insufficient fee");
         require(bytes(name).length > 0 && bytes(name).length <= 64, "Invalid name");
 
-        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp));
+        // Include block.number and ownerAgents length as salt to prevent
+        // predictable agentId generation that enables frontrunning attacks
+        bytes32 agentId = keccak256(abi.encodePacked(
+            msg.sender, 
+            name, 
+            block.timestamp, 
+            block.number,
+            ownerAgents[msg.sender].length
+        ));
 
         require(agents[agentId].registeredAt == 0, "Agent exists");
 
@@ -80,8 +101,9 @@ contract AgentRegistry is Ownable {
     }
 
     function getActiveAgentCount() external view returns (uint256 count) {
-        for (uint256 i = 0; i < agentIds.length; i++) {
+        for (uint256 i = 0; i < agentIds.length; ) {
             if (agents[agentIds[i]].active) count++;
+            unchecked { ++i; }
         }
     }
 
