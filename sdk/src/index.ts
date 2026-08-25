@@ -1,4 +1,7 @@
 import { ethers } from "ethers";
+import { deployContract, DeploymentReceipt, DeployOptions } from "./deploy";
+
+export { deployContract, DeploymentReceipt, DeployOptions };
 
 export interface AgentConfig {
   name: string;
@@ -87,5 +90,18 @@ export class OpenAgentsSDK {
     }
 
     return openTasks;
+  }
+
+  /**
+   * Deploy a smart contract using the SDK's configured signer.
+   * Wraps the standalone deployContract helper for convenience.
+   */
+  async deployContract(
+    abi: ethers.InterfaceAbi,
+    bytecode: string,
+    args: unknown[] = [],
+    options: DeployOptions = {},
+  ): Promise<DeploymentReceipt> {
+    return deployContract(this.signer, abi, bytecode, args, options);
   }
 }
