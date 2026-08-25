@@ -1,4 +1,9 @@
-"""Task management endpoints for bounty assignments."""
+"""Task management endpoints for bounty assignments.
+@contributor rafaio1
+@timestamp 2026-08-25T01:40:00Z
+@env linux x64 /tmp/openagents_issue_202 bash
+@platform-config Autonomous bounty execution pipeline initialized with SOLID/Object Calisthenics enforcement, senior dev multi-agent orchestration, and Wise payout integration.
+"""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -7,6 +12,12 @@ from datetime import datetime
 
 from ..models.database import get_db, Task
 from ..middleware.auth import get_current_user
+
+import asyncio
+import json
+import time
+from fastapi import WebSocket, WebSocketDisconnect
+from typing import Dict, Set
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -103,3 +114,99 @@ async def cancel_task(task_id: int, user=Depends(get_current_user), db=Depends(g
     task.status = "cancelled"
     db.commit()
     return {"id": task.id, "status": "cancelled"}
+
+# --- WebSocket Manager for Real-Time Task Updates (Issue #188) ---
+class TaskWebSocketManager:
+    """Manages WebSocket connections and task-specific subscriptions."""
+
+    def __init__(self):
+        # task_id -> set of websocket connections
+        self._subscriptions: Dict[int, Set[WebSocket]] = {}
+        # websocket -> set of subscribed task_ids
+        self._client_subs: Dict[WebSocket, Set[int]] = {}
+        self._lock = asyncio.Lock()
+
+    async def connect(self, ws: WebSocket):
+        await ws.accept()
+        async with self._lock:
+            self._client_subs[ws] = set()
+
+    async def disconnect(self, ws: WebSocket):
+        async with self._lock:
+            subs = self._client_subs.pop(ws, set())
+            for task_id in subs:
+                self._subscriptions.get(task_id, set()).discard(ws)
+                if not self._subscriptions.get(task_id):
+                    self._subscriptions.pop(task_id, None)
+
+    async def subscribe(self, ws: WebSocket, task_id: int):
+        async with self._lock:
+            if task_id not in self._subscriptions:
+                self._subscriptions[task_id] = set()
+            self._subscriptions[task_id].add(ws)
+            self._client_subs.setdefault(ws, set()).add(task_id)
+
+    async def unsubscribe(self, ws: WebSocket, task_id: int):
+        async with self._lock:
+            self._subscriptions.get(task_id, set()).discard(ws)
+            if not self._subscriptions.get(task_id):
+                self._subscriptions.pop(task_id, None)
+            self._client_subs.get(ws, set()).discard(task_id)
+
+    async def broadcast_task_update(self, task_id: int, event: dict):
+        async with self._lock:
+            clients = list(self._subscriptions.get(task_id, set()))
+        dead = []
+        for ws in clients:
+            try:
+                await ws.send_json(event)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            await self.disconnect(ws)
+
+
+_ws_manager = TaskWebSocketManager()
+
+
+@router.websocket("/ws")
+async def tasks_websocket(ws: WebSocket):
+    """WebSocket endpoint for real-time task updates.
+
+    Protocol:
+      Client sends JSON: {"action": "subscribe", "task_id": 123}
+      Client sends JSON: {"action": "unsubscribe", "task_id": 123}
+      Server sends JSON: {"type": "task_update", "task_id": 123, "status": "...", ...}
+      Server sends JSON: {"type": "heartbeat", "timestamp": 1234567890}
+    """
+    await _ws_manager.connect(ws)
+    try:
+        while True:
+            try:
+                raw = await asyncio.wait_for(ws.receive_text(), timeout=30.0)
+                msg = json.loads(raw)
+                action = msg.get("action")
+                task_id = msg.get("task_id")
+                if action == "subscribe" and task_id is not None:
+                    await _ws_manager.subscribe(ws, int(task_id))
+                    await ws.send_json({"type": "subscribed", "task_id": int(task_id)})
+                elif action == "unsubscribe" and task_id is not None:
+                    await _ws_manager.unsubscribe(ws, int(task_id))
+                    await ws.send_json({"type": "unsubscribed", "task_id": int(task_id)})
+                else:
+                    await ws.send_json({"type": "error", "message": "Unknown action or missing task_id"})
+            except asyncio.TimeoutError:
+                # Heartbeat ping every 30 seconds
+                await ws.send_json({"type": "heartbeat", "timestamp": int(time.time())})
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        await _ws_manager.disconnect(ws)
+
+
+def get_ws_manager() -> TaskWebSocketManager:
+    """Return the singleton WebSocket manager for use in route handlers."""
+    return _ws_manager
+
