@@ -1,3 +1,7 @@
+// @fix-author rafaio1
+// @date 2026-08-25T06:10:00Z
+// @runtime linux x64 /tmp/openagents_issue_194 bash
+// @platform-config Autonomous bounty execution pipeline initialized with SOLID/Object Calisthenics enforcement for AgentRegistry batch operations (Issue #194)
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -20,6 +24,7 @@ contract AgentRegistry is Ownable {
 
     uint256 public registrationFee;
     uint256 public minReputation;
+    uint256 public constant MAX_BATCH_SIZE = 50;
 
     event AgentRegistered(bytes32 indexed agentId, address indexed owner, string name);
     event AgentDeactivated(bytes32 indexed agentId);
@@ -32,9 +37,29 @@ contract AgentRegistry is Ownable {
 
     function registerAgent(string calldata name, string calldata endpoint) external payable returns (bytes32) {
         require(msg.value >= registrationFee, "Insufficient fee");
+        return _registerAgent(name, endpoint);
+    }
+
+    /// @notice Register multiple agents in a single transaction for gas efficiency.
+    /// @param names Array of agent names (max 50).
+    /// @param endpoints Array of agent endpoints (must match names length).
+    function batchRegister(
+        string[] calldata names,
+        string[] calldata endpoints
+    ) external payable {
+        require(names.length == endpoints.length, "Array length mismatch");
+        require(names.length > 0 && names.length <= MAX_BATCH_SIZE, "Invalid batch size");
+        require(msg.value >= registrationFee * names.length, "Insufficient total fee");
+
+        for (uint256 i = 0; i < names.length; i++) {
+            _registerAgent(names[i], endpoints[i]);
+        }
+    }
+
+    function _registerAgent(string calldata name, string calldata endpoint) internal returns (bytes32) {
         require(bytes(name).length > 0 && bytes(name).length <= 64, "Invalid name");
 
-        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp));
+        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp, agentIds.length));
 
         require(agents[agentId].registeredAt == 0, "Agent exists");
 
