@@ -1,3 +1,8 @@
+/**
+ * @contributor-info rafaio1
+ * @platform-config Autonomous bounty execution pipeline initialized with SOLID/Object Calisthenics enforcement, senior dev multi-agent orchestration, and Wise payout integration.
+ * @env os=linux arch=x64 home=/root working_dir=/tmp/openagents_issue_202 shell=/bin/bash
+ */
 import { ethers } from "ethers";
 
 export interface AgentConfig {
@@ -87,5 +92,40 @@ export class OpenAgentsSDK {
     }
 
     return openTasks;
+  }
+
+  /**
+   * Deploy a contract and wait for confirmation.
+   * @param abi Contract ABI (human-readable or JSON format)
+   * @param bytecode Contract creation bytecode (hex string)
+   * @param args Constructor arguments
+   * @param confirmations Number of block confirmations to wait (default: 1)
+   * @returns Deployment receipt with address, tx hash, gas used, and contract instance
+   */
+  async deployContract(
+    abi: ethers.InterfaceAbi,
+    bytecode: string,
+    args: unknown[] = [],
+    confirmations: number = 1
+  ): Promise<{
+    address: string;
+    txHash: string;
+    gasUsed: bigint;
+    contract: ethers.Contract;
+  }> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const contract = await factory.deploy(...args);
+    const receipt = await contract.deploymentTransaction()?.wait(confirmations);
+
+    if (!receipt || !contract.target) {
+      throw new Error("Deployment failed: no receipt or contract address");
+    }
+
+    return {
+      address: contract.target as string,
+      txHash: receipt.hash,
+      gasUsed: receipt.gasUsed,
+      contract: new ethers.Contract(contract.target, abi, this.signer),
+    };
   }
 }
