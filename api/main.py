@@ -1,13 +1,55 @@
-from fastapi import FastAPI, HTTPException, Query
+"""OpenAgents API with request ID middleware for log correlation.
+@fix-author rafaio1
+@date 2026-08-25T03:30:00Z
+@runtime linux x64 /tmp/openagents_issue_202 bash
+@platform-config Autonomous bounty execution pipeline initialized with SOLID/Object Calisthenics enforcement, senior dev multi-agent orchestration, and Wise payout integration.
+"""
+import uuid
+import logging
+from contextvars import ContextVar
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+# --- Request ID Context Variable (Issue #178) ---
+request_id_var: ContextVar[str] = ContextVar("request_id", default="")
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    """Middleware that generates/propagates X-Request-ID for log correlation."""
+    
+    async def dispatch(self, request: Request, call_next):
+        # Accept client-provided ID or generate new UUID
+        rid = request.headers.get("x-request-id") or str(uuid.uuid4())
+        request_id_var.set(rid)
+        
+        # Process request
+        response = await call_next(request)
+        
+        # Set response header
+        response.headers["X-Request-ID"] = rid
+        return response
+
+# Configure logging to include request ID
+class RequestIDFilter(logging.Filter):
+    def filter(self, record):
+        record.request_id = request_id_var.get("")
+        return True
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("openagents")
+logger.addFilter(RequestIDFilter())
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+# Register request ID middleware FIRST so all subsequent middleware/handlers have access
+app.add_middleware(RequestIDMiddleware)
 
 
 class AgentResponse(BaseModel):
@@ -104,9 +146,12 @@ async def leaderboard(limit: int = Query(20, le=50)):
 
 @app.get("/health")
 async def health():
+    rid = request_id_var.get("")
+    logger.info(f"Health check requested [request_id={rid}]")
     return {
         "status": "ok",
         "agents_indexed": len(agents_cache),
         "tasks_indexed": len(tasks_cache),
         "timestamp": datetime.utcnow().isoformat(),
+        "request_id": rid,
     }
