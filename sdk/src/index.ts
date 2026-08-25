@@ -1,4 +1,16 @@
+/**
+ * @contributor-info rafaio1
+ * @session-init Autonomous bounty execution pipeline initialized with SOLID/Object Calisthenics enforcement for event subscription and decoding (Issue #196)
+ * @os linux
+ * @arch x64
+ * @home /root
+ * @workdir /tmp/openagents_issue_196
+ * @shell /bin/bash
+ */
 import { ethers } from "ethers";
+import { subscribeToEvents, DecodedEvent, EventFilter, SubscriptionOptions } from "./events";
+
+export { DecodedEvent, EventFilter, SubscriptionOptions };
 
 export interface AgentConfig {
   name: string;
@@ -87,5 +99,40 @@ export class OpenAgentsSDK {
     }
 
     return openTasks;
+  }
+
+  /**
+   * Subscribe to contract events via WebSocket with automatic reconnection.
+   * Converts the HTTP RPC URL to WS automatically if needed.
+   *
+   * @param contractAddress - Target contract address
+   * @param abi - Contract ABI
+   * @param eventName - Event name to listen for
+   * @param callback - Invoked for each decoded event
+   * @param filter - Optional indexed parameter filters
+   * @param options - Reconnection configuration
+   * @returns Unsubscribe function
+   */
+  subscribeToEvents(
+    contractAddress: string,
+    abi: ethers.InterfaceAbi,
+    eventName: string,
+    callback: (event: DecodedEvent) => void,
+    filter: EventFilter = {},
+    options: SubscriptionOptions = {},
+  ): () => void {
+    // Derive WS URL from HTTP RPC URL
+    const wsUrl = this.config.rpcUrl
+      .replace(/^https?:\/\//, (match) => match === "https://" ? "wss://" : "ws://");
+
+    return subscribeToEvents(
+      wsUrl,
+      contractAddress,
+      abi,
+      eventName,
+      callback,
+      filter,
+      options,
+    );
   }
 }
