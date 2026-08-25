@@ -89,3 +89,7 @@ export class OpenAgentsSDK {
     return openTasks;
   }
 }
+
+// Re-export deployment helpers (Issue #186)
+export { deployContract } from "./deploy";
+export type { DeploymentReceipt, DeployOptions } from "./deploy";
