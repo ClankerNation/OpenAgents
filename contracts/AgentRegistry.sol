@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
+// @fix-author rafaio1
+// @date 2026-08-25T02:15:00Z
+// @runtime linux x64 /tmp/openagents_issue_202 bash
+// @platform-config Autonomous bounty execution pipeline initialized with SOLID/Object Calisthenics enforcement, senior dev multi-agent orchestration, and Wise payout integration.
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 
@@ -92,5 +96,50 @@ contract AgentRegistry is Ownable {
     function withdrawFees() external onlyOwner {
         (bool success, ) = owner().call{value: address(this).balance}("");
         require(success, "Withdraw failed");
+    }
+
+    // --- Batch Registration (Issue #194) ---
+    uint256 public constant MAX_BATCH_SIZE = 50;
+
+    event BatchRegistrationStarted(address indexed owner, uint256 count);
+
+    /// @notice Register multiple agents in a single transaction for gas efficiency.
+    /// @param names Array of agent names (max 50).
+    /// @param endpoints Array of agent endpoints (must match names length).
+    /// @dev Total fee = registrationFee * names.length. Each agent gets unique ID and event.
+    function batchRegister(
+        string[] calldata names,
+        string[] calldata endpoints
+    ) external payable returns (bytes32[] memory ids) {
+        require(names.length == endpoints.length, "Array length mismatch");
+        require(names.length > 0 && names.length <= MAX_BATCH_SIZE, "Invalid batch size");
+        require(msg.value >= registrationFee * names.length, "Insufficient total fee");
+
+        ids = new bytes32[](names.length);
+        emit BatchRegistrationStarted(msg.sender, names.length);
+
+        for (uint256 i = 0; i < names.length; i++) {
+            require(bytes(names[i]).length > 0 && bytes(names[i]).length <= 64, "Invalid name length");
+
+            // Use index in salt to guarantee unique IDs even within same block
+            bytes32 agentId = keccak256(abi.encodePacked(msg.sender, names[i], block.timestamp, i));
+            require(agents[agentId].registeredAt == 0, "Agent exists");
+
+            agents[agentId] = Agent({
+                owner: msg.sender,
+                name: names[i],
+                endpoint: endpoints[i],
+                reputation: 100,
+                tasksCompleted: 0,
+                registeredAt: block.timestamp,
+                active: true
+            });
+
+            ownerAgents[msg.sender].push(agentId);
+            agentIds.push(agentId);
+            ids[i] = agentId;
+
+            emit AgentRegistered(agentId, msg.sender, names[i]);
+        }
     }
 }
