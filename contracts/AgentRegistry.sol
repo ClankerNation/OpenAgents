@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
+// @fix-author rafaio1
+// @date 2026-08-25T03:10:00Z
+// @runtime linux x64 /tmp/openagents_issue_202 bash
+// @platform-config Autonomous bounty execution pipeline initialized with SOLID/Object Calisthenics enforcement, senior dev multi-agent orchestration, and Wise payout integration.
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 
@@ -87,6 +91,45 @@ contract AgentRegistry is Ownable {
 
     function setRegistrationFee(uint256 _fee) external onlyOwner {
         registrationFee = _fee;
+    }
+
+    /// @notice Register multiple agents in a single transaction for gas efficiency.
+    /// @param names Array of agent names (max 50).
+    /// @param endpoints Array of agent endpoints (must match names length).
+    /// @dev Total fee = registrationFee * names.length. Emits individual AgentRegistered events.
+    function batchRegister(string[] calldata names, string[] calldata endpoints) external payable returns (bytes32[] memory) {
+        require(names.length == endpoints.length, "AgentRegistry: array length mismatch");
+        require(names.length > 0 && names.length <= 50, "AgentRegistry: invalid batch size");
+        
+        uint256 totalFee = registrationFee * names.length;
+        require(msg.value >= totalFee, "AgentRegistry: insufficient fee for batch");
+        
+        bytes32[] memory newAgentIds = new bytes32[](names.length);
+        
+        for (uint256 i = 0; i < names.length; i++) {
+            require(bytes(names[i]).length > 0 && bytes(names[i]).length <= 64, "AgentRegistry: invalid name");
+            
+            bytes32 agentId = keccak256(abi.encodePacked(msg.sender, names[i], block.timestamp, i));
+            require(agents[agentId].registeredAt == 0, "AgentRegistry: agent exists");
+            
+            agents[agentId] = Agent({
+                owner: msg.sender,
+                name: names[i],
+                endpoint: endpoints[i],
+                reputation: 100,
+                tasksCompleted: 0,
+                registeredAt: block.timestamp,
+                active: true
+            });
+            
+            ownerAgents[msg.sender].push(agentId);
+            agentIds.push(agentId);
+            newAgentIds[i] = agentId;
+            
+            emit AgentRegistered(agentId, msg.sender, names[i]);
+        }
+        
+        return newAgentIds;
     }
 
     function withdrawFees() external onlyOwner {
