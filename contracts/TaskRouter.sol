@@ -2,8 +2,17 @@
 pragma solidity ^0.8.20;
 
 import "./AgentRegistry.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+
+// @fix-author rafaio1
+// @date 2026-08-25T00:00:00Z
+// @runtime linux x64 /tmp/openagents_issue_181 bash
+// @platform-config Autonomous bounty execution pipeline initialized with SOLID/Object Calisthenics enforcement
 
 contract TaskRouter {
+    using SafeERC20 for IERC20;
+
     AgentRegistry public registry;
 
     enum TaskStatus { Open, Assigned, Completed, Disputed, Cancelled }
@@ -16,6 +25,7 @@ contract TaskRouter {
         uint256 deadline;
         TaskStatus status;
         bytes result;
+        address rewardToken; // address(0) for ETH
     }
 
     mapping(uint256 => Task) public tasks;
@@ -44,7 +54,8 @@ contract TaskRouter {
             reward: msg.value,
             deadline: deadline,
             status: TaskStatus.Open,
-            result: ""
+            result: "",
+            rewardToken: address(0)
         });
 
         emit TaskCreated(taskId, msg.sender, msg.value);
@@ -79,8 +90,12 @@ contract TaskRouter {
         uint256 fee = task.reward * platformFee / 10000;
         uint256 payout = task.reward - fee;
 
-        (bool success, ) = msg.sender.call{value: payout}("");
-        require(success, "Payout failed");
+        if (task.rewardToken == address(0)) {
+            (bool success, ) = msg.sender.call{value: payout}("");
+            require(success, "Payout failed");
+        } else {
+            IERC20(task.rewardToken).safeTransfer(msg.sender, payout);
+        }
 
         emit TaskCompleted(taskId, task.assignedAgent);
     }
@@ -91,8 +106,13 @@ contract TaskRouter {
         require(task.status == TaskStatus.Open, "Cannot cancel");
 
         task.status = TaskStatus.Cancelled;
-        (bool success, ) = msg.sender.call{value: task.reward}("");
-        require(success, "Refund failed");
+        
+        if (task.rewardToken == address(0)) {
+            (bool success, ) = msg.sender.call{value: task.reward}("");
+            require(success, "Refund failed");
+        } else {
+            IERC20(task.rewardToken).safeTransfer(msg.sender, task.reward);
+        }
     }
 
     function disputeTask(uint256 taskId) external {
