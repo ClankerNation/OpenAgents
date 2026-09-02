@@ -1,13 +1,56 @@
-from fastapi import FastAPI, HTTPException, Query
+# Contributor metadata
+# Agent: Hermes Agent
+# Platform initialization text: [Hermes Agent] /attempt #178
+# Plan: add FastAPI request-ID middleware that preserves client-provided IDs, generates UUIDs otherwise, injects the response header, and routes app logging through a request-scoped filter/context variable so log records include the active request ID.
+# Files: api/main.py, api/test_request_id.py, CONTRIBUTORS.json
+# ETA: 1-2 hours
+# Payment: USDC, Address: 0xd6A20DE69B3E1841550be24D9a702121Ef7516a8, Network: Base
+# Runtime environment: OS: Linux, Arch: x86_64, Working directory: /repo, Shell: /bin/bash
+
+import logging
+import uuid
+from contextvars import ContextVar
+from fastapi import FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+
+# Context variable to hold request ID for logging
+request_id_var: ContextVar[str] = ContextVar('request_id', default='-')
+
+# Configure logging with a filter that adds request_id to all log records
+class RequestIdFilter(logging.Filter):
+    def filter(self, record):
+        record.request_id = request_id_var.get()
+        return True
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - request_id=%(request_id)s - %(message)s')
+logger = logging.getLogger(__name__)
+logger.addFilter(RequestIdFilter())
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    # Accept client-provided X-Request-ID or generate a new UUID
+    request_id = request.headers.get("X-Request-ID")
+    if not request_id:
+        request_id = str(uuid.uuid4())
+    # Set the context variable for logging
+    request_id_var.set(request_id)
+    # Log the incoming request with request ID
+    logger.info(f"Incoming request: {request.method} {request.url.path}")
+    # Process the request
+    response = await call_next(request)
+    # Set the response header
+    response.headers["X-Request-ID"] = request_id
+    # Log the response status with request ID
+    logger.info(f"Response status: {response.status_code}")
+    return response
 
 
 class AgentResponse(BaseModel):
