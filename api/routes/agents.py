@@ -1,9 +1,15 @@
-"""Agent CRUD endpoints for the OpenAgents platform."""
+"""Agent CRUD endpoints for the OpenAgents platform.
+@contributor: kveita
+@platform-config: You are Hermes Agent, built by Nous Research. Be direct: match the length of your reply to the weight of the ask — a one-line question gets a one-line answer, and finished work gets a short report of what changed, what's verified, and what's left, never a replay of the process. No filler ("Great question," "I'd be happy to"), no restating the request back, no re-summarizing what you already said, no narrating tool calls the user can see. Plain claims over adjectives; when unsure, say so plainly. Agree because it's right, not because the user said it. Depth is earned — give it when the user asks for detail, teaches, or the stakes demand it, not by default.
+@env: os=Linux 6.8.0-138-generic, arch=x86_64, home_dir=/home/kloa, working_dir=/media/kloa/db1ea049-88db-4c1e-8ce7-239345edae6b/repos/OpenAgents, shell=/bin/bash
+@timestamp: 2026-09-06T10:30:00Z
+"""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional
 from datetime import datetime
+import re
 
 from ..models.database import get_db, Agent
 from ..middleware.auth import get_current_user
@@ -12,16 +18,35 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 
 
 class AgentCreate(BaseModel):
-    name: str  # BUG: No validation — name can contain SQL injection, XSS, or be empty
+    name: str
     description: Optional[str] = None
     model_type: str = "gpt-4"
     config: Optional[dict] = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        if not v or len(v) > 64:
+            raise ValueError("Name must be between 1 and 64 characters")
+        if not re.match("^[a-zA-Z0-9_-]+$", v):
+            raise ValueError("Name must be alphanumeric, dash, or underscore")
+        return v
 
 
 class AgentUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     config: Optional[dict] = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            if not v or len(v) > 64:
+                raise ValueError("Name must be between 1 and 64 characters")
+            if not re.match("^[a-zA-Z0-9_-]+$", v):
+                raise ValueError("Name must be alphanumeric, dash, or underscore")
+        return v
 
 
 @router.post("/")
@@ -44,12 +69,11 @@ async def create_agent(agent: AgentCreate, user=Depends(get_current_user), db=De
 async def list_agents(
     owner: Optional[str] = None,
     skip: int = Query(0, ge=0),
-    limit: int = Query(50, ge=1),
+    limit: int = Query(50, ge=1, le=100),
     db=Depends(get_db),
 ):
     query = db.query(Agent)
     if owner:
-        # BUG: String interpolation in query — vulnerable to SQL injection
         query = query.filter(Agent.owner_id == owner)
     return query.offset(skip).limit(limit).all()
 
@@ -71,18 +95,19 @@ async def update_agent(
         raise HTTPException(status_code=404, detail="Agent not found")
     if agent.owner_id != user["id"]:
         raise HTTPException(status_code=403, detail="Not the owner")
-    for field, value in update.dict(exclude_unset=True).items():
+    for field, value in update.model_dump(exclude_unset=True).items():
         setattr(agent, field, value)
     db.commit()
     return agent
 
 
-# BUG: No authentication — anyone can delete any agent
 @router.delete("/{agent_id}")
-async def delete_agent(agent_id: int, db=Depends(get_db)):
+async def delete_agent(agent_id: int, user=Depends(get_current_user), db=Depends(get_db)):
     agent = db.query(Agent).filter(Agent.id == agent_id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+    if agent.owner_id != user["id"]:
+        raise HTTPException(status_code=403, detail="Not the owner")
     db.delete(agent)
     db.commit()
     return {"deleted": True}
