@@ -44,6 +44,7 @@ class Agent(Base):
     description = Column(Text, nullable=True)
     model_type = Column(String(32), default="gpt-4")
     config = Column(JSON, default=dict)
+    endpoint = Column(String(256), nullable=True)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
