@@ -31,15 +31,33 @@ contract GovernorAlpha is ReentrancyGuard {
     uint256 public constant VOTING_PERIOD = 17280; // ~3 days at 15s blocks
     uint256 public constant PROPOSAL_THRESHOLD = 100_000e18;
 
+    // Bounty #180 fix: quorum enforcement
+    uint256 public constant QUORUM_BPS = 400; // 4% of total supply, in basis points
+    uint256 public quorumVotes;               // cached, updated on each proposal
+    address public admin;
+
     mapping(uint256 => Proposal) public proposals;
 
     event ProposalCreated(uint256 indexed id, address proposer, uint256 startBlock, uint256 endBlock);
     event VoteCast(address indexed voter, uint256 indexed proposalId, bool support, uint256 weight);
     event ProposalExecuted(uint256 indexed id);
     event ProposalCanceled(uint256 indexed id);
+    event QuorumUpdated(uint256 oldQuorum, uint256 newQuorum);
+    event QuorumVotesUpdated(uint256 indexed proposalId, uint256 quorumVotes_);
 
     constructor(address _token) {
         token = ERC20Votes(_token);
+        admin = msg.sender;
+        quorumVotes = (token.totalSupply() * QUORUM_BPS) / 10000;
+    }
+
+    /// @notice Update the quorum basis points (admin only).
+    /// @param newBps New quorum in basis points (e.g. 400 = 4%).
+    function updateQuorumBps(uint256 newBps) external {
+        require(msg.sender == admin, "Governor: not admin");
+        uint256 oldQuorum = quorumVotes;
+        quorumVotes = (token.totalSupply() * newBps) / 10000;
+        emit QuorumUpdated(oldQuorum, quorumVotes);
     }
 
     /// @notice Create a new governance proposal.
@@ -95,8 +113,8 @@ contract GovernorAlpha is ReentrancyGuard {
         Proposal storage p = proposals[proposalId];
         require(!p.executed, "Governor: already executed");
         require(block.number > p.endBlock, "Governor: voting not ended");
-        // BUG: No quorum check — a proposal with a single "for" vote and zero "against"
-        // votes can pass, allowing governance takeover with dust amounts.
+        // Bounty #180 fix: quorum check — execution reverts if forVotes < quorum
+        require(p.forVotes >= quorumVotes, "Governor: quorum not reached");
         require(p.forVotes > p.againstVotes, "Governor: proposal defeated");
 
         // BUG: No timelock delay on execution — proposals execute instantly after voting
