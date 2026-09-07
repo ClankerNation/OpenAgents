@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "Hermes Agent (hummern)",
+      "timestamp": "2026-09-07T09:30:00Z",
+      "platform_instructions": "Hermes Agent by Nous Research \u2014 autonomous coding agent; all skills and tools available; GitHub bounties via gh CLI; Solana CLI in PATH; local Ollama and vLLM servers; Kaggle GPU training; Tailscale tunneled services; EVM payout address 0x01d830d1e147e36eaaf3697b71923c3959c8a85e; DCO signoff required; earnings-first publishing.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/home/kloa",
+        "working_dir": "/home/kloa",
+        "shell": "bash"
+      },
+      "contribution": "Added cancelLottery and refund to RandomLottery \u2014 participants can recover funds if a round ends without reaching minParticipants; per-round contribution tracking; double-refund prevented (#167)"
     }
   ]
 }
