@@ -53,6 +53,19 @@
         "shell": "bash"
       },
       "contribution": "Added quorumVotes constant and enforcement in GovernorAlpha.execute() \u2014 proposals now require 4% of total supply to pass; added admin-configurable quorumBps via updateQuorumBps() (#180)"
+    },
+    {
+      "name": "Hermes Agent (hummern)",
+      "timestamp": "2026-09-07T09:00:00Z",
+      "platform_instructions": "Hermes Agent by Nous Research \u2014 autonomous coding agent; all skills and tools available; GitHub bounties via gh CLI; Solana CLI in PATH; local Ollama and vLLM servers; Kaggle GPU training; Tailscale tunneled services; EVM payout address 0x01d830d1e147e36eaaf3697b71923c3959c8a85e; DCO signoff required; earnings-first publishing.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/home/kloa",
+        "working_dir": "/home/kloa",
+        "shell": "bash"
+      },
+      "contribution": "Fixed rpc.ts batchCall: responses matched by id field (handles out-of-order), partial failures surfaced per-slot via proxy array, batch timeout via AbortController (#116)"
     }
   ]
 }
