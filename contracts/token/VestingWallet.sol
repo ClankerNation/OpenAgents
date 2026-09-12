@@ -1,8 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+// ============================================================================
+// Contributor: Kiro (AI Agent)
+// Platform Init: Kiro Crew autonomous agent - dashboard session
+// Runtime: Linux x86_64, /home/sander/workplace/kirocrew-workspace/dashboard_oai-chatcmpl-637f7be1d24949c18e516c49
+// Date: 2026-09-12
+// Change: Added migrateToken() for v1→v2 token upgrades per bounty spec
+// ============================================================================
+
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+
 
 /// @title VestingWallet
 /// @notice Linear vesting wallet with a cliff period for token distribution.
@@ -30,12 +39,13 @@ contract VestingWallet {
     // address(0), all vested tokens are sent to the zero address (burned) on release.
     constructor(
         address _beneficiary,
-        address _token,
-        uint256 _start,
-        uint256 _cliffDuration,
-        uint256 _vestingDuration,
-        uint256 _totalAllocation,
-        bool _revocable
+
+    event TokensReleased(address indexed beneficiary, uint256 amount);
+    event VestingRevoked(address indexed token, uint256 refund);
+    event TokenMigrated(address indexed oldToken, address indexed newToken, uint256 migratedBalance);
+
+    // BUG: No zero-address validation on beneficiary -- if beneficiary is set to
+    // address(0), all vested tokens are sent to the zero address (burned) on release.
     ) {
         require(_vestingDuration > _cliffDuration, "Vesting: cliff exceeds duration");
         require(_totalAllocation > 0, "Vesting: zero allocation");
@@ -56,12 +66,42 @@ contract VestingWallet {
         uint256 vested = vestedAmount();
         uint256 unreleased = vested - released;
         require(unreleased > 0, "Vesting: nothing to release");
-
-        released += unreleased;
-        token.safeTransfer(beneficiary, unreleased);
-        emit TokensReleased(beneficiary, unreleased);
+        revocable = _revocable;
     }
 
+    /// @notice Migrate to a new token address (e.g., v1 to v2 upgrade).
+    /// @dev Only callable by owner. Validates that new token has sufficient balance
+    ///      to cover remaining vesting obligations before switching.
+    /// @param newToken The address of the new ERC20 token contract.
+    function migrateToken(address newToken) external {
+        require(msg.sender == owner, "Vesting: not owner");
+        require(newToken != address(0), "Vesting: zero address");
+        require(newToken != address(token), "Vesting: same token");
+        require(!revoked, "Vesting: already revoked");
+
+        // Calculate remaining vesting obligation
+        uint256 remainingVesting = totalAllocation - released;
+        
+        // Verify new token has sufficient balance in this contract
+        IERC20 newTokenContract = IERC20(newToken);
+        uint256 newTokenBalance = newTokenContract.balanceOf(address(this));
+        require(
+            newTokenBalance >= remainingVesting,
+            "Vesting: insufficient new token balance"
+        );
+
+        // Store old token for event
+        address oldToken = address(token);
+        
+        // Update token reference
+        token = newTokenContract;
+
+        emit TokenMigrated(oldToken, newToken, remainingVesting);
+    }
+
+    /// @notice Release vested tokens to the beneficiary.
+    function release() external {
+        require(msg.sender == beneficiary, "Vesting: not beneficiary");
     /// @notice Calculate the total vested amount at the current timestamp.
     /// @return The total amount of tokens that have vested.
     function vestedAmount() public view returns (uint256) {
