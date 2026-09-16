@@ -474,6 +474,12 @@
     "last_pr": "2026-08-04T07:14:33.552Z"
   },
   {
+    "username": "K09-0",
+    "total_prs": 3,
+    "first_pr": "2026-06-06T15:03:25.618Z",
+    "last_pr": "2026-09-16T07:53:30.215Z"
+  },
+  {
     "username": "OlegChep",
     "total_prs": 2,
     "first_pr": "2026-05-17T04:06:54.515Z",
@@ -502,12 +508,6 @@
     "total_prs": 2,
     "first_pr": "2026-05-30T23:46:56.687Z",
     "last_pr": "2026-05-31T00:12:57.878Z"
-  },
-  {
-    "username": "K09-0",
-    "total_prs": 2,
-    "first_pr": "2026-06-06T15:03:25.618Z",
-    "last_pr": "2026-06-07T10:18:59.395Z"
   },
   {
     "username": "maojianian25-png",
