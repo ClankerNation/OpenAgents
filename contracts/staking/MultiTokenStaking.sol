@@ -2,146 +2,184 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-/// @title MultiTokenStaking
-/// @notice Allows users to stake multiple ERC20 tokens across different pools,
-///         each earning a share of a global reward token emission.
-/// @dev Each pool has an allocation weight. Rewards are distributed proportionally.
-contract MultiTokenStaking is Ownable, ReentrancyGuard {
-    using SafeERC20 for IERC20;
-
-    struct PoolInfo {
-        IERC20 stakeToken;
-        uint256 allocPoint;
-        uint256 lastRewardTime;
-        uint256 accRewardPerShare;
+/**
+ * @title MultiTokenStaking
+ * @notice Staking contract supporting multiple token pools with reward distribution
+ */
+contract MultiTokenStaking is Ownable {
+    struct Pool {
+        IERC20 token;
         uint256 totalStaked;
+        uint256 rewardRate;
+        uint256 lastUpdateTime;
+        uint256 rewardPerTokenStored;
+        bool active;
     }
 
-    struct UserInfo {
+    struct UserStake {
         uint256 amount;
         uint256 rewardDebt;
     }
 
     IERC20 public rewardToken;
-    uint256 public rewardPerSecond;
-    uint256 public totalAllocPoint;
+    Pool[] public pools;
+    mapping(uint256 => mapping(address => UserStake)) public userStakes;
+    mapping(address => uint256) public totalUserStakes;
 
-    PoolInfo[] public poolInfo;
-    mapping(uint256 => mapping(address => UserInfo)) public userInfo;
+    event Stake(address indexed user, uint256 indexed poolId, uint256 amount);
+    event Withdraw(address indexed user, uint256 indexed poolId, uint256 amount);
+    event RewardClaimed(address indexed user, uint256 indexed poolId, uint256 amount);
+    event EmergencyWithdraw(address indexed user, uint256 indexed poolId, uint256 amount);
+    event PoolCreated(uint256 indexed poolId, address token, uint256 rewardRate);
+    event PoolUpdated(uint256 indexed poolId, uint256 rewardRate);
 
-    event PoolAdded(uint256 indexed pid, address token, uint256 allocPoint);
-    event Deposit(address indexed user, uint256 indexed pid, uint256 amount);
-    event Withdraw(address indexed user, uint256 indexed pid, uint256 amount);
-    event Harvest(address indexed user, uint256 indexed pid, uint256 amount);
-
-    // BUG: Missing zero-address validation — rewardToken can be set to address(0),
-    // causing all reward transfers to silently burn tokens or revert unpredictably.
-    constructor(address _rewardToken, uint256 _rewardPerSecond) Ownable(msg.sender) {
-        rewardToken = IERC20(_rewardToken);
-        rewardPerSecond = _rewardPerSecond;
+    constructor(IERC20 _rewardToken) Ownable(msg.sender) {
+        rewardToken = _rewardToken;
     }
 
-    /// @notice Add a new staking pool.
-    /// @param _allocPoint Allocation weight for reward distribution.
-    /// @param _stakeToken The ERC20 token to be staked in this pool.
-    // BUG: No duplicate token check — the same token can be added multiple times,
-    // causing reward accounting to break as totalAllocPoint inflates and existing
-    // stakers in the original pool get diluted unexpectedly.
-    function addPool(uint256 _allocPoint, address _stakeToken) external onlyOwner {
-        totalAllocPoint += _allocPoint;
-        poolInfo.push(PoolInfo({
-            stakeToken: IERC20(_stakeToken),
-            allocPoint: _allocPoint,
-            lastRewardTime: block.timestamp,
-            accRewardPerShare: 0,
-            totalStaked: 0
+    function createPool(IERC20 token, uint256 rewardRate) external onlyOwner returns (uint256) {
+        require(pools.length < 100, "Max pools reached");
+        pools.push(Pool({
+            token: token,
+            totalStaked: 0,
+            rewardRate: rewardRate,
+            lastUpdateTime: block.timestamp,
+            rewardPerTokenStored: 0,
+            active: true
         }));
-        emit PoolAdded(poolInfo.length - 1, _stakeToken, _allocPoint);
+        emit PoolCreated(pools.length - 1, address(token), rewardRate);
+        return pools.length - 1;
     }
 
-    /// @notice Update reward variables for a given pool.
-    /// @param pid Pool ID to update.
-    function updatePool(uint256 pid) public {
-        PoolInfo storage pool = poolInfo[pid];
-        if (block.timestamp <= pool.lastRewardTime) return;
-
-        if (pool.totalStaked == 0) {
-            pool.lastRewardTime = block.timestamp;
-            return;
-        }
-
-        uint256 elapsed = block.timestamp - pool.lastRewardTime;
-        // BUG: Reward calculation can overflow for large elapsed * rewardPerSecond * allocPoint
-        // values. With high rewardPerSecond (e.g., 1e18) and long time gaps, the intermediate
-        // multiplication exceeds uint256 before the division by totalAllocPoint.
-        uint256 reward = elapsed * rewardPerSecond * pool.allocPoint / totalAllocPoint;
-        pool.accRewardPerShare += reward * 1e12 / pool.totalStaked;
-        pool.lastRewardTime = block.timestamp;
+    function updatePool(uint256 poolId, uint256 newRewardRate) external onlyOwner {
+        require(poolId < pools.length, "Invalid pool");
+        _updateReward(poolId);
+        pools[poolId].rewardRate = newRewardRate;
+        pools[poolId].lastUpdateTime = block.timestamp;
+        emit PoolUpdated(poolId, newRewardRate);
     }
 
-    /// @notice Deposit tokens into a staking pool.
-    /// @param pid Pool ID.
-    /// @param amount Amount of tokens to stake.
-    function deposit(uint256 pid, uint256 amount) external nonReentrant {
-        PoolInfo storage pool = poolInfo[pid];
-        UserInfo storage user = userInfo[pid][msg.sender];
-        updatePool(pid);
+    function stake(uint256 poolId, uint256 amount) external {
+        require(poolId < pools.length, "Invalid pool");
+        require(pools[poolId].active, "Pool inactive");
+        require(amount > 0, "Amount must be > 0");
 
-        if (user.amount > 0) {
-            uint256 pending = user.amount * pool.accRewardPerShare / 1e12 - user.rewardDebt;
-            if (pending > 0) {
-                rewardToken.safeTransfer(msg.sender, pending);
-                emit Harvest(msg.sender, pid, pending);
-            }
-        }
+        _updateReward(poolId);
 
-        if (amount > 0) {
-            pool.stakeToken.safeTransferFrom(msg.sender, address(this), amount);
-            user.amount += amount;
-            pool.totalStaked += amount;
-        }
-        user.rewardDebt = user.amount * pool.accRewardPerShare / 1e12;
-        emit Deposit(msg.sender, pid, amount);
+        userStakes[poolId][msg.sender].amount += amount;
+        userStakes[poolId][msg.sender].rewardDebt = _getUserRewardDebt(poolId, msg.sender);
+        pools[poolId].totalStaked += amount;
+        totalUserStakes[msg.sender] += amount;
+
+        IERC20(pools[poolId].token).transferFrom(msg.sender, address(this), amount);
+
+        emit Stake(msg.sender, poolId, amount);
     }
 
-    /// @notice Withdraw staked tokens from a pool.
-    /// @param pid Pool ID.
-    /// @param amount Amount to withdraw.
-    function withdraw(uint256 pid, uint256 amount) external nonReentrant {
-        PoolInfo storage pool = poolInfo[pid];
-        UserInfo storage user = userInfo[pid][msg.sender];
-        require(user.amount >= amount, "MultiStaking: insufficient balance");
-        updatePool(pid);
+    function withdraw(uint256 poolId, uint256 amount) external {
+        require(poolId < pools.length, "Invalid pool");
+        require(amount > 0, "Amount must be > 0");
+        require(userStakes[poolId][msg.sender].amount >= amount, "Insufficient stake");
 
-        uint256 pending = user.amount * pool.accRewardPerShare / 1e12 - user.rewardDebt;
-        if (pending > 0) {
-            rewardToken.safeTransfer(msg.sender, pending);
-            emit Harvest(msg.sender, pid, pending);
+        _updateReward(poolId);
+
+        uint256 reward = _getUserReward(poolId, msg.sender);
+        userStakes[poolId][msg.sender].amount -= amount;
+        userStakes[poolId][msg.sender].rewardDebt = _getUserRewardDebt(poolId, msg.sender);
+        pools[poolId].totalStaked -= amount;
+        totalUserStakes[msg.sender] -= amount;
+
+        IERC20(pools[poolId].token).transfer(msg.sender, amount);
+
+        if (reward > 0) {
+            rewardToken.transfer(msg.sender, reward);
+            emit RewardClaimed(msg.sender, poolId, reward);
         }
 
-        if (amount > 0) {
-            user.amount -= amount;
-            pool.totalStaked -= amount;
-            pool.stakeToken.safeTransfer(msg.sender, amount);
-        }
-        user.rewardDebt = user.amount * pool.accRewardPerShare / 1e12;
-        emit Withdraw(msg.sender, pid, amount);
+        emit Withdraw(msg.sender, poolId, amount);
     }
 
-    /// @notice View pending rewards for a user in a pool.
-    function pendingReward(uint256 pid, address _user) external view returns (uint256) {
-        PoolInfo memory pool = poolInfo[pid];
-        UserInfo memory user = userInfo[pid][_user];
-        uint256 accRewardPerShare = pool.accRewardPerShare;
-        if (block.timestamp > pool.lastRewardTime && pool.totalStaked > 0) {
-            uint256 elapsed = block.timestamp - pool.lastRewardTime;
-            uint256 reward = elapsed * rewardPerSecond * pool.allocPoint / totalAllocPoint;
-            accRewardPerShare += reward * 1e12 / pool.totalStaked;
+    function claimReward(uint256 poolId) external {
+        require(poolId < pools.length, "Invalid pool");
+
+        _updateReward(poolId);
+
+        uint256 reward = _getUserReward(poolId, msg.sender);
+        require(reward > 0, "No rewards to claim");
+
+        userStakes[poolId][msg.sender].rewardDebt = _getUserRewardDebt(poolId, msg.sender);
+
+        rewardToken.transfer(msg.sender, reward);
+        emit RewardClaimed(msg.sender, poolId, reward);
+    }
+
+    function emergencyWithdraw(uint256 poolId) external {
+        require(poolId < pools.length, "Invalid pool");
+        
+        uint256 amount = userStakes[poolId][msg.sender].amount;
+        require(amount > 0, "No stake to withdraw");
+
+        // Reset user's reward debt to zero
+        userStakes[poolId][msg.sender].rewardDebt = 0;
+        
+        // Decrement pool's total staked
+        pools[poolId].totalStaked -= amount;
+        
+        // Reset user's stake amount
+        userStakes[poolId][msg.sender].amount = 0;
+        
+        // Update total user stakes
+        totalUserStakes[msg.sender] -= amount;
+
+        // Transfer staked tokens back to user
+        IERC20(pools[poolId].token).transfer(msg.sender, amount);
+
+        // Emit EmergencyWithdraw event
+        emit EmergencyWithdraw(msg.sender, poolId, amount);
+    }
+
+    function _updateReward(uint256 poolId) internal {
+        Pool storage pool = pools[poolId];
+        if (block.timestamp > pool.lastUpdateTime && pool.totalStaked > 0) {
+            uint256 elapsed = block.timestamp - pool.lastUpdateTime;
+            uint256 rewards = elapsed * pool.rewardRate;
+            pool.rewardPerTokenStored += (rewards * 1e18) / pool.totalStaked;
+            pool.lastUpdateTime = block.timestamp;
         }
-        return user.amount * accRewardPerShare / 1e12 - user.rewardDebt;
+    }
+
+    function _getUserReward(uint256 poolId, address user) internal view returns (uint256) {
+        Pool storage pool = pools[poolId];
+        UserStake storage stake = userStakes[poolId][user];
+        return (stake.amount * (pool.rewardPerTokenStored - stake.rewardDebt)) / 1e18;
+    }
+
+    function _getUserRewardDebt(uint256 poolId, address user) internal view returns (uint256) {
+        Pool storage pool = pools[poolId];
+        UserStake storage stake = userStakes[poolId][user];
+        return (stake.amount * pool.rewardPerTokenStored) / 1e18;
+    }
+
+    function getPoolInfo(uint256 poolId) external view returns (
+        IERC20 token,
+        uint256 totalStaked,
+        uint256 rewardRate,
+        uint256 lastUpdateTime,
+        uint256 rewardPerTokenStored,
+        bool active
+    ) {
+        Pool storage pool = pools[poolId];
+        return (pool.token, pool.totalStaked, pool.rewardRate, pool.lastUpdateTime, pool.rewardPerTokenStored, pool.active);
+    }
+
+    function getUserStake(uint256 poolId, address user) external view returns (uint256 amount, uint256 rewardDebt) {
+        UserStake storage stake = userStakes[poolId][user];
+        return (stake.amount, stake.rewardDebt);
+    }
+
+    function getPoolCount() external view returns (uint256) {
+        return pools.length;
     }
 }
