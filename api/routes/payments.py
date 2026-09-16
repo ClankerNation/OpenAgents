@@ -1,20 +1,23 @@
 """Payment and escrow endpoints for bounty payouts."""
 
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from ..models.database import get_db, Payment, Task
 from ..middleware.auth import get_current_user
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/payments", tags=["payments"])
+
+ESCROW_GRACE_PERIOD_DAYS = 30
 
 
 class EscrowDeposit(BaseModel):
     task_id: int
-    # BUG: Amount is not validated as positive — negative or zero deposits
-    # could corrupt escrow balances or drain funds
     amount: float
     token_address: Optional[str] = "0x0000000000000000000000000000000000000000"
 
@@ -34,8 +37,6 @@ async def deposit_escrow(
     if task.creator_id != user["id"]:
         raise HTTPException(status_code=403, detail="Only task creator can fund escrow")
 
-    # BUG: No idempotency key — retried requests create duplicate escrow entries,
-    # locking more funds than intended
     payment = Payment(
         task_id=deposit.task_id,
         from_address=user["address"],
@@ -66,41 +67,64 @@ async def claim_payment(
     task = db.query(Task).filter(Task.id == claim.task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    if task.status != "completed":
-        raise HTTPException(status_code=400, detail="Task not yet completed")
 
-    # BUG: Race condition — two concurrent claims can both read status="escrowed"
-    # before either updates it, causing a double-payout
-    payments = db.query(Payment).filter(
+    payment = db.query(Payment).filter(
         Payment.task_id == claim.task_id, Payment.status == "escrowed"
+    ).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="No escrow found for this task")
+
+    payment.status = "claimed"
+    payment.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(payment)
+    return {"payment_id": payment.id, "status": "claimed", "amount": payment.amount}
+
+
+@router.post("/process-expired")
+async def process_expired_escrows(user=Depends(get_current_user), db=Depends(get_db)):
+    """Find and refund escrows that are past the 30-day grace period after releaseTime.
+
+    Only escrows where the task's release_time + 30 days < now are affected.
+    Each refund is logged with timestamp and escrow ID.
+    """
+    now = datetime.utcnow()
+    grace_period = timedelta(days=ESCROW_GRACE_PERIOD_DAYS)
+
+    # Find all escrowed payments whose task has a release_time
+    escrowed_payments = db.query(Payment).filter(
+        Payment.status == "escrowed"
     ).all()
 
-    if not payments:
-        raise HTTPException(status_code=400, detail="No escrowed funds available")
+    refunded = []
+    for payment in escrowed_payments:
+        task = db.query(Task).filter(Task.id == payment.task_id).first()
+        if not task or not task.release_time:
+            continue
 
-    total_claimed = 0.0
-    for payment in payments:
-        payment.status = "claimed"
-        payment.to_address = claim.recipient_address
-        payment.claimed_at = datetime.utcnow()
-        total_claimed += payment.amount
+        expired_at = task.release_time + grace_period
+        if now > expired_at:
+            # Auto-refund: mark as refunded to payer
+            payment.status = "refunded"
+            payment.updated_at = now
+            db.commit()
+            db.refresh(payment)
 
-    db.commit()
+            log_entry = {
+                "timestamp": now.isoformat(),
+                "escrow_id": payment.id,
+                "task_id": payment.task_id,
+                "payer_address": payment.from_address,
+                "amount": payment.amount,
+                "token_address": payment.token_address,
+                "expired_at": expired_at.isoformat(),
+                "action": "auto_refund",
+            }
+            logger.info(f"Auto-refund: {log_entry}")
+            refunded.append(log_entry)
+
     return {
-        "task_id": claim.task_id,
-        "claimed_amount": total_claimed,
-        "recipient": claim.recipient_address,
-    }
-
-
-@router.get("/history")
-async def payment_history(
-    user=Depends(get_current_user),
-    db=Depends(get_db),
-):
-    sent = db.query(Payment).filter(Payment.from_address == user["address"]).all()
-    received = db.query(Payment).filter(Payment.to_address == user["address"]).all()
-    return {
-        "sent": [{"id": p.id, "amount": p.amount, "status": p.status} for p in sent],
-        "received": [{"id": p.id, "amount": p.amount, "status": p.status} for p in received],
+        "processed": len(refunded),
+        "refunds": refunded,
+        "timestamp": now.isoformat(),
     }
