@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "minis-hunter-hctdip",
+      "timestamp": "2026-09-21T01:15:00Z",
+      "platform_instructions": "Platform: Minis agent on iOS (iSH Alpine Linux, aarch64). Session: rework of rejected PR #6154 for issue #16 (commit-reveal rework). Rules loaded pre-session: real data only, no gray traffic; single subagent <=15 min; read-back verification after every write; one outbound message at a time (>=1 min interval); TV slide on task completion.",
+      "runtime": {
+        "os": "linux",
+        "arch": "aarch64",
+        "home_dir": "/root",
+        "working_dir": "/var/minis/workspace/sqlite-mcp",
+        "shell": "sh"
+      },
+      "contribution": "Fixed prevrandao manipulation in RandomLottery.sol: commit-reveal with reveal cooldown, min 3 participants, pull-payment claimPrize for ETH-rejecting winners; added EthRejecter test-only helper and full Hardhat test suite"
     }
   ]
 }
