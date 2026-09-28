@@ -73,37 +73,54 @@ export class SessionManager {
     return token;
   }
 
+  /** Tokens within this many seconds of expiry are treated as expired. */
+  private static EXPIRY_SKEW_SEC = 30;
+
+  private isCurrentTokenFresh(): boolean {
+    if (!this.currentToken) return false;
+    const now = Math.floor(Date.now() / 1000);
+    return this.currentToken.expiresAt - SessionManager.EXPIRY_SKEW_SEC > now;
+  }
+
   async getToken(): Promise<string> {
-    // BUG: No expiry check — returns the cached token even if it has expired,
-    // causing 401 errors on subsequent API calls
-    if (this.currentToken) {
+    if (this.currentToken && this.isCurrentTokenFresh()) {
       return this.currentToken.token;
     }
-    const session = await this.authenticate();
+    const session = this.currentToken ? await this.refresh() : await this.authenticate();
     return session.token;
   }
 
   async refresh(): Promise<SessionToken> {
-    // BUG: Race condition — multiple concurrent callers can trigger parallel
-    // refresh requests, and only the last one's token survives
+    // De-duplicate concurrent refreshes: in-flight callers share the same promise.
+    if (this.refreshPromise) {
+      return this.refreshPromise;
+    }
     if (!this.currentToken?.refreshToken) {
       return this.authenticate();
     }
 
-    const res = await fetch(`${this.apiBaseUrl}/auth/refresh`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refreshToken: this.currentToken.refreshToken }),
-    });
+    this.refreshPromise = (async () => {
+      try {
+        const res = await fetch(`${this.apiBaseUrl}/auth/refresh`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refreshToken: this.currentToken!.refreshToken }),
+        });
 
-    if (!res.ok) {
-      this.currentToken = null;
-      return this.authenticate();
-    }
+        if (!res.ok) {
+          this.currentToken = null;
+          return await this.authenticate();
+        }
 
-    const token: SessionToken = await res.json();
-    this.persistSession(token);
-    return token;
+        const token: SessionToken = await res.json();
+        this.persistSession(token);
+        return token;
+      } finally {
+        this.refreshPromise = null;
+      }
+    })();
+
+    return this.refreshPromise;
   }
 
   logout(): void {
