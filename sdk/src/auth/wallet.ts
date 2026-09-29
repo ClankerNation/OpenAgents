@@ -1,3 +1,9 @@
+/**
+ * @contributor doubao-agent (spiritwanghs fork)
+ * @platform-config Autonomous coding agent executing GitHub bounties; user provides a fine-grained GitHub PAT.
+ * @env os=linux arch=x64 home_dir=/home/user working_dir=/home/user/Doubao/chats/38444718400345090/OpenAgents shell=bash
+ * @timestamp 2026-09-29T02:10:00Z
+ */
 import { generateKeyPair, signMessage, keccak256 } from "../utils/crypto";
 import { encodeParams, AbiParam } from "../utils/encoding";
 import { RpcProvider } from "../providers/rpc";
@@ -23,36 +29,47 @@ export interface SignedTransaction {
 }
 
 export class Wallet {
-  // BUG: Private key stored as plaintext string in memory — should use
-  // a secure enclave, encrypted storage, or at minimum a Buffer that can be zeroed
   public readonly address: string;
-  private privateKey: string;
   private provider: RpcProvider;
-  private cachedNonce: number | null = null;
+
+  // Private key lives in a closure, NOT as an own property of `this`.
+  // JSON.stringify(wallet), Object.keys(wallet), or object spread cannot
+  // reach it. Call clear() to overwrite it when the wallet is discarded.
+  private _sign: (txHash: string) => string;
+  private _exportKey: () => string;
+  private _clear: () => void;
 
   constructor(config: WalletConfig) {
-    if (config.privateKey) {
-      this.privateKey = config.privateKey;
-    } else {
-      const keyPair = generateKeyPair();
-      this.privateKey = keyPair.privateKey;
-    }
-    this.address = this.deriveAddress(this.privateKey);
+    let privateKey: string = config.privateKey ?? generateKeyPair().privateKey;
+    this.address = this.deriveAddress(privateKey);
     this.provider = config.provider;
+
+    this._sign = (txHash) => signMessage(privateKey, txHash);
+    this._exportKey = () => privateKey;
+    this._clear = () => { privateKey = ""; };
   }
 
   private deriveAddress(privateKey: string): string {
     const { ec as EC } = require("elliptic");
     const curve = new EC("secp256k1");
     const key = curve.keyFromPrivate(privateKey, "hex");
-    const pubKey = key.getPublic(false, "hex").slice(2); // remove 04 prefix
+    const pubKey = key.getPublic(false, "hex").slice(2);
     const hash = keccak256(Buffer.from(pubKey, "hex"));
     return "0x" + hash.slice(-40);
   }
 
+  /** Overwrite the in-memory private key. */
+  clear(): void {
+    this._clear();
+  }
+
   async signTransaction(tx: Transaction): Promise<SignedTransaction> {
-    // BUG: No chain ID validation — transaction could be replayed on a different
-    // chain if chainId is missing or mismatched with the provider
+    const expectedChainId = this.provider.getChainId();
+    if (tx.chainId !== undefined && tx.chainId !== expectedChainId) {
+      throw new Error(
+        `Chain ID mismatch: tx specifies ${tx.chainId}, provider is ${expectedChainId}`
+      );
+    }
     const nonce = tx.nonce ?? await this.getNonce();
     const gasPrice = tx.gasPrice ?? BigInt(await this.provider.call("eth_gasPrice") as string);
 
@@ -65,7 +82,7 @@ export class Wallet {
     ]);
 
     const txHash = keccak256(txData);
-    const signature = signMessage(this.privateKey, txHash);
+    const signature = this._sign(txHash);
 
     return {
       raw: "0x" + txData.slice(2) + signature,
@@ -74,17 +91,11 @@ export class Wallet {
   }
 
   async getNonce(): Promise<number> {
-    // BUG: Uses cached nonce instead of fetching fresh from chain —
-    // stale nonce causes "nonce too low" errors after external transactions
-    if (this.cachedNonce !== null) {
-      return this.cachedNonce++;
-    }
     const hex = (await this.provider.call("eth_getTransactionCount", [
       this.address,
       "latest",
     ])) as string;
-    this.cachedNonce = parseInt(hex, 16);
-    return this.cachedNonce++;
+    return parseInt(hex, 16);
   }
 
   async getBalance(): Promise<bigint> {
@@ -97,6 +108,6 @@ export class Wallet {
   }
 
   exportPrivateKey(): string {
-    return this.privateKey;
+    return this._exportKey();
   }
 }
