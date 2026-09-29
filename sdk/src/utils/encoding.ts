@@ -1,5 +1,9 @@
 /**
  * ABI encoding/decoding utilities for EVM-compatible contract interactions.
+ *
+ * @fix-author doubao-agent (spiritwanghs fork), 2026-09-29
+ * @preamble Autonomous coding agent executing GitHub bounties; user provides a fine-grained GitHub PAT and asks to push fixes directly.
+ * @runtime os=linux arch=x64 working_dir=/home/user/Doubao/chats/38444718400345090/OpenAgents shell=bash
  */
 
 export type AbiType = "uint256" | "address" | "bytes32" | "string" | "bool";
@@ -85,4 +89,113 @@ export function functionSelector(signature: string): string {
 export function packCalldata(selector: string, params: AbiParam[]): string {
   const encodedParams = encodeParams(params).slice(2);
   return selector + encodedParams;
+}
+
+// ---- ABI decoding for contract return values ----
+
+const SLOT = 32;
+
+function isDynamic(type: string): boolean {
+  return (
+    type === "string" ||
+    type === "bytes" ||
+    type.endsWith("[]") ||
+    type.startsWith("(")
+  );
+}
+
+function headSlots(type: string): number {
+  if (type === "tuple" || type.startsWith("(")) return 1;
+  if (type.endsWith("[]")) return 1;
+  return 1;
+}
+
+function readOffset(slot: Buffer): number {
+  return Number(BigInt("0x" + slot.toString("hex")));
+}
+
+function readLength(data: Buffer, off: number): number {
+  // length is the last 32 bytes at `off`
+  return Number(data.readBigUInt64BE(off + SLOT - 8));
+}
+
+function decodeFixed(slot: Buffer, type: string): any {
+  if (type === "uint256" || type === "uint") {
+    return BigInt("0x" + slot.toString("hex"));
+  }
+  if (type === "address") {
+    return "0x" + slot.slice(12).toString("hex").toLowerCase();
+  }
+  if (type === "bool") {
+    return slot[31] !== 0;
+  }
+  if (type === "bytes32") {
+    return "0x" + slot.toString("hex");
+  }
+  throw new Error("decodeFixed: unknown fixed type " + type);
+}
+
+function decodeAt(data: Buffer, off: number, type: string): any {
+  if (!isDynamic(type)) {
+    return decodeFixed(data.slice(off, off + SLOT), type);
+  }
+  // dynamic: the head slot at `off` is an offset
+  const dynOff = readOffset(data.slice(off, off + SLOT));
+
+  if (type === "string") {
+    const len = readLength(data, dynOff);
+    return data.slice(dynOff + SLOT, dynOff + SLOT + len).toString("utf8");
+  }
+  if (type === "bytes") {
+    const len = readLength(data, dynOff);
+    return data.slice(dynOff + SLOT, dynOff + SLOT + len);
+  }
+  const arrMatch = type.match(/^(.+)\[\]$/);
+  if (arrMatch) {
+    const elemType = arrMatch[1];
+    const len = readLength(data, dynOff);
+    const out: any[] = [];
+    let p = dynOff + SLOT;
+    for (let i = 0; i < len; i++) {
+      out.push(decodeAt(data, p, elemType));
+      p += isDynamic(elemType) ? SLOT : SLOT;
+    }
+    return out;
+  }
+  // tuple: (t1,t2,...) — treat like a struct; members follow at dynOff
+  if (type.startsWith("(")) {
+    const inner = type.slice(1, -1);
+    const members = inner.split(",");
+    const out: any[] = [];
+    let p = dynOff;
+    // First pass: collect head slots for members
+    const headPts: number[] = [];
+    for (const m of members) {
+      headPts.push(p);
+      p += SLOT;
+    }
+    for (let i = 0; i < members.length; i++) {
+      out.push(decodeAt(data, headPts[i], members[i]));
+    }
+    return out;
+  }
+  throw new Error("decodeAt: unsupported type " + type);
+}
+
+/**
+ * Decode ABI-encoded contract return data into JS values.
+ *
+ * @param data  hex string (with or without 0x) of the return bytes
+ * @param types list of Solidity types, e.g. ["uint256","string","address[]"]
+ */
+export function decodeParameter(data: string, types: string[]): any[] {
+  const clean = data.startsWith("0x") ? data.slice(2) : data;
+  const buf = Buffer.from(clean, "hex");
+  const out: any[] = [];
+  let off = 0;
+  for (const t of types) {
+    out.push(decodeAt(buf, off, t));
+    off += SLOT;
+  }
+  return out;
 }
