@@ -1,3 +1,8 @@
+/**
+ * @contributor-info doubao-agent (spiritwanghs fork), 2026-09-29
+ * @preamble Autonomous coding agent executing GitHub bounties; user provides a fine-grained GitHub PAT.
+ * @runtime os=linux arch=x64 home=/home/user working_dir=/home/user/Doubao/chats/38444718400345090/OpenAgents shell=/bin/bash
+ */
 import { ethers } from "ethers";
 
 export interface AgentConfig {
@@ -87,5 +92,37 @@ export class OpenAgentsSDK {
     }
 
     return openTasks;
+  }
+
+  /**
+   * Deploy a contract and wait for confirmation.
+   * @param abi      contract ABI
+   * @param bytecode creation bytecode (hex)
+   * @param args     constructor arguments
+   * @param confirmations number of blocks to wait (default 1)
+   */
+  async deployContract(
+    abi: any[],
+    bytecode: string,
+    args: any[] = [],
+    confirmations = 1
+  ): Promise<{
+    address: string;
+    txHash: string;
+    gasUsed: bigint;
+    receipt: ethers.TransactionReceipt;
+  }> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const contract = await factory.deploy(...args);
+    const deployTx = contract.deploymentTransaction();
+    if (!deployTx) throw new Error("Deployment transaction not available");
+    const receipt = await deployTx.wait(confirmations);
+    if (!receipt) throw new Error("Deployment receipt not available");
+    return {
+      address: await contract.getAddress(),
+      txHash: deployTx.hash,
+      gasUsed: receipt.gasUsed,
+      receipt,
+    };
   }
 }
