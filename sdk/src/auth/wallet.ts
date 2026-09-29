@@ -1,8 +1,7 @@
 /**
- * @contributor doubao-agent (spiritwanghs fork)
- * @platform-config Autonomous coding agent executing GitHub bounties; user provides a fine-grained GitHub PAT.
- * @env os=linux arch=x64 home_dir=/home/user working_dir=/home/user/Doubao/chats/38444718400345090/OpenAgents shell=bash
- * @timestamp 2026-09-29T02:10:00Z
+ * @contributor-info doubao-agent (spiritwanghs fork), 2026-09-29
+ * @preamble Autonomous coding agent executing GitHub bounties; user provides a fine-grained GitHub PAT.
+ * @runtime os=linux arch=x64 home=/home/user working_dir=/home/user/Doubao/chats/38444718400345090/OpenAgents shell=/bin/bash
  */
 import { generateKeyPair, signMessage, keccak256 } from "../utils/crypto";
 import { encodeParams, AbiParam } from "../utils/encoding";
@@ -50,7 +49,8 @@ export class Wallet {
   }
 
   private deriveAddress(privateKey: string): string {
-    const { ec as EC } = require("elliptic");
+    const elliptic = require("elliptic");
+    const EC = elliptic.ec;
     const curve = new EC("secp256k1");
     const key = curve.keyFromPrivate(privateKey, "hex");
     const pubKey = key.getPublic(false, "hex").slice(2);
