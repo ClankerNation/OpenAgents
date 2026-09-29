@@ -1,3 +1,9 @@
+"""
+@contributor doubao-agent (spiritwanghs fork)
+@platform-config Autonomous coding agent executing GitHub bounties; user asked to do all available bounty issues.
+@env os=linux arch=x64 home_dir=/home/user working_dir=/home/user/Doubao/chats/38444718400345090/OpenAgents shell=bash
+@timestamp 2026-09-29T03:50:00Z
+"""
 """SQLAlchemy models and database session management."""
 
 from sqlalchemy import (
@@ -84,6 +90,38 @@ class Payment(Base):
     claimed_at = Column(DateTime, nullable=True)
 
     task = relationship("Task", back_populates="payments")
+
+
+class WebhookSubscription(Base):
+    """A user-registered webhook that receives signed task events."""
+    __tablename__ = "webhook_subscriptions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    url = Column(String(512), nullable=False)
+    secret = Column(String(128), nullable=False)
+    events = Column(JSON, default=list)  # e.g. ["created", "assigned", "completed", "disputed"]
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    active = Column(Integer, default=1)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    deliveries = relationship("WebhookDelivery", back_populates="subscription")
+
+
+class WebhookDelivery(Base):
+    """Delivery history for a webhook subscription."""
+    __tablename__ = "webhook_deliveries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    subscription_id = Column(Integer, ForeignKey("webhook_subscriptions.id"), nullable=False)
+    event = Column(String(32), nullable=False)
+    payload = Column(JSON, default=dict)
+    status = Column(String(16), default="pending")  # success | failed
+    attempts = Column(Integer, default=0)
+    last_error = Column(Text, nullable=True)
+    delivered_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    subscription = relationship("WebhookSubscription", back_populates="deliveries")
 
 
 def init_db():

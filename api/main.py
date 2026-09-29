@@ -3,11 +3,15 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+from .routes import webhooks as webhooks_router
+
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+app.include_router(webhooks_router.router)
 
 
 class AgentResponse(BaseModel):

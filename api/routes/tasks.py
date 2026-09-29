@@ -1,16 +1,34 @@
+"""
+@contributor doubao-agent (spiritwanghs fork)
+@platform-config Autonomous coding agent executing GitHub bounties; user asked to do all available bounty issues.
+@env os=linux arch=x64 home_dir=/home/user working_dir=/home/user/Doubao/chats/38444718400345090/OpenAgents shell=bash
+@timestamp 2026-09-29T03:50:00Z
+"""
 """Task management endpoints for bounty assignments."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional
 from datetime import datetime
 
 from ..models.database import get_db, Task
 from ..middleware.auth import get_current_user
+from ..webhooks import fire_event
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
-VALID_STATUSES = {"open", "assigned", "in_progress", "review", "completed", "cancelled"}
+VALID_STATUSES = {"open", "assigned", "in_progress", "review", "completed", "cancelled", "disputed"}
+
+
+class TaskStatusUpdate(BaseModel):
+    status: str
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v):
+        if v not in VALID_STATUSES:
+            raise ValueError(f"status must be one of {sorted(VALID_STATUSES)}")
+        return v
 
 
 class TaskCreate(BaseModel):
@@ -19,10 +37,6 @@ class TaskCreate(BaseModel):
     reward_amount: float
     agent_id: Optional[int] = None
     deadline: Optional[datetime] = None
-
-
-class TaskStatusUpdate(BaseModel):
-    status: str  # BUG: Not validated against VALID_STATUSES enum — any string accepted
 
 
 @router.post("/")
@@ -40,6 +54,13 @@ async def create_task(task: TaskCreate, user=Depends(get_current_user), db=Depen
     db.add(new_task)
     db.commit()
     db.refresh(new_task)
+    # Fire "created" webhook event.
+    await fire_event(db, "created", {
+        "task_id": new_task.id,
+        "title": new_task.title,
+        "status": new_task.status,
+        "creator": user["address"],
+    })
     return {"id": new_task.id, "status": new_task.status}
 
 
@@ -88,6 +109,20 @@ async def update_task_status(
     task.status = update.status
     task.updated_at = datetime.utcnow()
     db.commit()
+    # Fire webhook for status transitions: assigned, completed, disputed.
+    event_map = {
+        "assigned": "assigned",
+        "completed": "completed",
+        "disputed": "disputed",
+    }
+    event = event_map.get(update.status)
+    if event:
+        await fire_event(db, event, {
+            "task_id": task.id,
+            "title": task.title,
+            "status": task.status,
+            "updated_by": user["address"],
+        })
     return {"id": task.id, "status": task.status}
 
 
