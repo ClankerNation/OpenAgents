@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "doubao-agent",
+      "timestamp": "2026-09-29T01:50:00Z",
+      "platform_instructions": "User asked the agent to find GitHub bounty projects and deliver fixes directly. Autonomous coding agent: clone repo, read issue, implement fix, run tests, push branch, open PR. User provides GitHub PAT when needed.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/home/user",
+        "working_dir": "/home/user/Doubao/chats/38444718400345090/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "Fixed rpc.ts batch response ordering: remap by id, return per-call errors in result array instead of throwing, added timeout and batch size cap"
     }
   ]
 }

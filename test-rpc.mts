@@ -35,9 +35,9 @@ function makeProvider(handler) {
   assert(out[2] === "result-for-c", "third call result returned third");
 }
 
-// 2. Error response in a batch must throw, not silently return undefined
+// 2. Partial failure: one error returned in array, others succeed (no throw)
 {
-  console.log("test 2: error response throws");
+  console.log("test 2: partial batch failure returns Error in array");
   const p = makeProvider(async (url, opts) => {
     const reqs = JSON.parse(opts.body);
     const resps = reqs.map((r) =>
@@ -47,29 +47,26 @@ function makeProvider(handler) {
     );
     return { ok: true, json: async () => resps };
   });
-  let threw = false;
-  try {
-    await p.batchCall([{ method: "a" }, { method: "b" }, { method: "c" }]);
-  } catch (e) { threw = /-32000/.test(e.message); }
-  assert(threw, "batch error propagates");
+  const out = await p.batchCall([{ method: "a" }, { method: "b" }, { method: "c" }]);
+  assert(out[0] === "ok", "first call still succeeds");
+  assert(out[1] instanceof Error && /-32000/.test(out[1].message), "second call returns Error");
+  assert(out[2] === "ok", "third call still succeeds");
 }
 
-// 3. Missing response for a request id must throw (old sort would misalign)
+// 3. Missing response id returns Error in array, others succeed
 {
-  console.log("test 3: missing response id throws");
+  console.log("test 3: missing response id returns Error in array");
   const p = makeProvider(async (url, opts) => {
     const reqs = JSON.parse(opts.body);
-    // Only respond to first and third, skip middle
     const resps = [reqs[0], reqs[2]].map((r) => ({
       jsonrpc: "2.0", id: r.id, result: "ok",
     }));
     return { ok: true, json: async () => resps };
   });
-  let threw = false;
-  try {
-    await p.batchCall([{ method: "a" }, { method: "b" }, { method: "c" }]);
-  } catch (e) { threw = /no response for request id/.test(e.message); }
-  assert(threw, "missing response detected");
+  const out = await p.batchCall([{ method: "a" }, { method: "b" }, { method: "c" }]);
+  assert(out[0] === "ok", "first call succeeds");
+  assert(out[1] instanceof Error && /no response for request id/.test(out[1].message), "missing id returns Error");
+  assert(out[2] === "ok", "third call succeeds");
 }
 
 // 4. Batch size cap

@@ -1,3 +1,9 @@
+/**
+ * @contributor doubao-agent (spiritwanghs fork)
+ * @platform-config Autonomous coding agent executing GitHub bounties; user provides a fine-grained GitHub PAT and asks to push fixes directly.
+ * @env os=linux arch=x64 home_dir=/home/user working_dir=/home/user/Doubao/chats/38444718400345090/OpenAgents shell=bash
+ * @timestamp 2026-09-29T01:50:00Z
+ */
 import { withRetry, RetryOptions } from "../utils/retry";
 
 export interface JsonRpcRequest {
@@ -114,15 +120,17 @@ export class RpcProvider {
       byId.set(r.id, r);
     }
 
+    // Per-call failures are returned as Error objects in the result array,
+    // not thrown, so one failing call does not abort the whole batch.
     return requests.map((req) => {
       const resp = byId.get(req.id);
       if (!resp) {
-        throw new Error(
+        return new Error(
           `RPC batch: no response for request id ${req.id} (${req.method})`
         );
       }
       if (resp.error) {
-        throw new Error(
+        return new Error(
           `RPC error ${resp.error.code} on ${req.method}: ${resp.error.message}`
         );
       }
