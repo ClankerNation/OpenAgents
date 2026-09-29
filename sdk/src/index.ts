@@ -1,3 +1,9 @@
+/**
+ * @contributor doubao-agent (spiritwanghs fork)
+ * @platform-config Autonomous coding agent executing GitHub bounties; user asked to do all available bounty issues.
+ * @env os=linux arch=x64 home_dir=/home/user working_dir=/home/user/Doubao/chats/38444718400345090/OpenAgents shell=bash
+ * @timestamp 2026-09-29T03:20:00Z
+ */
 import { ethers } from "ethers";
 
 export interface AgentConfig {
@@ -7,6 +13,18 @@ export interface AgentConfig {
   rpcUrl: string;
   registryAddress: string;
   routerAddress: string;
+  /** Optional WebSocket URL for real-time events. Defaults to rpcUrl with https->wss. */
+  wsUrl?: string;
+}
+
+export type EventCallback<T = Record<string, any>> = (
+  decoded: T,
+  payload: ethers.ContractEventPayload
+) => void;
+
+function toWsUrl(rpcUrl: string): string {
+  if (rpcUrl.startsWith("ws://") || rpcUrl.startsWith("wss://")) return rpcUrl;
+  return rpcUrl.replace(/^https:\/\//, "wss://").replace(/^http:\/\//, "ws://");
 }
 
 export class OpenAgentsSDK {
@@ -87,5 +105,62 @@ export class OpenAgentsSDK {
     }
 
     return openTasks;
+  }
+
+  /**
+   * Subscribe to on-chain contract events in real time.
+   * Uses a WebSocket provider (ethers auto-reconnects and resubscribes).
+   * Logs are decoded with parameter names and values; optional filtering by
+   * indexed parameter values is applied before the callback fires.
+   *
+   * @returns an unsubscribe function.
+   */
+  async subscribeToEvents<T = Record<string, any>>(
+    contractAddress: string,
+    abi: any[],
+    eventName: string,
+    callback: EventCallback<T>,
+    filter: Record<string, any> = {}
+  ): Promise<() => void> {
+    const wsUrl = this.config.wsUrl ?? toWsUrl(this.config.rpcUrl);
+    const wsProvider = new ethers.WebSocketProvider(wsUrl);
+    const contract = new ethers.Contract(contractAddress, abi, wsProvider);
+
+    // Resolve the event fragment to validate the name and get inputs.
+    const iface = contract.interface;
+    const fragment = iface.getEvent(eventName);
+    if (!fragment) throw new Error(`Unknown event: ${eventName}`);
+
+    const handler = (...args: any[]) => {
+      const payload = args[args.length - 1] as ethers.ContractEventPayload;
+      const decoded: Record<string, any> = {};
+      const inputs = fragment.inputs;
+      for (let i = 0; i < inputs.length; i++) {
+        const name = inputs[i].name || `arg${i}`;
+        decoded[name] = args[i];
+      }
+      if (this.matchesFilter(decoded, filter, fragment.inputs)) {
+        callback(decoded as T, payload);
+      }
+    };
+
+    contract.on(fragment, handler);
+
+    return async () => {
+      contract.off(fragment, handler);
+      await wsProvider.destroy();
+    };
+  }
+
+  private matchesFilter(
+    decoded: Record<string, any>,
+    filter: Record<string, any>,
+    inputs: readonly ethers.ParamType[]
+  ): boolean {
+    for (const key of Object.keys(filter)) {
+      if (!(key in decoded)) return false;
+      if (decoded[key] !== filter[key]) return false;
+    }
+    return true;
   }
 }
