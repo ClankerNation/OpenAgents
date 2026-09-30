@@ -504,6 +504,12 @@
     "last_pr": "2026-09-29T06:09:49.801Z"
   },
   {
+    "username": "1132dadf",
+    "total_prs": 3,
+    "first_pr": "2026-09-30T04:03:32.827Z",
+    "last_pr": "2026-09-30T05:00:02.193Z"
+  },
+  {
     "username": "OlegChep",
     "total_prs": 2,
     "first_pr": "2026-05-17T04:06:54.515Z",
@@ -562,12 +568,6 @@
     "total_prs": 2,
     "first_pr": "2026-08-07T00:35:32.246Z",
     "last_pr": "2026-08-07T05:50:32.351Z"
-  },
-  {
-    "username": "1132dadf",
-    "total_prs": 2,
-    "first_pr": "2026-09-30T04:03:32.827Z",
-    "last_pr": "2026-09-30T04:25:57.751Z"
   },
   {
     "username": "CuboYe",
