@@ -42,6 +42,24 @@ npx hardhat test
 cd api && pip install -r requirements.txt && uvicorn main:app
 ```
 
+## API Error Responses
+
+All `api/` error responses share one schema:
+
+```json
+{"code": "NOT_FOUND", "message": "Agent not found", "details": {}, "request_id": "..."}
+```
+
+| Code | HTTP status | Meaning |
+|------|-------------|---------|
+| `VALIDATION_ERROR` | 400 | Request body/query failed validation; `details.fields` lists each invalid field |
+| `NOT_FOUND` | 404 | Requested resource does not exist |
+| `AUTH_FAILED` | 401/403 | Missing, invalid, or insufficient credentials |
+| `RATE_LIMITED` | 429 | Too many requests |
+| `INTERNAL_ERROR` | 500 | Unexpected server error |
+
+`request_id` is a per-request UUID also returned in the `X-Request-ID` response header, for correlating client reports with server logs. See `api/errors.py` for the exception types (`ValidationAPIError`, `NotFoundError`, `AuthFailedError`, `RateLimitedError`, `InternalError`) route handlers should raise.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
