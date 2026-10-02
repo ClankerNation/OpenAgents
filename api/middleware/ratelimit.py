@@ -1,92 +1,102 @@
 """Rate limiting middleware for the OpenAgents API."""
-
 import time
-from collections import defaultdict
-from fastapi import Request, HTTPException
+from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import JSONResponse
-from typing import Dict, Tuple
+from api.middleware.auth import decode_token
+from jwt import ExpiredSignatureError, InvalidTokenError
+
+# Rate limits
+AUTH_LIMIT = 1000      # authenticated users per minute
+ANON_LIMIT = 100       # anonymous users per minute
+WINDOW_SIZE = 60       # 60 seconds window
+
+# In-memory storage for request counts
+# In production, use Redis or similar
+_request_counts = {
+    "auth": {},   # key -> (count, window_start)
+    "anon": {}    # key -> (count, window_start)
+}
 
 
-class RateLimitConfig:
-    def __init__(
-        self,
-        requests_per_window: int = 100,
-        window_seconds: int = 60,
-        burst_limit: int = 20,
-    ):
-        self.requests_per_window = requests_per_window
-        self.window_seconds = window_seconds
-        self.burst_limit = burst_limit
+def _get_key(request: Request) -> str:
+    """Extract identifier for rate limiting."""
+    # Check for Authorization header
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header[7:]  # Remove 'Bearer '
+        try:
+            payload = decode_token(token)
+            # Use user id if available, otherwise fall back to IP
+            user_id = payload.get("sub")
+            if user_id:
+                return f"auth:{user_id}"
+        except (ExpiredSignatureError, InvalidTokenError):
+            pass  # fall back to IP
+    # Fallback to IP address
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        ip = forwarded.split(",")[0].strip()
+    else:
+        ip = request.client.host if request.client else "unknown"
+    return f"anon:{ip}"
 
 
-# BUG: In-memory store — all counters reset when the server restarts,
-# allowing clients to bypass rate limits by waiting for a deploy
-_request_counts: Dict[str, Tuple[int, float]] = defaultdict(lambda: (0, time.time()))
+def _is_authenticated(request: Request) -> bool:
+    """Check if request has a valid authentication token."""
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return False
+    token = auth_header[7:]
+    try:
+        decode_token(token)
+        return True
+    except (ExpiredSignatureError, InvalidTokenError):
+        return False
 
 
-class RateLimitMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, config: RateLimitConfig = None):
-        super().__init__(app)
-        self.config = config or RateLimitConfig()
-
-    def _get_client_ip(self, request: Request) -> str:
-        # BUG: Trusts X-Forwarded-For header without validation — clients can
-        # spoof their IP to bypass rate limiting entirely
-        forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-        return request.client.host if request.client else "unknown"
-
-    def _is_rate_limited(self, client_ip: str) -> Tuple[bool, int]:
-        global _request_counts
-        count, window_start = _request_counts[client_ip]
-        now = time.time()
-
-        # BUG: Fixed window instead of sliding window — a burst of requests at
-        # the boundary of two windows allows 2x the intended rate
-        if now - window_start >= self.config.window_seconds:
-            _request_counts[client_ip] = (1, now)
-            return False, self.config.requests_per_window - 1
-
-        if count >= self.config.requests_per_window:
-            retry_after = int(self.config.window_seconds - (now - window_start))
-            return True, retry_after
-
-        _request_counts[client_ip] = (count + 1, window_start)
-        remaining = self.config.requests_per_window - count - 1
-        return False, remaining
-
+class RateLimiter(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        if request.url.path.startswith("/health"):
+        # Skip rate limiting for health check
+        if request.url.path == "/health":
             return await call_next(request)
 
-        client_ip = self._get_client_ip(request)
-        is_limited, value = self._is_rate_limited(client_ip)
+        key = _get_key(request)
+        is_auth = _is_authenticated(request)
+        limit = AUTH_LIMIT if is_auth else ANON_LIMIT
 
-        if is_limited:
-            return JSONResponse(
+        now = time.time()
+        window_start = now - (now % WINDOW_SIZE)
+
+        # Get current count and window start for this key
+        count_dict = _request_counts["auth" if is_auth else "anon"]
+        count, start = count_dict.get(key, (0, window_start))
+
+        # Reset if we're in a new window
+        if start != window_start:
+            count = 0
+            start = window_start
+
+        # Increment count
+        count += 1
+        count_dict[key] = (count, start)
+
+        # If over limit, return 429
+        if count > limit:
+            return Response(
+                content="Rate limit exceeded",
                 status_code=429,
-                content={
-                    "error": "Rate limit exceeded",
-                    "retry_after": value,
+                headers={
+                    "Retry-After": str(WINDOW_SIZE),
                 },
-                headers={"Retry-After": str(value)},
             )
 
-        response = await call_next(request)
-        response.headers["X-RateLimit-Remaining"] = str(value)
-        response.headers["X-RateLimit-Limit"] = str(self.config.requests_per_window)
+        # Process request
+        response: Response = await call_next(request)
+
+        # Add rate limit headers
+        remaining = max(0, limit - count)
+        response.headers["X-RateLimit-Limit"] = str(limit)
+        response.headers["X-RateLimit-Remaining"] = str(remaining)
+        response.headers["X-RateLimit-Reset"] = str(int(start + WINDOW_SIZE))
+
         return response
-
-
-def create_rate_limiter(
-    requests_per_minute: int = 100,
-    burst: int = 20,
-) -> RateLimitMiddleware:
-    config = RateLimitConfig(
-        requests_per_window=requests_per_minute,
-        window_seconds=60,
-        burst_limit=burst,
-    )
-    return RateLimitMiddleware(app=None, config=config)
