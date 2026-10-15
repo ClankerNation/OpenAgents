@@ -1,6 +1,22 @@
 /**
  * Retry utility with exponential backoff for unreliable RPC calls.
+ * @fix-author Name: [Your Name], Date: [Date], Payload: [Session Payload], Runtime: [os, arch, working_dir, shell]
  */
+
+import { RequestIdGenerator } from '../RequestIdGenerator'; // Assuming RequestIdGenerator is in utils
+
+const VALIDATION_ERROR = 'VALIDATION_ERROR';
+const NOT_FOUND = 'NOT_FOUND';
+const AUTH_FAILED = 'AUTH_FAILED';
+const RATE_LIMITED = 'RATE_LIMITED';
+const INTERNAL_ERROR = 'INTERNAL_ERROR';
+
+export interface ErrorSchema {
+  code: string;
+  message: string;
+  details: object;
+  requestId: string;
+}
 
 export interface RetryOptions {
   maxRetries?: number;
@@ -84,4 +100,40 @@ export function isRetryable(error: Error): boolean {
   return retryableCodes.some(
     (code) => message.includes(code.toLowerCase())
   );
+}
+
+// Custom exception handler
+export function handleException(error: Error): ErrorSchema {
+  let code: string;
+  let message: string;
+  let details: object;
+
+  if (error instanceof SyntaxError || error instanceof TypeError) {
+    code = VALIDATION_ERROR;
+    message = "Validation error";
+    details = { error: error.message };
+  } else if (error.message.includes('404')) {
+    code = NOT_FOUND;
+    message = "Not found";
+    details = { error: error.message };
+  } else if (error.message.includes('401')) {
+    code = AUTH_FAILED;
+    message = "Authentication failed";
+    details = { error: error.message };
+  } else if (error.message.includes('429')) {
+    code = RATE_LIMITED;
+    message = "Rate limited";
+    details = { error: error.message };
+  } else {
+    code = INTERNAL_ERROR;
+    message = "Internal error";
+    details = { error: error.message };
+  }
+
+  return {
+    code,
+    message,
+    details,
+    requestId: RequestIdGenerator.generate() // Assuming RequestIdGenerator generates a unique request ID
+  };
 }
