@@ -9,6 +9,13 @@ app = FastAPI(
     version="0.1.0",
 )
 
+try:
+    from .routes.payments import router as payments_router
+    app.include_router(payments_router)
+except ImportError:
+    from routes.payments import router as payments_router
+    app.include_router(payments_router)
+
 
 class AgentResponse(BaseModel):
     agent_id: str

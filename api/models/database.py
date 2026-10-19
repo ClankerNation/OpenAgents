@@ -6,7 +6,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
-from datetime import datetime
+from datetime import datetime, timedelta
+from typing import Optional
 import os
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./openagents.db")
@@ -82,8 +83,26 @@ class Payment(Base):
     status = Column(String(32), default="pending")
     created_at = Column(DateTime, default=datetime.utcnow)
     claimed_at = Column(DateTime, nullable=True)
+    release_time = Column(DateTime, nullable=True)
 
     task = relationship("Task", back_populates="payments")
+
+    @property
+    def releaseTime(self) -> Optional[datetime]:
+        """Release timestamp of the escrow, defaulting to task deadline or creation time."""
+        if self.release_time:
+            return self.release_time
+        if self.task and self.task.deadline:
+            return self.task.deadline
+        return self.created_at
+
+    @property
+    def expired_at(self) -> Optional[datetime]:
+        """Computed field: escrow expiration timestamp (30 days past releaseTime)."""
+        base_time = self.releaseTime
+        if base_time:
+            return base_time + timedelta(days=30)
+        return None
 
 
 def init_db():

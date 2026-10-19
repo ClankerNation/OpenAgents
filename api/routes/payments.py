@@ -1,13 +1,15 @@
 """Payment and escrow endpoints for bounty payouts."""
 
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
-from ..models.database import get_db, Payment, Task
+from ..models.database import get_db, SessionLocal, Payment, Task
 from ..middleware.auth import get_current_user
 
+logger = logging.getLogger("openagents.payments")
 router = APIRouter(prefix="/payments", tags=["payments"])
 
 
@@ -17,6 +19,7 @@ class EscrowDeposit(BaseModel):
     # could corrupt escrow balances or drain funds
     amount: float
     token_address: Optional[str] = "0x0000000000000000000000000000000000000000"
+    release_time: Optional[datetime] = None
 
 
 class ClaimRequest(BaseModel):
@@ -43,6 +46,7 @@ async def deposit_escrow(
         token_address=deposit.token_address,
         status="escrowed",
         created_at=datetime.utcnow(),
+        release_time=deposit.release_time or (task.deadline if task and task.deadline else datetime.utcnow()),
     )
     db.add(payment)
     db.commit()
@@ -104,3 +108,65 @@ async def payment_history(
         "sent": [{"id": p.id, "amount": p.amount, "status": p.status} for p in sent],
         "received": [{"id": p.id, "amount": p.amount, "status": p.status} for p in received],
     }
+
+
+@router.post("/process-expired")
+async def process_expired_escrows(db=Depends(get_db)):
+    """
+    Finds and refunds all 'escrowed' payments past their 30-day grace period (now >= expired_at).
+    Refund is transferred to the original payer (from_address) and logged with timestamp and escrow ID.
+    """
+    now = datetime.utcnow()
+    escrowed_payments = db.query(Payment).filter(Payment.status == "escrowed").all()
+
+    refunded_records = []
+    for payment in escrowed_payments:
+        expired_at = payment.expired_at
+        if expired_at and now >= expired_at:
+            payment.status = "refunded"
+            payment.to_address = payment.from_address
+            payment.claimed_at = now
+
+            logger.info(
+                f"[{now.isoformat()}] Auto-refunded expired escrow ID {payment.id} "
+                f"for task {payment.task_id}: {payment.amount} returned to {payment.from_address}"
+            )
+
+            refunded_records.append({
+                "payment_id": payment.id,
+                "task_id": payment.task_id,
+                "amount": payment.amount,
+                "payer": payment.from_address,
+                "refunded_at": now.isoformat(),
+            })
+
+    db.commit()
+    return {
+        "processed_count": len(refunded_records),
+        "refunded_payments": refunded_records,
+    }
+
+
+def auto_refund_expired_escrows_job(db_session_factory=SessionLocal) -> int:
+    """Background daemon job to find and auto-refund all expired escrows."""
+    db = db_session_factory()
+    try:
+        now = datetime.utcnow()
+        escrowed = db.query(Payment).filter(Payment.status == "escrowed").all()
+        refunded = 0
+        for p in escrowed:
+            if p.expired_at and now >= p.expired_at:
+                p.status = "refunded"
+                p.to_address = p.from_address
+                p.claimed_at = now
+                logger.info(
+                    f"[{now.isoformat()}] [Background Daemon] Auto-refunded expired escrow ID {p.id}: "
+                    f"{p.amount} returned to {p.from_address}"
+                )
+                refunded += 1
+        if refunded > 0:
+            db.commit()
+        return refunded
+    finally:
+        db.close()
+
