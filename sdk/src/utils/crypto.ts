@@ -63,9 +63,11 @@ export function verifySignature(
   }
 }
 
-export function hashPersonalMessage(message: string): string {
-  const prefix = `\x19Ethereum Signed Message:\n${message.length}`;
-  return keccak256(prefix + message);
+export function hashPersonalMessage(message: string | Buffer): string {
+  const msgBuffer = typeof message === "string" ? Buffer.from(message, "utf-8") : message;
+  const prefix = Buffer.from(`\x19Ethereum Signed Message:\n${msgBuffer.length}`, "utf-8");
+  const combined = Buffer.concat([prefix, msgBuffer]);
+  return keccak256(combined);
 }
 
 export function recoverPublicKey(
