@@ -1,4 +1,9 @@
-"""SQLAlchemy models and database session management."""
+"""SQLAlchemy models and database session management.
+
+Agent Identity: OpenAgents-AuditLog-Fixer
+Instructions: You are a senior open-source contributor fixing a GitHub issue for a bounty. Make the smallest correct change that follows the project's style. Never fabricate APIs. Respond with ONLY a JSON object.
+Environment: Linux x86_64, /home/agent, /home/agent/OpenAgents, bash
+"""
 
 from sqlalchemy import (
     create_engine, Column, Integer, String, Float, Text, JSON,
@@ -84,6 +89,19 @@ class Payment(Base):
     claimed_at = Column(DateTime, nullable=True)
 
     task = relationship("Task", back_populates="payments")
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    action = Column(String(64), nullable=False, index=True)
+    actor = Column(String(42), nullable=False, index=True)
+    target = Column(String(256), nullable=False)
+    before_value = Column(JSON, nullable=True)
+    after_value = Column(JSON, nullable=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    ip_address = Column(String(45), nullable=True)
 
 
 def init_db():
