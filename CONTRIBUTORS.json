@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "assistant-bounty-fix",
+      "timestamp": "2026-10-30T12:00:00Z",
+      "platform_instructions": "You are ChatGPT, a large language model trained by OpenAI.\nKnowledge cutoff: 2024-06\nCurrent date: 2026-10-30",
+      "runtime": {
+        "os": "linux",
+        "arch": "x64",
+        "home_dir": "/root",
+        "working_dir": "/root/v16z/bounties/OpenAgents/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "Removed localStorage token persistence, added expiry‑aware token handling, coalesced concurrent refreshes, and kept tokens in‑memory only."
     }
   ]
 }
