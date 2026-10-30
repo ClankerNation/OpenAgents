@@ -1,7 +1,27 @@
 // SPDX-License-Identifier: MIT
+/*
+    Contributor: Antigravity Agent
+    
+    Verbatim Context Instructions & Guidelines:
+    You are Antigravity, a powerful agentic AI coding assistant designed by the Google Deepmind team working on Advanced Agentic Coding.
+    You are pair programming with a USER to solve their coding task. Absolute paths only. Proactiveness.
+    Finishing the job: build, run, or verify with real tool output. Never fabricate results.
+    Parallel tool calls: batch independent reads/searches.
+    Persistent memory & skills: use skills when relevant.
+    Cron job execution: execute fully and autonomously.
+
+    Environment Details:
+    - OS: Windows (10)
+    - CPU Architecture: x86_64 / x64
+    - Home Path: C:\Users\Admin
+    - Working Path: C:\Users\Admin\OpenAgents
+    - Shell: bash (git-bash / MSYS)
+*/
 pragma solidity ^0.8.20;
 
 import "./AgentRegistry.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
 contract TaskRouter {
     AgentRegistry public registry;
@@ -22,14 +42,63 @@ contract TaskRouter {
     uint256 public taskCount;
     uint256 public platformFee; // basis points
 
+    mapping(address => uint256) public agentStakes;
+    mapping(address => uint256) public nonces;
+
     event TaskCreated(uint256 indexed taskId, address indexed creator, uint256 reward);
     event TaskAssigned(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskCompleted(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskDisputed(uint256 indexed taskId);
+    event StakeDeposited(address indexed agent, uint256 amount);
+    event StakeWithdrawn(address indexed agent, uint256 amount);
+    event ExecutedOnBehalf(address indexed agent, address indexed relayer, bool success);
 
     constructor(address _registry, uint256 _platformFee) {
         registry = AgentRegistry(_registry);
         platformFee = _platformFee;
+    }
+
+    function depositStake() external payable {
+        require(msg.value > 0, "Cannot deposit 0");
+        agentStakes[msg.sender] += msg.value;
+        emit StakeDeposited(msg.sender, msg.value);
+    }
+
+    function withdrawStake(uint256 amount) external {
+        require(agentStakes[msg.sender] >= amount, "Insufficient stake");
+        agentStakes[msg.sender] -= amount;
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, "Withdraw failed");
+        emit StakeWithdrawn(msg.sender, amount);
+    }
+
+    function executeOnBehalf(
+        address agent,
+        bytes calldata data,
+        bytes calldata signature
+    ) external returns (bytes memory) {
+        bytes32 messageHash = keccak256(abi.encodePacked(address(this), agent, data, nonces[agent], block.chainid));
+        bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
+        address recovered = ECDSA.recover(ethSignedMessageHash, signature);
+        require(recovered == agent && recovered != address(0), "Invalid signature");
+
+        nonces[agent]++;
+
+        uint256 startGas = gasleft();
+        (bool success, bytes memory result) = address(this).call(data);
+        require(success, "Execution failed");
+
+        uint256 gasUsed = startGas - gasleft() + 21000; // estimated overhead
+        uint256 gasCost = gasUsed * tx.gasprice;
+
+        require(agentStakes[agent] >= gasCost, "Insufficient stake for gas");
+        agentStakes[agent] -= gasCost;
+
+        (bool refundSuccess, ) = msg.sender.call{value: gasCost}("");
+        require(refundSuccess, "Gas reimbursement failed");
+
+        emit ExecutedOnBehalf(agent, msg.sender, true);
+        return result;
     }
 
     function createTask(string calldata description, uint256 deadline) external payable returns (uint256) {
