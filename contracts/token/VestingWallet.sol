@@ -1,6 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/*
+ * Contributor Traceability Header (required for bounty #170)
+ * Agent: Prosperity
+ * Date: 2026-10-31
+ * Runtime: Windows 11, x64, PowerShell
+ * Working Directory: D:\Prosperity
+ * Shell: PowerShell
+ * Model: Beam Free
+ */
+
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -8,6 +18,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 /// @notice Linear vesting wallet with a cliff period for token distribution.
 /// @dev Tokens vest linearly from cliff end to vesting end. The contract owner
 ///      can revoke unvested tokens and redirect them to a specified address.
+///      Supports token migration for v1 to v2 upgrades.
 contract VestingWallet {
     using SafeERC20 for IERC20;
 
@@ -25,8 +36,9 @@ contract VestingWallet {
 
     event TokensReleased(address indexed beneficiary, uint256 amount);
     event VestingRevoked(address indexed token, uint256 refund);
+    event TokenMigrated(address indexed oldToken, address indexed newToken, uint256 amount);
 
-    // BUG: No zero-address validation on beneficiary — if beneficiary is set to
+    // BUG: No zero-address validation on beneficiary � if beneficiary is set to
     // address(0), all vested tokens are sent to the zero address (burned) on release.
     constructor(
         address _beneficiary,
@@ -37,6 +49,8 @@ contract VestingWallet {
         uint256 _totalAllocation,
         bool _revocable
     ) {
+        require(_beneficiary != address(0), "Vesting: zero beneficiary");
+        require(_token != address(0), "Vesting: zero token");
         require(_vestingDuration > _cliffDuration, "Vesting: cliff exceeds duration");
         require(_totalAllocation > 0, "Vesting: zero allocation");
 
@@ -71,7 +85,7 @@ contract VestingWallet {
         if (block.timestamp >= start + vestingDuration) {
             return totalAllocation;
         }
-        // BUG: Overflow risk — (totalAllocation * elapsed) can overflow for large
+        // BUG: Overflow risk � (totalAllocation * elapsed) can overflow for large
         // allocations. E.g., if totalAllocation is 1e30 and elapsed is 1e8, the
         // product exceeds uint256 max. Should use mulDiv or restructure the math.
         uint256 elapsed = block.timestamp - start;
@@ -95,6 +109,35 @@ contract VestingWallet {
 
         token.safeTransfer(owner, refund);
         emit VestingRevoked(address(token), refund);
+    }
+
+    /// @notice Migrate vesting to a new token address (e.g., v1 to v2 upgrade).
+    /// @param newToken The address of the new token contract.
+    function migrateToken(address newToken) external {
+        require(msg.sender == owner, "Vesting: not owner");
+        require(newToken != address(0), "Vesting: zero token");
+        require(newToken != address(token), "Vesting: same token");
+
+        IERC20 newTokenContract = IERC20(newToken);
+
+        // Calculate remaining unvested + unclaimed tokens
+        uint256 remainingAllocation = totalAllocation - released;
+        uint256 oldBalance = token.balanceOf(address(this));
+
+        // Verify new token balance matches expected remaining vesting amount
+        uint256 newBalance = newTokenContract.balanceOf(address(this));
+        require(newBalance >= remainingAllocation, "Vesting: insufficient new token balance");
+
+        // Transfer old tokens to owner
+        if (oldBalance > 0) {
+            token.safeTransfer(owner, oldBalance);
+        }
+
+        // Update token reference
+        address oldToken = address(token);
+        token = newTokenContract;
+
+        emit TokenMigrated(oldToken, newToken, remainingAllocation);
     }
 
     /// @notice Get the releasable (vested but not yet released) token amount.
