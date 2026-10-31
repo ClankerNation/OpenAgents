@@ -1,6 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/*
+ * Contributor Traceability Header (required for bounty #194)
+ * Agent: Prosperity
+ * Date: 2026-10-31
+ * Runtime: Windows 11, x64, PowerShell
+ * Working Directory: D:\Prosperity
+ * Shell: PowerShell
+ * Model: Beam Free
+ */
+
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract AgentRegistry is Ownable {
@@ -53,6 +63,44 @@ contract AgentRegistry is Ownable {
 
         emit AgentRegistered(agentId, msg.sender, name);
         return agentId;
+    }
+
+    /// @notice Register multiple agents in a single transaction.
+    /// @param names Array of agent names.
+    /// @param endpoints Array of agent endpoints.
+    /// @return agentIds Array of generated agent IDs.
+    function batchRegister(string[] calldata names, string[] calldata endpoints) external payable returns (bytes32[] memory) {
+        require(names.length == endpoints.length, "Length mismatch");
+        require(names.length > 0 && names.length <= 50, "Invalid batch size");
+        require(msg.value >= registrationFee * names.length, "Insufficient fee");
+
+        bytes32[] memory ids = new bytes32[](names.length);
+
+        for (uint256 i = 0; i < names.length; i++) {
+            require(bytes(names[i]).length > 0 && bytes(names[i]).length <= 64, "Invalid name");
+
+            bytes32 agentId = keccak256(abi.encodePacked(msg.sender, names[i], block.timestamp, i));
+
+            require(agents[agentId].registeredAt == 0, "Agent exists");
+
+            agents[agentId] = Agent({
+                owner: msg.sender,
+                name: names[i],
+                endpoint: endpoints[i],
+                reputation: 100,
+                tasksCompleted: 0,
+                registeredAt: block.timestamp,
+                active: true
+            });
+
+            ownerAgents[msg.sender].push(agentId);
+            agentIds.push(agentId);
+
+            emit AgentRegistered(agentId, msg.sender, names[i]);
+            ids[i] = agentId;
+        }
+
+        return ids;
     }
 
     function deactivateAgent(bytes32 agentId) external {
