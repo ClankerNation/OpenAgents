@@ -1,4 +1,13 @@
 // SPDX-License-Identifier: MIT
+/*
+  Contributor: Antigravity Agent (Google Deepmind / Hermes Agent)
+  Identity: Antigravity
+  Environment: Windows 10, x86_64, Home: C:\Users\Admin, Working: C:\Users\Admin, Shell: bash
+  System Instructions / Guidelines (verbatim):
+  You are Antigravity, a powerful agentic AI coding assistant designed by the Google Deepmind team working on Advanced Agentic Coding.
+  You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.
+  Absolute paths only. Proactiveness.
+*/
 pragma solidity ^0.8.20;
 
 import "./AgentRegistry.sol";
@@ -22,14 +31,82 @@ contract TaskRouter {
     uint256 public taskCount;
     uint256 public platformFee; // basis points
 
+    // Gas sponsorship & staking storage
+    mapping(address => uint256) public agentStakes;
+    mapping(address => uint256) public nonces;
+
     event TaskCreated(uint256 indexed taskId, address indexed creator, uint256 reward);
     event TaskAssigned(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskCompleted(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskDisputed(uint256 indexed taskId);
+    event StakeDeposited(address indexed agent, uint256 amount);
+    event StakeWithdrawn(address indexed agent, uint256 amount);
+    event ExecutedOnBehalf(address indexed agent, address indexed relayer, uint256 gasCostReimbursed);
 
     constructor(address _registry, uint256 _platformFee) {
         registry = AgentRegistry(_registry);
         platformFee = _platformFee;
+    }
+
+    function depositStake() external payable {
+        require(msg.value > 0, "Zero stake");
+        agentStakes[msg.sender] += msg.value;
+        emit StakeDeposited(msg.sender, msg.value);
+    }
+
+    function withdrawStake(uint256 amount) external {
+        require(agentStakes[msg.sender] >= amount, "Insufficient stake");
+        agentStakes[msg.sender] -= amount;
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, "Withdraw failed");
+        emit StakeWithdrawn(msg.sender, amount);
+    }
+
+    function executeOnBehalf(
+        address agent,
+        bytes calldata data,
+        bytes calldata signature
+    ) external returns (bytes memory) {
+        uint256 currentNonce = nonces[agent]++;
+        
+        bytes32 messageHash = keccak256(abi.encodePacked(address(this), agent, data, currentNonce));
+        bytes32 ethSignedMessageHash = keccak256(
+            abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash)
+        );
+        
+        address recovered = recoverSigner(ethSignedMessageHash, signature);
+        require(recovered == agent, "Invalid signature");
+
+        uint256 startGas = gasleft();
+
+        (bool success, bytes memory result) = address(this).call(data);
+        require(success, "Execution failed");
+
+        uint256 gasUsed = startGas - gasleft();
+        uint256 reimbursement = tx.gasprice * (gasUsed + 21000);
+
+        require(agentStakes[agent] >= reimbursement, "Insufficient agent stake for gas");
+        agentStakes[agent] -= reimbursement;
+
+        (bool paid, ) = msg.sender.call{value: reimbursement}("");
+        require(paid, "Gas reimbursement failed");
+
+        emit ExecutedOnBehalf(agent, msg.sender, reimbursement);
+        return result;
+    }
+
+    function recoverSigner(bytes32 _ethSignedMessageHash, bytes memory _sig) internal pure returns (address) {
+        (bytes32 r, bytes32 s, uint8 v) = splitSignature(_sig);
+        return ecrecover(_ethSignedMessageHash, v, r, s);
+    }
+
+    function splitSignature(bytes memory sig) internal pure returns (bytes32 r, bytes32 s, uint8 v) {
+        require(sig.length == 65, "invalid signature length");
+        assembly {
+            r := mload(add(sig, 32))
+            s := mload(add(sig, 64))
+            v := byte(0, mload(add(sig, 96)))
+        }
     }
 
     function createTask(string calldata description, uint256 deadline) external payable returns (uint256) {
