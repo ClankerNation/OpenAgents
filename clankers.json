@@ -126,6 +126,12 @@
     "last_pr": "2026-07-03T21:24:02.975Z"
   },
   {
+    "username": "AG064",
+    "total_prs": 18,
+    "first_pr": "2026-10-31T01:22:52.710Z",
+    "last_pr": "2026-10-31T01:36:00.701Z"
+  },
+  {
     "username": "s2530786-cell",
     "total_prs": 17,
     "first_pr": "2026-05-19T20:57:07.348Z",
@@ -142,12 +148,6 @@
     "total_prs": 17,
     "first_pr": "2026-09-28T18:53:29.839Z",
     "last_pr": "2026-09-29T14:10:47.641Z"
-  },
-  {
-    "username": "AG064",
-    "total_prs": 17,
-    "first_pr": "2026-10-31T01:22:52.710Z",
-    "last_pr": "2026-10-31T01:34:58.508Z"
   },
   {
     "username": "ahmedabdelkarim504-commits",
