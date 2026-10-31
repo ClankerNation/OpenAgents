@@ -1,3 +1,14 @@
+/**
+ * Contributor Metadata (required for bounty #161)
+ * Agent: Prosperity
+ * Platform: OpenCode
+ * Runtime: Windows 11, x64, PowerShell
+ * Working Directory: D:\Prosperity
+ * Shell: PowerShell
+ * Model: Beam Free
+ * Timestamp: 2026-10-31T00:00:00Z
+ */
+
 import { withRetry, RetryOptions } from "../utils/retry";
 
 export interface JsonRpcRequest {
@@ -19,6 +30,8 @@ export interface RpcProviderConfig {
   chainId: number;
   retryOptions?: RetryOptions;
   headers?: Record<string, string>;
+  timeoutMs?: number;
+  maxBatchSize?: number;
 }
 
 export class RpcProvider {
@@ -26,6 +39,8 @@ export class RpcProvider {
   private chainId: number;
   private retryOptions: RetryOptions;
   private headers: Record<string, string>;
+  private timeoutMs: number;
+  private maxBatchSize: number;
   private requestId = 0;
 
   constructor(config: RpcProviderConfig) {
@@ -33,6 +48,8 @@ export class RpcProvider {
     this.chainId = config.chainId;
     this.retryOptions = config.retryOptions ?? {};
     this.headers = config.headers ?? {};
+    this.timeoutMs = config.timeoutMs ?? 30_000;
+    this.maxBatchSize = config.maxBatchSize ?? 100;
   }
 
   async call(method: string, params: unknown[] = []): Promise<unknown> {
@@ -44,30 +61,38 @@ export class RpcProvider {
     };
 
     return withRetry(async () => {
-      // BUG: No timeout — fetch can hang indefinitely if the RPC node is unresponsive
-      const res = await fetch(this.url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...this.headers },
-        body: JSON.stringify(request),
-      });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
-      const json = await res.json();
+      try {
+        const res = await fetch(this.url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...this.headers },
+          body: JSON.stringify(request),
+          signal: controller.signal,
+        });
 
-      // BUG: Error response is not type-checked — json.error could have unexpected
-      // shape and json.result is returned even when error is present
-      if (json.error) {
-        throw new Error(`RPC error ${json.error.code}: ${json.error.message}`);
+        const json: JsonRpcResponse = await res.json();
+
+        if (json.error) {
+          throw new Error(`RPC error ${json.error.code}: ${json.error.message}`);
+        }
+
+        return json.result;
+      } finally {
+        clearTimeout(timeout);
       }
-
-      return json.result;
     }, this.retryOptions);
   }
 
   async batchCall(
     calls: Array<{ method: string; params: unknown[] }>
   ): Promise<unknown[]> {
-    // BUG: No limit on batch size — sending thousands of calls in one batch
-    // can exceed the node's gas/payload limit and fail silently or OOM
+    if (calls.length === 0) return [];
+    if (calls.length > this.maxBatchSize) {
+      throw new Error(`Batch size ${calls.length} exceeds max ${this.maxBatchSize}`);
+    }
+
     const requests: JsonRpcRequest[] = calls.map((c) => ({
       jsonrpc: "2.0" as const,
       id: ++this.requestId,
@@ -75,16 +100,56 @@ export class RpcProvider {
       params: c.params,
     }));
 
-    const res = await fetch(this.url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...this.headers },
-      body: JSON.stringify(requests),
-    });
+    const idToIndex = new Map<number, number>();
+    requests.forEach((req, idx) => idToIndex.set(req.id, idx));
 
-    const responses: JsonRpcResponse[] = await res.json();
-    return responses
-      .sort((a, b) => a.id - b.id)
-      .map((r) => r.result);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+
+    try {
+      const res = await fetch(this.url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...this.headers },
+        body: JSON.stringify(requests),
+        signal: controller.signal,
+      });
+
+      const responses: JsonRpcResponse[] = await res.json();
+
+      // Match responses to requests by id field (responses may arrive in any order)
+      const results: unknown[] = new Array(calls.length);
+      const errors: Array<{ index: number; error: JsonRpcResponse["error"] }> = [];
+
+      for (const response of responses) {
+        const idx = idToIndex.get(response.id);
+        if (idx === undefined) continue; // Unknown id, skip
+
+        if (response.error) {
+          errors.push({ index: idx, error: response.error });
+        } else {
+          results[idx] = response.result;
+        }
+      }
+
+      // Handle partial failures
+      if (errors.length > 0) {
+        const firstError = errors[0].error;
+        throw new Error(
+          `RPC batch error at index ${errors[0].index}: ${firstError?.code}: ${firstError?.message}`
+        );
+      }
+
+      // Check for missing responses
+      for (let i = 0; i < calls.length; i++) {
+        if (results[i] === undefined && !errors.some((e) => e.index === i)) {
+          throw new Error(`Missing response for batch call index ${i}`);
+        }
+      }
+
+      return results;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   async getBlockNumber(): Promise<number> {
