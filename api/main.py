@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Query
+from .routes.audit import router as audit_router
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -8,6 +9,9 @@ app = FastAPI(
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+# Register audit log router
+app.include_router(audit_router)
 
 
 class AgentResponse(BaseModel):
