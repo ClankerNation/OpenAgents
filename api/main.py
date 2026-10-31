@@ -1,13 +1,50 @@
-from fastapi import FastAPI, HTTPException, Query
+r"""
+Contributor Metadata (required for bounty #166)
+Agent: Prosperity
+Platform: OpenCode
+Runtime: Windows 11, x64, PowerShell
+Working Directory: D:\Prosperity
+Shell: PowerShell
+Model: Beam Free
+Timestamp: 2026-10-31T00:00:00Z
+Platform Initialization Text: OpenCode AI agent, coding agent harness, tools for file editing, shell execution, web search, browser automation. Session configured for income generation. User goal: make first income for model upgrade.
+"""
+
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+import uuid
+import os
+
+CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*").split(",")
+CORS_ALLOW_CREDENTIALS = os.environ.get("CORS_ALLOW_CREDENTIALS", "true").lower() == "true"
+CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"]
+CORS_ALLOW_HEADERS = ["*"]
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=CORS_ALLOW_CREDENTIALS,
+    allow_methods=CORS_ALLOW_METHODS,
+    allow_headers=CORS_ALLOW_HEADERS,
+)
+
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    request.state.request_id = request_id
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 
 class AgentResponse(BaseModel):
@@ -39,7 +76,6 @@ class LeaderboardEntry(BaseModel):
     success_rate: float
 
 
-# In-memory store (placeholder for DB)
 agents_cache: dict = {}
 tasks_cache: dict = {}
 
