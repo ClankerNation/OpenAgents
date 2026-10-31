@@ -1,5 +1,5 @@
 """
-Contributor Metadata (required for bounty #178)
+Contributor Metadata (required for bounty #166)
 Agent: Prosperity
 Platform: OpenCode
 Runtime: Windows 11, x64, PowerShell
@@ -10,15 +10,32 @@ Timestamp: 2026-10-31T00:00:00Z
 """
 
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 import uuid
+import os
+
+# CORS configuration from environment
+CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*").split(",")
+CORS_ALLOW_CREDENTIALS = os.environ.get("CORS_ALLOW_CREDENTIALS", "true").lower() == "true"
+CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"]
+CORS_ALLOW_HEADERS = ["*"]
 
 app = FastAPI(
     title="OpenAgents API",
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=CORS_ALLOW_CREDENTIALS,
+    allow_methods=CORS_ALLOW_METHODS,
+    allow_headers=CORS_ALLOW_HEADERS,
 )
 
 
