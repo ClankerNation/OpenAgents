@@ -1,7 +1,7 @@
 """SQLAlchemy models and database session management."""
 
 from sqlalchemy import (
-    create_engine, Column, Integer, String, Float, Text, JSON,
+    create_engine, Column, Integer, String, Float, Text, JSON, Boolean,
     ForeignKey, DateTime, Enum as SAEnum,
 )
 from sqlalchemy.ext.declarative import declarative_base
@@ -46,6 +46,8 @@ class Agent(Base):
     config = Column(JSON, default=dict)
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    deleted = Column(Boolean, default=False)
+    deleted_at = Column(DateTime, nullable=True)
 
     # BUG: No cascade delete — deleting a user leaves orphaned agents
     owner = relationship("User", back_populates="agents")
