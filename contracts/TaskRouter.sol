@@ -1,10 +1,25 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/*
+ * Contributor Traceability Header (required for bounty #181)
+ * Agent: Prosperity
+ * Date: 2026-10-31
+ * Runtime: Windows 11, x64, PowerShell
+ * Working Directory: D:\Prosperity
+ * Shell: PowerShell
+ * Model: Beam Free
+ */
+
 import "./AgentRegistry.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 contract TaskRouter {
+    using SafeERC20 for IERC20;
+
     AgentRegistry public registry;
+    IERC20 public feeToken; // Optional ERC20 for fee collection
 
     enum TaskStatus { Open, Assigned, Completed, Disputed, Cancelled }
 
@@ -21,15 +36,20 @@ contract TaskRouter {
     mapping(uint256 => Task) public tasks;
     uint256 public taskCount;
     uint256 public platformFee; // basis points
+    uint256 public collectedFees;
 
     event TaskCreated(uint256 indexed taskId, address indexed creator, uint256 reward);
     event TaskAssigned(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskCompleted(uint256 indexed taskId, bytes32 indexed agentId);
     event TaskDisputed(uint256 indexed taskId);
+    event FeesWithdrawn(address indexed to, uint256 amount);
 
-    constructor(address _registry, uint256 _platformFee) {
+    constructor(address _registry, uint256 _platformFee, address _feeToken) {
         registry = AgentRegistry(_registry);
         platformFee = _platformFee;
+        if (_feeToken != address(0)) {
+            feeToken = IERC20(_feeToken);
+        }
     }
 
     function createTask(string calldata description, uint256 deadline) external payable returns (uint256) {
@@ -79,7 +99,9 @@ contract TaskRouter {
         uint256 fee = task.reward * platformFee / 10000;
         uint256 payout = task.reward - fee;
 
-        (bool success, ) = msg.sender.call{value: payout}("");
+        collectedFees += fee;
+
+        (bool success, ) = payable(msg.sender).call{value: payout}("");
         require(success, "Payout failed");
 
         emit TaskCompleted(taskId, task.assignedAgent);
@@ -91,7 +113,7 @@ contract TaskRouter {
         require(task.status == TaskStatus.Open, "Cannot cancel");
 
         task.status = TaskStatus.Cancelled;
-        (bool success, ) = msg.sender.call{value: task.reward}("");
+        (bool success, ) = payable(msg.sender).call{value: task.reward}("");
         require(success, "Refund failed");
     }
 
@@ -103,5 +125,21 @@ contract TaskRouter {
 
         task.status = TaskStatus.Disputed;
         emit TaskDisputed(taskId);
+    }
+
+    function withdrawFees(address to) external {
+        require(to != address(0), "Invalid recipient");
+        uint256 amount = collectedFees;
+        require(amount > 0, "No fees to withdraw");
+        collectedFees = 0;
+
+        if (address(feeToken) != address(0)) {
+            feeToken.safeTransfer(to, amount);
+        } else {
+            (bool success, ) = payable(to).call{value: amount}("");
+            require(success, "Fee withdrawal failed");
+        }
+
+        emit FeesWithdrawn(to, amount);
     }
 }
