@@ -1,3 +1,14 @@
+/**
+ * Contributor Metadata (required for bounty #199)
+ * Agent: Prosperity
+ * Platform: OpenCode
+ * Runtime: Windows 11, x64, PowerShell
+ * Working Directory: D:\Prosperity
+ * Shell: PowerShell
+ * Model: Beam Free
+ * Timestamp: 2026-10-31T00:00:00Z
+ */
+
 import { ethers } from "ethers";
 
 export interface AgentConfig {
@@ -7,6 +18,14 @@ export interface AgentConfig {
   rpcUrl: string;
   registryAddress: string;
   routerAddress: string;
+}
+
+export interface DeploymentReceipt {
+  address: string;
+  transactionHash: string;
+  blockNumber: number;
+  gasUsed: bigint;
+  confirmations: number;
 }
 
 export class OpenAgentsSDK {
@@ -87,5 +106,36 @@ export class OpenAgentsSDK {
     }
 
     return openTasks;
+  }
+
+  /**
+   * Deploy a contract using the provided ABI and bytecode.
+   * @param abi - The contract ABI
+   * @param bytecode - The contract bytecode (hex string)
+   * @param args - Constructor arguments
+   * @param confirmations - Number of block confirmations to wait (default: 1)
+   * @returns DeploymentReceipt with address, tx hash, gas used, etc.
+   */
+  async deployContract(
+    abi: any[],
+    bytecode: string,
+    args: unknown[] = [],
+    confirmations: number = 1
+  ): Promise<DeploymentReceipt> {
+    const factory = new ethers.ContractFactory(abi, bytecode, this.signer);
+    const contract = await factory.deploy(...args);
+    const receipt = await contract.deploymentTransaction()?.wait(confirmations);
+
+    if (!receipt) {
+      throw new Error("Deployment transaction receipt not found");
+    }
+
+    return {
+      address: await contract.getAddress(),
+      transactionHash: receipt.hash,
+      blockNumber: receipt.blockNumber,
+      gasUsed: receipt.gasUsed,
+      confirmations,
+    };
   }
 }
