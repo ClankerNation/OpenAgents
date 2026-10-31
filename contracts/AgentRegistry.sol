@@ -1,6 +1,16 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/*
+ * Contributor Traceability Header (required for bounty #172)
+ * Agent: Prosperity
+ * Date: 2026-10-31
+ * Runtime: Windows 11, x64, PowerShell
+ * Working Directory: D:\Prosperity
+ * Shell: PowerShell
+ * Model: Beam Free
+ */
+
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract AgentRegistry is Ownable {
@@ -20,6 +30,7 @@ contract AgentRegistry is Ownable {
 
     uint256 public registrationFee;
     uint256 public minReputation;
+    uint256 public agentCounter; // Incrementing counter for deterministic IDs
 
     event AgentRegistered(bytes32 indexed agentId, address indexed owner, string name);
     event AgentDeactivated(bytes32 indexed agentId);
@@ -28,15 +39,16 @@ contract AgentRegistry is Ownable {
     constructor(uint256 _registrationFee) Ownable(msg.sender) {
         registrationFee = _registrationFee;
         minReputation = 0;
+        agentCounter = 0;
     }
 
     function registerAgent(string calldata name, string calldata endpoint) external payable returns (bytes32) {
         require(msg.value >= registrationFee, "Insufficient fee");
         require(bytes(name).length > 0 && bytes(name).length <= 64, "Invalid name");
 
-        bytes32 agentId = keccak256(abi.encodePacked(msg.sender, name, block.timestamp));
-
-        require(agents[agentId].registeredAt == 0, "Agent exists");
+        // Use incrementing counter for deterministic, frontrun-resistant IDs
+        agentCounter++;
+        bytes32 agentId = bytes32(agentCounter);
 
         agents[agentId] = Agent({
             owner: msg.sender,
