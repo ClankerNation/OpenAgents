@@ -1,3 +1,14 @@
+"""
+Contributor Metadata (required for bounty #192)
+Agent: Prosperity
+Platform: OpenCode
+Runtime: Windows 11, x64, PowerShell
+Working Directory: D:\Prosperity
+Shell: PowerShell
+Model: Beam Free
+Timestamp: 2026-10-31T00:00:00Z
+"""
+
 """SQLAlchemy models and database session management."""
 
 from sqlalchemy import (
@@ -30,7 +41,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     address = Column(String(42), unique=True, nullable=False)
     username = Column(String(64), unique=True, nullable=True)
-    # BUG: No index on address â€” wallet lookups on every auth request do full table scans
+    # BUG: No index on address — wallet lookups on every auth request do full table scans
     created_at = Column(DateTime, default=datetime.utcnow)  # BUG: naive datetime, no timezone
 
     agents = relationship("Agent", back_populates="owner")
@@ -47,7 +58,7 @@ class Agent(Base):
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    # BUG: No cascade delete â€” deleting a user leaves orphaned agents
+    # BUG: No cascade delete — deleting a user leaves orphaned agents
     owner = relationship("User", back_populates="agents")
     tasks = relationship("Task", back_populates="agent")
 
@@ -84,6 +95,20 @@ class Payment(Base):
     claimed_at = Column(DateTime, nullable=True)
 
     task = relationship("Task", back_populates="payments")
+
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    action = Column(String(128), nullable=False)
+    actor = Column(String(128), nullable=False)
+    target = Column(String(256), nullable=True)
+    before_value = Column(Text, nullable=True)
+    after_value = Column(Text, nullable=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    ip_address = Column(String(45), nullable=True)
 
 
 def init_db():

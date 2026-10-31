@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI
+from .routes.audit import router as audit_router, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
