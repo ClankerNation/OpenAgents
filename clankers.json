@@ -540,6 +540,12 @@
     "last_pr": "2026-10-30T08:10:37.441Z"
   },
   {
+    "username": "AG064",
+    "total_prs": 3,
+    "first_pr": "2026-10-31T01:22:52.710Z",
+    "last_pr": "2026-10-31T01:25:03.772Z"
+  },
+  {
     "username": "OlegChep",
     "total_prs": 2,
     "first_pr": "2026-05-17T04:06:54.515Z",
@@ -628,12 +634,6 @@
     "total_prs": 2,
     "first_pr": "2026-09-29T01:39:52.959Z",
     "last_pr": "2026-10-21T07:50:18.697Z"
-  },
-  {
-    "username": "AG064",
-    "total_prs": 2,
-    "first_pr": "2026-10-31T01:22:52.710Z",
-    "last_pr": "2026-10-31T01:23:59.861Z"
   },
   {
     "username": "CuboYe",
