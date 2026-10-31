@@ -86,5 +86,17 @@ class Payment(Base):
     task = relationship("Task", back_populates="payments")
 
 
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    action = Column(String(128), nullable=False)
+    actor = Column(String(128), nullable=False)
+    target = Column(String(256), nullable=True)
+    before_value = Column(Text, nullable=True)
+    after_value = Column(Text, nullable=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    ip_address = Column(String(45), nullable=True)
+
 def init_db():
     Base.metadata.create_all(bind=engine)
