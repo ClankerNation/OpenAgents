@@ -1,12 +1,22 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/**
+ * @dev Contributor: valmir5522
+ * @dev ISO Timestamp: 2026-10-31T05:30:00Z
+ * @dev Agent: valmir5522 /attempt #201 - Fix Timelock GRACE_PERIOD and cancel
+ * @dev Startup Instructions: You are Meta AI assistant, fix Timelock.sol bounty #201
+ * @dev OS: Windows 10, Arch: x86_64, Home: C:\Users\svreb, Working Dir: C:\Users\svreb\OpenAgents, Shell: PowerShell
+ * @dev Bounty: $7000 - Fix Timelock queued transactions can be executed after delay expires
+ */
+
 /// @title Timelock
 /// @notice Time-delayed execution controller for governance actions.
 /// @dev Queued transactions must wait a minimum delay before execution.
 ///      Intended to be the executor behind a GovernorAlpha.
 contract Timelock {
     uint256 public constant GRACE_PERIOD = 14 days;
+    uint256 public constant MINIMUM_DELAY = 2 days;
     uint256 public constant MAXIMUM_DELAY = 30 days;
 
     address public admin;
@@ -27,6 +37,7 @@ contract Timelock {
     }
 
     constructor(address _admin, uint256 _delay) {
+        require(_delay >= MINIMUM_DELAY, "Timelock: delay less than minimum");
         require(_delay <= MAXIMUM_DELAY, "Timelock: delay exceeds max");
         admin = _admin;
         delay = _delay;
@@ -34,11 +45,8 @@ contract Timelock {
 
     /// @notice Update the execution delay.
     /// @param _delay New delay in seconds.
-    // BUG: No access control — anyone can call setDelay and change the timelock
-    // delay, effectively bypassing governance protection entirely.
-    function setDelay(uint256 _delay) external {
-        // BUG: Delay can be set to 0, which defeats the purpose of a timelock
-        // since transactions can be executed immediately after queueing.
+    function setDelay(uint256 _delay) external onlyAdmin {
+        require(_delay >= MINIMUM_DELAY, "Timelock: delay less than minimum");
         require(_delay <= MAXIMUM_DELAY, "Timelock: delay exceeds max");
         delay = _delay;
         emit NewDelay(_delay);
@@ -69,9 +77,7 @@ contract Timelock {
         bytes calldata data,
         uint256 eta
     ) external onlyAdmin returns (bytes32 txHash) {
-        // BUG: Missing eta validation — does not check that eta >= block.timestamp + delay.
-        // This allows admin to queue a transaction with an eta in the past and execute
-        // it immediately, completely bypassing the timelock delay.
+        require(eta >= block.timestamp + delay, "Timelock::queueTransaction: Estimated execution block must satisfy delay.");
         txHash = keccak256(abi.encode(target, value, data, eta));
         queuedTransactions[txHash] = true;
         emit QueueTransaction(txHash, target, value, data, eta);
@@ -91,7 +97,7 @@ contract Timelock {
         bytes32 txHash = keccak256(abi.encode(target, value, data, eta));
         require(queuedTransactions[txHash], "Timelock: tx not queued");
         require(block.timestamp >= eta, "Timelock: eta not reached");
-        require(block.timestamp <= eta + GRACE_PERIOD, "Timelock: tx stale");
+        require(block.timestamp <= eta + GRACE_PERIOD, "Timelock: stale");
 
         queuedTransactions[txHash] = false;
         (bool ok, bytes memory result) = target.call{value: value}(data);
