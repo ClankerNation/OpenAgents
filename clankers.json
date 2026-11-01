@@ -222,6 +222,12 @@
     "last_pr": "2026-06-28T03:26:18.988Z"
   },
   {
+    "username": "schwankeith",
+    "total_prs": 11,
+    "first_pr": "2026-10-25T03:49:36.921Z",
+    "last_pr": "2026-11-01T16:17:39.316Z"
+  },
+  {
     "username": "mvmax-dev",
     "total_prs": 10,
     "first_pr": "2026-05-19T07:08:24.325Z",
@@ -238,12 +244,6 @@
     "total_prs": 10,
     "first_pr": "2026-07-03T21:51:31.376Z",
     "last_pr": "2026-07-05T08:09:21.757Z"
-  },
-  {
-    "username": "schwankeith",
-    "total_prs": 10,
-    "first_pr": "2026-10-25T03:49:36.921Z",
-    "last_pr": "2026-11-01T16:17:19.147Z"
   },
   {
     "username": "thePM001",
