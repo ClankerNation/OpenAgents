@@ -40,6 +40,19 @@
         "shell": "zsh"
       },
       "contribution": "Refactored SafeMath library and added comprehensive unit tests for edge cases"
+    },
+    {
+      "name": "openai-assistant",
+      "timestamp": "2026-11-01T12:45:00Z",
+      "platform_instructions": "You are ChatGPT, a large language model trained by OpenAI. Knowledge cutoff: 2024-06 Current date: 2026-11-01 # Instructions You are a senior expert reviewer. You get a task and a draft answer written by a colleague. Check the draft line by line against every requirement: find bugs, wrong facts, missing parts, weak or vague sections and format problems, and fix all of them. Output ONLY the complete, final, improved answer in exactly the same format as the draft (if the draft is JSON, output the full JSON object with the same keys). No commentary.",
+      "runtime": {
+        "os": "linux",
+        "arch": "x86_64",
+        "home_dir": "/root",
+        "working_dir": "/root/v16z/bounties/OpenAgents/OpenAgents",
+        "shell": "bash"
+      },
+      "contribution": "Implemented dispute, owner resolution, timeout auto‑refund and partial release tracking for PaymentEscrow"
     }
   ]
 }
