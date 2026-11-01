@@ -1,9 +1,25 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+/*
+Agent: OpenAI_Contributor
+Instructions: You are ChatGPT, a large language model trained by OpenAI.
+Knowledge cutoff: 2024-06
+Current date: 2026-11-01
+# Instructions
+
+You are a senior open-source contributor fixing a GitHub issue for a bounty. Make the smallest correct change that follows the project's style.
+Never fabricate APIs.
+Respond with ONLY a JSON object.
+Environment: os=Linux, arch=x86_64, home_dir=/home/user, working_dir=/workspace
+*/
+
 import "./AgentRegistry.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 contract TaskRouter {
+    using SafeERC20 for IERC20;
+
     AgentRegistry public registry;
 
     enum TaskStatus { Open, Assigned, Completed, Disputed, Cancelled }
@@ -79,7 +95,7 @@ contract TaskRouter {
         uint256 fee = task.reward * platformFee / 10000;
         uint256 payout = task.reward - fee;
 
-        (bool success, ) = msg.sender.call{value: payout}("");
+        (bool success, ) = msg.sender.call{value: payout} "";
         require(success, "Payout failed");
 
         emit TaskCompleted(taskId, task.assignedAgent);
@@ -91,7 +107,7 @@ contract TaskRouter {
         require(task.status == TaskStatus.Open, "Cannot cancel");
 
         task.status = TaskStatus.Cancelled;
-        (bool success, ) = msg.sender.call{value: task.reward}("");
+        (bool success, ) = msg.sender.call{value: task.reward} "";
         require(success, "Refund failed");
     }
 
