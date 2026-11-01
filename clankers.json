@@ -642,6 +642,12 @@
     "last_pr": "2026-10-21T01:39:27.616Z"
   },
   {
+    "username": "airdropia",
+    "total_prs": 2,
+    "first_pr": "2026-11-01T19:05:12.654Z",
+    "last_pr": "2026-11-01T19:14:46.164Z"
+  },
+  {
     "username": "CuboYe",
     "total_prs": 1,
     "first_pr": "2026-05-16T16:52:10.623Z",
@@ -904,11 +910,5 @@
     "total_prs": 1,
     "first_pr": "2026-11-01T09:17:04.517Z",
     "last_pr": "2026-11-01T09:17:04.517Z"
-  },
-  {
-    "username": "airdropia",
-    "total_prs": 1,
-    "first_pr": "2026-11-01T19:05:12.654Z",
-    "last_pr": "2026-11-01T19:05:12.654Z"
   }
 ]
