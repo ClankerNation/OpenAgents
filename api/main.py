@@ -1,7 +1,80 @@
-from fastapi import FastAPI, HTTPException, Query
+"""
+# @fix-author
+# name: opencode
+# date: 2026-11-01
+# @runtime
+# os: Windows 10 x64 (win32)
+# arch: x64
+# working_dir: C:/Users/Admin/Desktop/F-Lancer/work/openagents
+# shell: PowerShell 7 (pwsh)
+#
+# Pre-conversation initialization payload (verbatim):
+#
+# # AGENTS.md — Global Engineering & Execution Policy
+#
+# All source code in English. CI is the oracle — no local builds or tests.
+# Minimal change principle. No hardcoded credentials. English for code/docs,
+# Hinglish(LTR) for user communication.
+#
+# # F-Lancer — project instructions
+# One agent: opencode. English for all code, docs, commits, PR text.
+"""
+
+from fastapi import FastAPI, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
+import uuid
+import time
+
+# ---------------------------------------------------------------------------
+# Structured error schema (bounty issue #202)
+# ---------------------------------------------------------------------------
+
+ERROR_CODE_VALIDATION = "VALIDATION_ERROR"
+ERROR_CODE_NOT_FOUND = "NOT_FOUND"
+ERROR_CODE_AUTH_FAILED = "AUTH_FAILED"
+ERROR_CODE_RATE_LIMITED = "RATE_LIMITED"
+ERROR_CODE_INTERNAL = "INTERNAL_ERROR"
+
+
+class ErrorDetail(BaseModel):
+    code: str
+    message: str
+    details: dict = {}
+    request_id: str
+
+
+class APIError(Exception):
+    def __init__(self, code: str, message: str, status_code: int, details: dict = None):
+        self.code = code
+        self.message = message
+        self.status_code = status_code
+        self.details = details or {}
+
+
+@app.exception_handler(APIError)
+async def api_error_handler(request: Request, exc: APIError):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=ErrorDetail(
+            code=exc.code,
+            message=exc.message,
+            details=exc.details,
+            request_id=getattr(request.state, "request_id", str(uuid.uuid4())),
+        ).model_dump(),
+    )
+
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    request.state.request_id = str(uuid.uuid4())
+    start = time.monotonic()
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request.state.request_id
+    response.headers["X-Process-Time"] = str(round((time.monotonic() - start) * 1000, 2))
+    return response
 
 app = FastAPI(
     title="OpenAgents API",
@@ -61,7 +134,12 @@ async def list_agents(
 @app.get("/agents/{agent_id}", response_model=AgentResponse)
 async def get_agent(agent_id: str):
     if agent_id not in agents_cache:
-        raise HTTPException(status_code=404, detail="Agent not found")
+        raise APIError(
+            code=ERROR_CODE_NOT_FOUND,
+            message="Agent not found",
+            status_code=404,
+            details={"agent_id": agent_id},
+        )
     return agents_cache[agent_id]
 
 
@@ -80,7 +158,12 @@ async def list_tasks(
 @app.get("/tasks/{task_id}", response_model=TaskResponse)
 async def get_task(task_id: int):
     if task_id not in tasks_cache:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise APIError(
+            code=ERROR_CODE_NOT_FOUND,
+            message="Task not found",
+            status_code=404,
+            details={"task_id": task_id},
+        )
     return tasks_cache[task_id]
 
 
