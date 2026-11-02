@@ -1,11 +1,1 @@
-Rework for #41 — Health check with concurrent component checks
-
-Changes:
-- DB, RPC, disk, memory checks run CONCURRENTLY via asyncio.gather
-- Per-component timeout reduced to 1.2s, total response well under 5s
-- Per-component status + latency, overall = worst component
-- HTTP 200 healthy / 503 unhealthy
-- Cache-Control: max-age=10
-- Contributor documentation header included
-
-Fixes #41
+(This file is no longer part of this pull request as it is unrelated to issue #183.)
