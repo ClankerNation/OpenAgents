@@ -9,12 +9,12 @@ describe("TaskRouter Gas Sponsorship", function () {
     [owner, agent, relayer] = await ethers.getSigners();
 
     const AgentRegistry = await ethers.getContractFactory("AgentRegistry");
-    agentRegistry = await AgentRegistry.deploy(0);
-    await agentRegistry.deployed();
+    agentRegistry = await AgentRegistry.deploy();
+    await agentRegistry.waitForDeployment();
 
     const TaskRouter = await ethers.getContractFactory("TaskRouter");
-    taskRouter = await TaskRouter.deploy(agentRegistry.target, 0);
-    await taskRouter.deployed();
+    taskRouter = await TaskRouter.deploy(await agentRegistry.getAddress());
+    await taskRouter.waitForDeployment();
 
     // Register agent
     await agentRegistry.registerAgent("Test Agent", "http://example.com", {
@@ -25,7 +25,7 @@ describe("TaskRouter Gas Sponsorship", function () {
   it("should allow agent to stake ETH", async function () {
     const amount = ethers.parseEther("1");
     await taskRouter.connect(agent).stake({ value: amount });
-    expect(await taskRouter.stakes(agent)).to.equal(amount);
+    expect(await taskRouter.stakes(agent.address)).to.equal(amount);
   });
 
   it("should execute sponsored transaction and reimburse relayer", async function () {
@@ -34,38 +34,38 @@ describe("TaskRouter Gas Sponsorship", function () {
     await taskRouter.connect(agent).stake({ value: stakeAmount });
 
     // Get nonce and build hash
-    const nonce = await taskRouter.nonces(agent);
-    const data = ethers.solidityPackedKeccak256(["string"], ["test"]);
+    const nonce = await taskRouter.nonces(agent.address);
+    const data = ethers.keccak256(ethers.toUtf8Bytes("test"));
     const hash = ethers.solidityPackedKeccak256(
       ["address", "bytes", "uint256"],
-      [agent, data, nonce]
+      [agent.address, data, nonce]
     );
 
     // Agent signs the hash
     const signature = await agent.signMessage(ethers.getBytes(hash));
 
     // Record relayer balance before
-    const relayerBalanceBefore = await ethers.provider.getBalance(relayer);
+    const relayerBalanceBefore = await ethers.provider.getBalance(relayer.address);
 
     // Relayer executes on behalf of agent
     const tx = await taskRouter
       .connect(relayer)
-      .executeOnBehalf(agent, data, signature, {
+      .executeOnBehalf(agent.address, data, signature, {
         gasLimit: 500000,
       });
 
     const receipt = await tx.wait();
     const gasUsed = receipt.gasUsed;
-    const txCost = gasUsed * (receipt.gasPrice || 0);
+    const txCost = gasUsed * receipt.gasPrice;
 
     // Nonce should be incremented
-    expect(await taskRouter.nonces(agent)).to.equal(nonce + 1);
+    expect(await taskRouter.nonces(agent.address)).to.equal(nonce + 1n);
 
     // Agent stake should be reduced by gas cost
-    expect(await taskRouter.stakes(agent)).to.be.lt(stakeAmount);
+    expect(await taskRouter.stakes(agent.address)).to.be.lt(stakeAmount);
 
     // Relayer should be reimbursed (balance should not decrease by full gas cost)
-    const relayerBalanceAfter = await ethers.provider.getBalance(relayer);
+    const relayerBalanceAfter = await ethers.provider.getBalance(relayer.address);
     expect(relayerBalanceAfter).to.be.gt(
       relayerBalanceBefore - txCost - 1000000000000000n
     );
@@ -77,37 +77,37 @@ describe("TaskRouter Gas Sponsorship", function () {
     await taskRouter.connect(agent).stake({ value: stakeAmount });
 
     // Get nonce and build hash
-    const nonce = await taskRouter.nonces(agent);
-    const data = ethers.solidityPackedKeccak256(["string"], ["test"]);
+    const nonce = await taskRouter.nonces(agent.address);
+    const data = ethers.keccak256(ethers.toUtf8Bytes("test"));
     const hash = ethers.solidityPackedKeccak256(
       ["address", "bytes", "uint256"],
-      [agent, data, nonce]
+      [agent.address, data, nonce]
     );
 
     // Agent signs the hash
     const signature = await agent.signMessage(ethers.getBytes(hash));
 
     // First execution succeeds
-    await taskRouter.connect(relayer).executeOnBehalf(agent, data, signature);
+    await taskRouter.connect(relayer).executeOnBehalf(agent.address, data, signature);
 
     // Second execution with same signature should fail (nonce already consumed)
     await expect(
-      taskRouter.connect(relayer).executeOnBehalf(agent, data, signature)
+      taskRouter.connect(relayer).executeOnBehalf(agent.address, data, signature)
     ).to.be.reverted;
   });
 
   it("should reject execution when agent has insufficient stake", async function () {
     // Agent has no stake
-    const data = ethers.solidityPackedKeccak256(["string"], ["test"]);
-    const nonce = await taskRouter.nonces(agent);
+    const data = ethers.keccak256(ethers.toUtf8Bytes("test"));
+    const nonce = await taskRouter.nonces(agent.address);
     const hash = ethers.solidityPackedKeccak256(
       ["address", "bytes", "uint256"],
-      [agent, data, nonce]
+      [agent.address, data, nonce]
     );
     const signature = await agent.signMessage(ethers.getBytes(hash));
 
     await expect(
-      taskRouter.connect(relayer).executeOnBehalf(agent, data, signature)
+      taskRouter.connect(relayer).executeOnBehalf(agent.address, data, signature)
     ).to.be.revertedWith("Insufficient stake");
   });
 
@@ -115,18 +115,18 @@ describe("TaskRouter Gas Sponsorship", function () {
     // Agent stakes ETH
     await taskRouter.connect(agent).stake({ value: ethers.parseEther("1") });
 
-    const data = ethers.solidityPackedKeccak256(["string"], ["test"]);
-    const nonce = await taskRouter.nonces(agent);
+    const data = ethers.keccak256(ethers.toUtf8Bytes("test"));
+    const nonce = await taskRouter.nonces(agent.address);
     const hash = ethers.solidityPackedKeccak256(
       ["address", "bytes", "uint256"],
-      [agent, data, nonce]
+      [agent.address, data, nonce]
     );
 
     // Wrong signer (relayer signs instead of agent)
     const signature = await relayer.signMessage(ethers.getBytes(hash));
 
     await expect(
-      taskRouter.connect(relayer).executeOnBehalf(agent, data, signature)
+      taskRouter.connect(relayer).executeOnBehalf(agent.address, data, signature)
     ).to.be.reverted;
   });
 });
