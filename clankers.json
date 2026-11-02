@@ -204,6 +204,12 @@
     "last_pr": "2026-06-08T05:38:31.984Z"
   },
   {
+    "username": "airdropia",
+    "total_prs": 12,
+    "first_pr": "2026-11-01T19:05:12.654Z",
+    "last_pr": "2026-11-02T08:26:53.803Z"
+  },
+  {
     "username": "arthurus36-alt",
     "total_prs": 11,
     "first_pr": "2026-05-20T12:50:22.241Z",
@@ -226,12 +232,6 @@
     "total_prs": 11,
     "first_pr": "2026-06-27T17:33:01.514Z",
     "last_pr": "2026-06-28T03:26:18.988Z"
-  },
-  {
-    "username": "airdropia",
-    "total_prs": 11,
-    "first_pr": "2026-11-01T19:05:12.654Z",
-    "last_pr": "2026-11-02T08:25:03.322Z"
   },
   {
     "username": "mvmax-dev",
