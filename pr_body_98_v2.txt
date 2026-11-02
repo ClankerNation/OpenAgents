@@ -1,0 +1,15 @@
+Fixes #98
+
+Created contracts/lottery/FlashLoan.sol with flash loan protection:
+
+- Minimum fee of 1 token (fee >= 1 always — prevents zero-fee truncation)
+- Max loan capped at 50% of pool (prevents drainage)
+- Rebasing safety via totalDebtIssued tracking
+- Emergency pause/unpause (owner only)
+- Deposit/withdraw functions for pool management
+- SafeERC20 for all token transfers (return value checked)
+- Contributor metadata comment
+
+Tests: fee minimum, loan cap, pause/unpause, rebasing safety, withdraw.
+
+Bounty: $9400 USDC Base
