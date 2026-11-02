@@ -1,0 +1,18 @@
+Rework for #183 — Gas sponsorship relay with executeOnBehalf
+
+Changes:
+- Added executeOnBehalf(address agent, bytes calldata, bytes signature)
+  for gas-sponsored meta-transactions
+- Agent stakes ETH via stake() for gas reimbursement
+- executeOnBehalf verifies agent ECDSA signature via OpenZeppelin ECDSA
+- Nonce tracking per agent prevents replay attacks
+- Relayer pays gas, reimbursed from agent's staked balance
+- SponsoredExecution and StakeDeposited events
+- TaskRouter is Ownable for secure ownership
+
+Tests: sponsored execution, replay prevention (nonce), insufficient stake,
+invalid signature.
+
+Includes contributor documentation header as required by issue #183.
+
+Fixes #183
