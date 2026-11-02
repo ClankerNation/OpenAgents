@@ -164,8 +164,8 @@ contract TaskRouter is Ownable {
         bytes32 hash = keccak256(abi.encode(agent, data, nonce));
 
         // Verify ECDSA signature using OpenZeppelin's ECDSA library
-        (address signer, bytes32 error) = ECDSA.tryRecover(hash, signature);
-        require(error.length == 0, "Invalid signature");
+        (address signer, ECDSA.RecoverError error) = ECDSA.tryRecover(hash, signature);
+        require(error == ECDSA.RecoverError.NoError, "Invalid signature");
         require(signer == agent, "Signature does not match agent");
 
         // Consume nonce — replay protection
@@ -176,7 +176,7 @@ contract TaskRouter is Ownable {
 
         // Execute the calldata on this contract, forwarding any sent ETH
         uint256 gasBefore = gasleft();
-        (bool success, bytes memory ret) = address(this).call{value: msg.value}(data);
+        (bool success, ) = address(this).call{value: msg.value}(data);
         uint256 gasUsed = gasBefore - gasleft();
         uint256 gasPrice = tx.gasprice;
         uint256 gasCost = gasUsed * gasPrice;
