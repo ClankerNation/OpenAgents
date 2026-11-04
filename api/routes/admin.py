@@ -121,8 +121,11 @@ def admin_update_agent(
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
-    before = {"name": agent.name, "description": agent.description, "config": agent.config}
     changes = patch.model_dump(exclude_none=True)
+    if not changes:
+        raise HTTPException(status_code=400, detail="no fields to update")
+
+    before = {"name": agent.name, "description": agent.description, "config": agent.config}
     for field, value in changes.items():
         setattr(agent, field, value)
     after = {"name": agent.name, "description": agent.description, "config": agent.config}
@@ -145,12 +148,13 @@ def admin_set_role(
     if not target:
         raise HTTPException(status_code=404, detail="User not found")
 
-    before = {"username": target.username, "roles": getattr(target, "roles", None)}
-    # roles live on the token today; keep the record explicit for both states
-    after = {"username": target.username, "roles": patch.role, "requested_role": patch.role}
+    before = {"username": target.username, "roles": target.roles}
+    target.roles = patch.role
+    after = {"username": target.username, "roles": target.roles}
 
     row = record(db, request, user, "user.role", "user", target.id, before, after)
     db.commit()
+    db.refresh(target)
     return {"user_id": target.id, "audit_id": row.id, "role": patch.role}
 
 

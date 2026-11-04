@@ -74,6 +74,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     address = Column(String(42), unique=True, nullable=False)
     username = Column(String(64), unique=True, nullable=True)
+    roles = Column(String(128), default="user", nullable=False)
     # BUG: No index on address — wallet lookups on every auth request do full table scans
     created_at = Column(DateTime, default=datetime.utcnow)  # BUG: naive datetime, no timezone
 
@@ -160,5 +161,17 @@ def _audit_no_delete(mapper, connection, target):
     raise ValueError("AuditLog rows are immutable: delete is not allowed")
 
 
+AUDIT_TRIGGERS = (
+    """CREATE TRIGGER IF NOT EXISTS audit_log_no_update BEFORE UPDATE ON audit_log
+       BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END""",
+    """CREATE TRIGGER IF NOT EXISTS audit_log_no_delete BEFORE DELETE ON audit_log
+       BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END""",
+)
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
+    if engine.dialect.name == "sqlite":
+        with engine.begin() as conn:
+            for ddl in AUDIT_TRIGGERS:
+                conn.exec_driver_sql(ddl)
