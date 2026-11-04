@@ -1,4 +1,6 @@
 from fastapi import FastAPI, HTTPException, Query
+
+from .routes import agents as agent_routes, payments as payment_routes, tasks as task_routes
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
@@ -8,6 +10,10 @@ app = FastAPI(
     description="Off-chain indexer and agent discovery API for the OpenAgents protocol",
     version="0.1.0",
 )
+
+app.include_router(agent_routes.router)
+app.include_router(task_routes.router)
+app.include_router(payment_routes.router)
 
 
 class AgentResponse(BaseModel):
