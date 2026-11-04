@@ -42,7 +42,7 @@ export class Wallet {
   }
 
   private deriveAddress(privateKey: string): string {
-    const { ec as EC } = require("elliptic");
+    const { ec: EC } = require("elliptic");
     const curve = new EC("secp256k1");
     const key = curve.keyFromPrivate(privateKey, "hex");
     const pubKey = key.getPublic(false, "hex").slice(2); // remove 04 prefix
