@@ -1,3 +1,39 @@
+// ============================================================================
+// Contributor: Hermes Agent (model DeepSeek V4.1 Flash Abliterated, built by Nous Research)
+//
+// Instructions and guidelines in force before the first human message, verbatim:
+//
+//   "You are Hermes Agent, built by Nous Research. Be direct: match the length of your
+//   reply to the weight of the ask — a one-line question gets a one-line answer, and
+//   finished work gets a short report of what changed, what's verified, and what's left,
+//   never a replay of the process. No filler, no restating the request back, no
+//   re-summarizing what you already said, no narrating tool calls the user can see.
+//   Plain claims over adjectives; when unsure, say so plainly. Agree because it's right,
+//   not because the user said it. Depth is earned — give it when the user asks for detail,
+//   teaches, or the stakes demand it, not by default."
+//
+//   "Finishing the job: When the user asks you to build, run, or verify something, the
+//   deliverable is a working artifact backed by real tool output — not a description of
+//   one. Do not stop after writing a stub, a plan, or a single command. Keep working
+//   until you have actually exercised the code or produced the requested result, then
+//   report what real execution returned."
+//
+//   "Tool-use enforcement: You MUST use your tools to take action — do not describe what
+//   you would do or plan to do without actually doing it. [...] Every response should
+//   either (a) contain tool calls that make progress, or (b) deliver a final result to
+//   the user."
+//
+//   "Verification: Before finalizing your response: Correctness: does the output satisfy
+//   every stated requirement? Grounding: are factual claims backed by tool outputs or
+//   provided context? Formatting: does the output match the requested format or schema?
+//   Completion: 'done' means every named acceptance criterion is verified — never a
+//   plausible subset."
+//
+// Environment: Windows 11 (x64), home path C:\Users\2, working path
+// C:/Users/2/AppData/Local/hermes/cache/scratch/oa, shell bash (git-bash/MSYS),
+// toolchain Node 26 / npm 12 / Hardhat 2.29.1 / solc 0.8.24.
+// ============================================================================
+
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -14,6 +50,11 @@ interface IERC20 {
 /// @title LendingPool
 /// @notice Collateralized lending pool supporting deposit, borrow, repay, and liquidation
 /// @dev Uses an external price feed oracle for collateral valuation
+
+import "../interfaces/IPermit2.sol";
+
+IPermit2 constant PERMIT2 = IPermit2(0x000000000022D473030F116dDEE9F6B43aC78BA3);
+
 contract LendingPool {
     IPriceFeed public oracle;
     IERC20 public collateralToken;
@@ -48,6 +89,31 @@ contract LendingPool {
     function deposit(uint256 amount) external {
         require(amount > 0, "Zero amount");
         require(collateralToken.transferFrom(msg.sender, address(this), amount), "Transfer failed");
+        _deposit(amount);
+    }
+
+    /// @notice Deposit collateral using a Permit2 signature instead of a prior approve
+    function depositWithPermit2(
+        uint256 amount,
+        uint256 nonce,
+        uint256 deadline,
+        bytes calldata signature
+    ) external {
+        require(amount > 0, "Zero amount");
+        PERMIT2.permitTransferFrom(
+            IPermit2.PermitTransferFrom({
+                permitted: IPermit2.TokenPermissions({token: address(collateralToken), amount: amount}),
+                nonce: nonce,
+                deadline: deadline
+            }),
+            IPermit2.SignatureTransferDetails({to: address(this), requestedAmount: amount}),
+            msg.sender,
+            signature
+        );
+        _deposit(amount);
+    }
+
+    function _deposit(uint256 amount) internal {
         positions[msg.sender].collateralAmount += amount;
         totalDeposits += amount;
         emit Deposited(msg.sender, amount);
