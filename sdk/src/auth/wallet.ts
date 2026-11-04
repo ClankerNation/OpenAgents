@@ -1,6 +1,7 @@
-import { generateKeyPair, signMessage, keccak256 } from "../utils/crypto";
-import { encodeParams, AbiParam } from "../utils/encoding";
-import { RpcProvider } from "../providers/rpc";
+import { generateKeyPair, signMessage, keccak256 } from "../utils/crypto.ts";
+import elliptic from "elliptic";
+import { encodeParams, type AbiParam } from "../utils/encoding.ts";
+import { RpcProvider } from "../providers/rpc.ts";
 
 export interface WalletConfig {
   privateKey?: string;
@@ -42,7 +43,7 @@ export class Wallet {
   }
 
   private deriveAddress(privateKey: string): string {
-    const { ec as EC } = require("elliptic");
+    const EC = elliptic.ec;
     const curve = new EC("secp256k1");
     const key = curve.keyFromPrivate(privateKey, "hex");
     const pubKey = key.getPublic(false, "hex").slice(2); // remove 04 prefix

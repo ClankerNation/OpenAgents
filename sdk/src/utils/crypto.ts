@@ -1,5 +1,7 @@
 import { createHash, createHmac, randomBytes } from "crypto";
-import { ec as EC } from "elliptic";
+import elliptic from "elliptic";
+
+const EC = elliptic.ec;
 
 const secp256k1 = new EC("secp256k1");
 

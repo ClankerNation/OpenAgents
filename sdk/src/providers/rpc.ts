@@ -1,4 +1,4 @@
-import { withRetry, RetryOptions } from "../utils/retry";
+import { withRetry, type RetryOptions } from "../utils/retry.ts";
 
 export interface JsonRpcRequest {
   jsonrpc: "2.0";
