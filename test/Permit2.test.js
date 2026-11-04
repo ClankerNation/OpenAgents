@@ -72,7 +72,7 @@ describe("Permit2 flows", function () {
 
   it("stakes with a permit2 signature and no prior approve", async function () {
     const amount = ethers.parseEther("10")
-    const deadline = Math.floor(Date.now() / 1000) + 3600
+    const deadline = (await ethers.provider.getBlock("latest")).timestamp + 3600
     const nonce = 0
     const sig = await signPermit2(
       user, await token.getAddress(), amount, await staking.getAddress(), nonce, deadline,
@@ -89,7 +89,7 @@ describe("Permit2 flows", function () {
 
   it("swaps with a permit2 signature", async function () {
     const amount = ethers.parseEther("5")
-    const deadline = Math.floor(Date.now() / 1000) + 3600
+    const deadline = (await ethers.provider.getBlock("latest")).timestamp + 3600
     const sig = await signPermit2(
       user, await token.getAddress(), amount, await pool.getAddress(), 1, deadline,
     )
@@ -100,7 +100,7 @@ describe("Permit2 flows", function () {
 
   it("deposits collateral with a permit2 signature", async function () {
     const amount = ethers.parseEther("2")
-    const deadline = Math.floor(Date.now() / 1000) + 3600
+    const deadline = (await ethers.provider.getBlock("latest")).timestamp + 3600
     const sig = await signPermit2(
       user, await token.getAddress(), amount, await lending.getAddress(), 2, deadline,
     )
@@ -111,7 +111,7 @@ describe("Permit2 flows", function () {
 
   it("rejects a replayed nonce", async function () {
     const amount = ethers.parseEther("1")
-    const deadline = Math.floor(Date.now() / 1000) + 3600
+    const deadline = (await ethers.provider.getBlock("latest")).timestamp + 3600
     const sig = await signPermit2(
       user, await token.getAddress(), amount, await staking.getAddress(), 7, deadline,
     )
