@@ -234,6 +234,12 @@
     "last_pr": "2026-06-28T03:26:18.988Z"
   },
   {
+    "username": "Plugv3",
+    "total_prs": 11,
+    "first_pr": "2026-11-04T07:52:30.594Z",
+    "last_pr": "2026-11-04T09:28:09.487Z"
+  },
+  {
     "username": "mvmax-dev",
     "total_prs": 10,
     "first_pr": "2026-05-19T07:08:24.325Z",
@@ -250,12 +256,6 @@
     "total_prs": 10,
     "first_pr": "2026-07-03T21:51:31.376Z",
     "last_pr": "2026-07-05T08:09:21.757Z"
-  },
-  {
-    "username": "Plugv3",
-    "total_prs": 10,
-    "first_pr": "2026-11-04T07:52:30.594Z",
-    "last_pr": "2026-11-04T09:24:06.956Z"
   },
   {
     "username": "thePM001",
