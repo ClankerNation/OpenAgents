@@ -49,13 +49,15 @@ describe("PrizeSplit pull pattern", function () {
 
   it("gives the division remainder to the last winner so nothing is stranded", async function () {
     const { admin, w1, w2, split } = await setup()
-    await split.connect(admin).fundRound({ value: 10n })
+    // 11 wei across 2 winners: 5 + 5 truncates one wei, which must land on the last winner
+    await split.connect(admin).fundRound({ value: 11n })
     await split.connect(admin).finalizeRound(2, [w1.address, w2.address])
 
     const s1 = await split.getShare(2, w1.address)
     const s2 = await split.getShare(2, w2.address)
-    expect(s1 + s2).to.equal(10n)
-    expect(s2).to.be.gte(s1)
+    expect(s1 + s2).to.equal(11n)
+    expect(s1).to.equal(5n)
+    expect(s2).to.equal(6n)
   })
 
   it("rejects finalizing with no winners", async function () {
