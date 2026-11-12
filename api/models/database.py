@@ -31,7 +31,7 @@ class User(Base):
     address = Column(String(42), unique=True, nullable=False)
     username = Column(String(64), unique=True, nullable=True)
     # BUG: No index on address — wallet lookups on every auth request do full table scans
-    created_at = Column(DateTime, default=datetime.utcnow)  # BUG: naive datetime, no timezone
+    created_at = Column(DateTime, default=datetime.utcnow, timezone=True)  # BUG: naive datetime, no timezone
 
     agents = relationship("Agent", back_populates="owner")
 
