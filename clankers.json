@@ -654,6 +654,12 @@
     "last_pr": "2026-10-21T01:39:27.616Z"
   },
   {
+    "username": "kingoftheland",
+    "total_prs": 2,
+    "first_pr": "2026-11-14T09:14:37.070Z",
+    "last_pr": "2026-11-15T13:36:37.446Z"
+  },
+  {
     "username": "CuboYe",
     "total_prs": 1,
     "first_pr": "2026-05-16T16:52:10.623Z",
@@ -928,11 +934,5 @@
     "total_prs": 1,
     "first_pr": "2026-11-12T01:27:09.987Z",
     "last_pr": "2026-11-12T01:27:09.987Z"
-  },
-  {
-    "username": "kingoftheland",
-    "total_prs": 1,
-    "first_pr": "2026-11-14T09:14:37.070Z",
-    "last_pr": "2026-11-14T09:14:37.070Z"
   }
 ]
