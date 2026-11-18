@@ -90,7 +90,7 @@ contract TaskRouter {
         address agent,
         bytes calldata data,
         bytes calldata signature
-    ) external returns (bytes memory) {
+    ) external payable returns (bytes memory) {
         bytes32 messageHash = keccak256(abi.encodePacked(address(this), agent, data, nonces[agent], block.chainid));
         bytes32 ethSignedMessageHash = MessageHashUtils.toEthSignedMessageHash(messageHash);
         address recovered = ECDSA.recover(ethSignedMessageHash, signature);
@@ -105,7 +105,8 @@ contract TaskRouter {
         require(success, "Execution failed");
 
         uint256 gasUsed = startGas > gasleft() ? startGas - gasleft() + 21000 : 21000;
-        uint256 gasCost = gasUsed * tx.gasprice;
+        uint256 effectiveGasPrice = tx.gasprice > 0 ? tx.gasprice : (block.basefee > 0 ? block.basefee : 1 gwei);
+        uint256 gasCost = gasUsed * effectiveGasPrice;
 
         if (gasCost > 0) {
             require(agentStakes[agent] >= gasCost, "Insufficient stake for gas");
