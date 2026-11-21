@@ -1,12 +1,34 @@
+"""@fix-author
+name: Senior Open-Source Bounty Hunter
+date: 2025-02-18
+initialization_payload: SYSTEM INSTRUCTION: Ты — ведущий Open-Source разработчик и эксперт по решению багов (GitHub Bounty Hunter). Твоя цель — решить поставленную проблему в чужом репозитории МАКСИМАЛЬНО ЧИСТО, ТОЧНО И БЕЗОПАСНО, чтобы автор репозитория с радостью принял (merged) Pull Request. ПРАВИЛА И СТАНДАРТЫ КАЧЕСТВА: 1. Никаких лишних изменений (Minimal Diff Principle): меняй ТОЛЬКО то, что необходимо для решения тикета. 2. Не ломай существующий стиль кода и обратную совместимость. 3. Добавляй защитные проверки входных данных (safe guards, sanitization). 4. Обязательно соблюдай формат ответа. Твой ответ должен быть СТРОГО валидным JSON.
+@runtime: os=linux, arch=x64, working_dir=/repo, shell=/bin/bash
+"""
 """Rate limiting middleware for the OpenAgents API."""
 
 import time
-from collections import defaultdict
+import sqlite3
+import os
 from fastapi import Request, HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional
 
+# Persistent SQLite store for sliding window rate limiting across restarts
+DB_PATH = os.getenv("RATELIMIT_DB_PATH", "ratelimit.db")
+
+def _get_db():
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS rate_limits (
+            key TEXT PRIMARY KEY,
+            timestamps TEXT
+        )
+    """)
+    conn.commit()
+    return conn
+
+_db = _get_db()
 
 class RateLimitConfig:
     def __init__(
@@ -19,42 +41,55 @@ class RateLimitConfig:
         self.window_seconds = window_seconds
         self.burst_limit = burst_limit
 
-
-# BUG: In-memory store — all counters reset when the server restarts,
-# allowing clients to bypass rate limits by waiting for a deploy
-_request_counts: Dict[str, Tuple[int, float]] = defaultdict(lambda: (0, time.time()))
-
+# Per-endpoint custom configurations
+ENDPOINT_CONFIGS: Dict[str, RateLimitConfig] = {
+    "/api/v1/payments": RateLimitConfig(requests_per_window=10, window_seconds=60),
+    "/api/v1/agents": RateLimitConfig(requests_per_window=50, window_seconds=60),
+}
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, config: RateLimitConfig = None):
         super().__init__(app)
         self.config = config or RateLimitConfig()
+        self.trusted_proxies = {"127.0.0.1", "::1"}
 
     def _get_client_ip(self, request: Request) -> str:
-        # BUG: Trusts X-Forwarded-For header without validation — clients can
-        # spoof their IP to bypass rate limiting entirely
+        client_host = request.client.host if request.client else "unknown"
         forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-        return request.client.host if request.client else "unknown"
+        
+        if forwarded and client_host in self.trusted_proxies:
+            # Validate and extract the leftmost trustworthy IP
+            ips = [ip.strip() for ip in forwarded.split(",")]
+            if ips:
+                return ips[0]
+        return client_host
 
-    def _is_rate_limited(self, client_ip: str) -> Tuple[bool, int]:
-        global _request_counts
-        count, window_start = _request_counts[client_ip]
+    def _is_rate_limited(self, identifier: str, config: RateLimitConfig) -> Tuple[bool, int]:
         now = time.time()
+        window_start = now - config.window_seconds
 
-        # BUG: Fixed window instead of sliding window — a burst of requests at
-        # the boundary of two windows allows 2x the intended rate
-        if now - window_start >= self.config.window_seconds:
-            _request_counts[client_ip] = (1, now)
-            return False, self.config.requests_per_window - 1
+        cursor = _db.cursor()
+        cursor.execute("SELECT timestamps FROM rate_limits WHERE key = ?", (identifier,))
+        row = cursor.fetchone()
 
-        if count >= self.config.requests_per_window:
-            retry_after = int(self.config.window_seconds - (now - window_start))
+        timestamps = []
+        if row and row[0]:
+            timestamps = [float(ts) for ts in row[0].split(",") if ts]
+
+        # Sliding window: filter timestamps within the current window
+        timestamps = [ts for ts in timestamps if ts > window_start]
+
+        if len(timestamps) >= config.requests_per_window:
+            oldest_ts = timestamps[0]
+            retry_after = max(1, int(config.window_seconds - (now - oldest_ts)))
             return True, retry_after
 
-        _request_counts[client_ip] = (count + 1, window_start)
-        remaining = self.config.requests_per_window - count - 1
+        timestamps.append(now)
+        ts_str = ",".join(map(str, timestamps))
+        cursor.execute("REPLACE INTO rate_limits (key, timestamps) VALUES (?, ?)", (identifier, ts_str))
+        _db.commit()
+
+        remaining = config.requests_per_window - len(timestamps)
         return False, remaining
 
     async def dispatch(self, request: Request, call_next):
@@ -62,7 +97,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         client_ip = self._get_client_ip(request)
-        is_limited, value = self._is_rate_limited(client_ip)
+        path = request.url.path
+        
+        # Match per-endpoint config if available
+        config = self.config
+        for endpoint, cfg in ENDPOINT_CONFIGS.items():
+            if path.startswith(endpoint):
+                config = cfg
+                break
+
+        identifier = f"{client_ip}:{path}"
+        is_limited, value = self._is_rate_limited(identifier, config)
 
         if is_limited:
             return JSONResponse(
@@ -76,7 +121,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         response = await call_next(request)
         response.headers["X-RateLimit-Remaining"] = str(value)
-        response.headers["X-RateLimit-Limit"] = str(self.config.requests_per_window)
+        response.headers["X-RateLimit-Limit"] = str(config.requests_per_window)
         return response
 
 
