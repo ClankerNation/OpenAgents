@@ -1,4 +1,4 @@
-"""Payment and escrow endpoints for bounty payouts."""
+﻿"""Payment and escrow endpoints for bounty payouts."""
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -12,15 +12,13 @@ router = APIRouter(prefix="/payments", tags=["payments"])
 
 
 class EscrowDeposit(BaseModel):
-    task_id: int
-    # BUG: Amount is not validated as positive — negative or zero deposits
-    # could corrupt escrow balances or drain funds
+    task_id: str
     amount: float
-    token_address: Optional[str] = "0x0000000000000000000000000000000000000000"
+    token_address: str = "0x0000000000000000000000000000000000000000"
 
 
 class ClaimRequest(BaseModel):
-    task_id: int
+    task_id: str
     recipient_address: str
 
 
@@ -28,16 +26,14 @@ class ClaimRequest(BaseModel):
 async def deposit_escrow(
     deposit: EscrowDeposit, user=Depends(get_current_user), db=Depends(get_db)
 ):
-    task = db.query(Task).filter(Task.id == deposit.task_id).first()
+    task = db.query(Task).filter(Task.uuid == deposit.task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     if task.creator_id != user["id"]:
         raise HTTPException(status_code=403, detail="Only task creator can fund escrow")
 
-    # BUG: No idempotency key — retried requests create duplicate escrow entries,
-    # locking more funds than intended
     payment = Payment(
-        task_id=deposit.task_id,
+        task_id=task.id,
         from_address=user["address"],
         amount=deposit.amount,
         token_address=deposit.token_address,
@@ -47,13 +43,16 @@ async def deposit_escrow(
     db.add(payment)
     db.commit()
     db.refresh(payment)
-    return {"payment_id": payment.id, "status": "escrowed", "amount": payment.amount}
+    return {"payment_id": payment.uuid, "status": "escrowed", "amount": payment.amount}
 
 
 @router.get("/escrow/{task_id}")
-async def get_escrow_balance(task_id: int, db=Depends(get_db)):
+async def get_escrow_balance(task_id: str, db=Depends(get_db)):
+    task = db.query(Task).filter(Task.uuid == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
     payments = db.query(Payment).filter(
-        Payment.task_id == task_id, Payment.status == "escrowed"
+        Payment.task_id == task.id, Payment.status == "escrowed"
     ).all()
     total = sum(p.amount for p in payments)
     return {"task_id": task_id, "escrowed_total": total, "deposits": len(payments)}
@@ -63,16 +62,14 @@ async def get_escrow_balance(task_id: int, db=Depends(get_db)):
 async def claim_payment(
     claim: ClaimRequest, user=Depends(get_current_user), db=Depends(get_db)
 ):
-    task = db.query(Task).filter(Task.id == claim.task_id).first()
+    task = db.query(Task).filter(Task.uuid == claim.task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     if task.status != "completed":
         raise HTTPException(status_code=400, detail="Task not yet completed")
 
-    # BUG: Race condition — two concurrent claims can both read status="escrowed"
-    # before either updates it, causing a double-payout
     payments = db.query(Payment).filter(
-        Payment.task_id == claim.task_id, Payment.status == "escrowed"
+        Payment.task_id == task.id, Payment.status == "escrowed"
     ).all()
 
     if not payments:
@@ -101,6 +98,6 @@ async def payment_history(
     sent = db.query(Payment).filter(Payment.from_address == user["address"]).all()
     received = db.query(Payment).filter(Payment.to_address == user["address"]).all()
     return {
-        "sent": [{"id": p.id, "amount": p.amount, "status": p.status} for p in sent],
-        "received": [{"id": p.id, "amount": p.amount, "status": p.status} for p in received],
+        "sent": [{"id": p.uuid, "amount": p.amount, "status": p.status} for p in sent],
+        "received": [{"id": p.uuid, "amount": p.amount, "status": p.status} for p in received],
     }

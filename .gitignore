@@ -31,6 +31,14 @@ build/
 .DS_Store
 Thumbs.db
 
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+*.db
+*.sqlite
+
 # Deployment
 deployments/localhost/
 
