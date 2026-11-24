@@ -59,7 +59,7 @@ export class Wallet {
     const txData = encodeParams([
       { type: "uint256", value: nonce } as AbiParam,
       { type: "uint256", value: gasPrice } as AbiParam,
-      { type: "uint256", value: tx.gasLimit } as AbiParam,
+      { type: "uint256", value: Math.min((await this.provider.call("eth_estimateGas", [tx])) * 120n / 100n, BigInt(await this.provider.call("eth_blockNumber") as string)) } as AbiParam,
       { type: "address", value: tx.to } as AbiParam,
       { type: "uint256", value: tx.value } as AbiParam,
     ]);
