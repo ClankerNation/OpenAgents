@@ -162,3 +162,4 @@ Automated tracking of all Clankers PR contributors.
 | CapMorningStar | 1 | 2026-11-02T08:16:23.895Z | 2026-11-02T08:16:23.895Z |
 | csterrett | 1 | 2026-11-12T01:27:09.987Z | 2026-11-12T01:27:09.987Z |
 | tony88pisa | 1 | 2026-11-15T16:00:55.529Z | 2026-11-15T16:00:55.529Z |
+| rhys-mor | 1 | 2026-11-24T01:58:30.080Z | 2026-11-24T01:58:30.080Z |
