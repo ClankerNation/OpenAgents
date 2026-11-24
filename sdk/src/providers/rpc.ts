@@ -101,3 +101,4 @@ export class RpcProvider {
     return this.chainId;
   }
 }
+// Add gas estimation with safety margin\nasync estimateGas(method: string, params: unknown[] = []): Promise<bigint> {\n  const gasEstimate = (await this.call('eth_estimateGas', params)) as string;\n  return BigInt(gasEstimate) * 120n / 100n; // 20% safety margin\n}
